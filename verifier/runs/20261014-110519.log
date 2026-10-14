@@ -1,0 +1,12 @@
+== 1. gofmt (excluding vendored deps)
+== 2. go vet
+== 3. go build
+== 4. go test
+== 5. no frontend artifacts (no HTML/JS frontend code)
+== 6. required files
+== 7. native UI only (no webview window in main)
+VERIFIER v1: PASS
+== 8. icon generation (go run ./internal/genicon)
+== 9. mygo packaging (go tool mygo build)
+packaged binary: /tmp/corra-verify-build/linux-amd64/corra (43M)
+VERIFIER v2: PASS
