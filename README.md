@@ -6,29 +6,45 @@
 
 ## English
 
-Corra is a single-pane Markdown editor with a **fully native UI**, written in
-Go with the [MyGo](https://mygo.egoist.dev) toolkit. No webview, no HTML, no
-JavaScript — the whole interface is drawn by Go on the GPU.
+Corra is a Markdown **notes app** with a **fully native UI**, written in
+Go with the [MyGo](https://mygo.egoist.dev) toolkit. No webview, no HTML,
+no JavaScript — the whole interface is drawn by Go on the GPU.
 
 ### Highlights
 
-- **Single-pane editing** — edit right inside the styled document; block
-  source and rendered typography meet in one column (source mode available
-  via `Ctrl/Cmd+E`)
-- **GFM complete** — tables, task lists (clickable), strikethrough, footnotes
+- **Apple Notes-style three-column layout** — folders in the sidebar,
+  notes grouped by date (Today / Yesterday / Previous 7 / 30 days) in
+  the list, a dated editor column on the right
+- **Full Markdown editing that works** — the editor column is a real
+  code editor widget: syntax highlighting, soft wrap, multiple carets,
+  find & replace (Cmd+F), undo/redo (Cmd+Z); every keystroke autosaves
+- **Edit / preview** — `Ctrl/Cmd+E` toggles between source editing and
+  the rendered document; task checkboxes stay clickable in preview, and
+  code/tables/math/diagrams open their source on click
+- **GFM complete** — tables, task lists, strikethrough, footnotes
 - **Math** — inline `$...$` and `$$...$$` blocks, typeset by go-latex
-- **Diagrams** — ` ```mermaid ` (Rust/WASM renderer), ` ```d2 `, ` ```goat `
-  ASCII diagrams, rasterized in pure Go with an embedded font for labels
+- **Diagrams** — ` ```mermaid ` (Rust/WASM renderer), ` ```d2 `,
+  ` ```goat ` ASCII diagrams, rasterized in pure Go with an embedded
+  font for labels
 - **Data charts** — ` ```chart ` YAML blocks (line / bar / hbar / pie),
   rendered natively
 - **Syntax highlighting** — 200+ languages via chroma, themed light & dark
-- **GitHub image hosting** — insert an image and it is uploaded to a GitHub
-  repo via the Contents API; a CDN link (jsDelivr by default, configurable)
-  is inserted. The token never leaves your machine (0600 file)
+- **GitHub image hosting** — insert an image and it is uploaded to a
+  GitHub repo via the Contents API; a CDN link (jsDelivr by default,
+  configurable) is inserted. The token never leaves your machine (0600
+  file)
 - **Export PDF** — embedded CJK font subset, works on any machine
 - **Deep native integration** — system dark mode, drag & drop, file
-  associations, recent files, external-change detection with a conflict
-  dialog, global menu with accelerators
+  associations, external-change detection with a conflict dialog, global
+  menu with accelerators
+
+### Storage
+
+Notes live in a plain folder of Markdown files
+(`<config>/备忘录` by default — one folder of the app per
+subfolder, like Apple Notes' folders). Anything that edits the files on
+disk (Sync, git, other editors) shows up in the app; the app autosaves
+back to the same files.
 
 ### Build
 
@@ -67,14 +83,20 @@ Windows and Linux in parallel and uploads them to a draft release
 
 ## 中文
 
-Corra 是一个**纯原生 UI** 的单栏 Markdown 编辑器，用 Go 基于
+Corra 是一个**纯原生 UI** 的 Markdown 备忘录应用，用 Go 基于
 [MyGo](https://mygo.egoist.dev) 工具包编写：无 webview、无 HTML、无
 JavaScript，整个界面由 Go 在 GPU 上绘制。
 
 ### 功能
 
-- **单栏编辑**：直接在排版后的文档上编辑，`Ctrl/Cmd+E` 可切换纯源码模式
-- **GFM 全要素**：表格、任务列表（可点击勾选）、删除线、脚注
+- **类 Apple Notes 三栏布局**：左栏备忘录文件夹，中栏按日期分组
+  （今天/昨天/最近 7 天/最近 30 天）的列表，右栏带日期的编辑区
+- **完整可用的 Markdown 编辑**：右栏是真正的代码编辑器控件——语法
+  高亮、软换行、多光标、查找替换（Cmd+F）、撤销重做（Cmd+Z），
+  每次输入即时自动保存
+- **编辑 / 预览**：`Ctrl/Cmd+E` 在源码编辑与渲染阅读间切换；预览里
+  任务复选框仍可点击，代码块/表格/公式/图表点击即回源码编辑
+- **GFM 全要素**：表格、任务列表、删除线、脚注
 - **数学公式**：行内 `$...$` 与块级 `$$...$$`，go-latex 排版
 - **图表**：` ```mermaid `（Rust/WASM 渲染）、` ```d2 `、` ```goat `
   ASCII 图，纯 Go 光栅化并内嵌字体绘制文字标签
@@ -83,8 +105,16 @@ JavaScript，整个界面由 Go 在 GPU 上绘制。
 - **GitHub 图床**：插入图片即通过 Contents API 上传到指定仓库并回插
   CDN 链接（默认 jsDelivr，可自定义反代）；token 只存本机（0600 权限）
 - **导出 PDF**：内嵌中文字体子集，任何机器上都能正常显示
-- **深度系统集成**：系统深浅色、拖放打开、文件关联、最近文件、
-  外部修改检测与冲突处理、全局菜单与快捷键
+- **深度系统集成**：系统深浅色、拖放打开、文件关联、外部修改检测
+  与冲突处理、全局菜单与快捷键
+
+### 存储
+
+备忘录就是一个普通文件夹里的 Markdown 文件（默认在
+`<config>/备忘录`；库根目录下的每个子文件夹对应左栏一个文件夹，
+与 Apple Notes 一致）。磁盘上的文件被别的工具（同步、git、其他
+编辑器）修改会实时反映到应用里；应用的自动保存也直接写回同一批
+文件。
 
 ### 构建
 

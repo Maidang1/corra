@@ -2,8 +2,6 @@ package main
 
 import (
 	"github.com/egoist/mygo"
-
-	"github.com/Maidang1/corra/app"
 )
 
 // buildMenu builds the application menu.
@@ -15,26 +13,29 @@ func buildMenu() *mygo.Menu {
 			}
 		}}
 	}
-	check := func(label string, accel string, fn func(checked bool)) *mygo.MenuItem {
-		return &mygo.MenuItem{Label: label, Accelerator: accel, Type: mygo.MenuItemCheckbox,
-			Click: func(it *mygo.MenuItem, _ *mygo.Window) { fn(it.IsChecked()) }}
+	role := func(r mygo.MenuRole) *mygo.MenuItem {
+		return &mygo.MenuItem{Role: r}
 	}
 
 	fileMenu := &mygo.MenuItem{
 		Label: "文件",
 		Submenu: []*mygo.MenuItem{
-			item("新建", "CmdOrCtrl+N", func() {
-				if fileOps.CheckDirty() {
-					editorApp.NewDocument()
-					watchCurrent()
-				}
-			}),
+			item("新建备忘录", "CmdOrCtrl+N", func() { view.NewNoteAction() }),
 			item("打开…", "CmdOrCtrl+O", func() { fileOps.Open() }),
 			mygo.Separator(),
-			item("保存", "CmdOrCtrl+S", func() { fileOps.Save() }),
-			item("另存为…", "CmdOrCtrl+Shift+S", func() { fileOps.SaveAs() }),
+			item("保存", "CmdOrCtrl+S", func() {
+				view.FlushAutosave()
+				fileOps.Save()
+			}),
+			item("另存为…", "CmdOrCtrl+Shift+S", func() {
+				view.FlushAutosave()
+				fileOps.SaveAs()
+			}),
 			mygo.Separator(),
-			item("导出 PDF…", "", func() { fileOps.ExportPDF(exportPDF) }),
+			item("导出 PDF…", "", func() {
+				view.FlushAutosave()
+				fileOps.ExportPDF(exportPDF)
+			}),
 			item("插入图片（可上传图床）…", "", func() { view.OnInsertImage() }),
 			mygo.Separator(),
 			item("图床设置…", "", func() {
@@ -43,61 +44,46 @@ func buildMenu() *mygo.Menu {
 				editorApp.InvalidateUI()
 			}),
 			mygo.Separator(),
-			item("退出", "", func() { mygo.App.Quit() }),
+			role(mygo.RoleClose),
+			role(mygo.RoleQuit),
 		},
 	}
 
 	editMenu := &mygo.MenuItem{
 		Label: "编辑",
 		Submenu: []*mygo.MenuItem{
-			item("撤销", "CmdOrCtrl+Z", func() { editorApp.Undo() }),
-			item("重做", "CmdOrCtrl+Shift+Z", func() { editorApp.Redo() }),
+			// Roles dispatch to the focused editor: the Markdown editor
+			// column handles undo, cut/copy/paste and select-all itself.
+			role(mygo.RoleUndo),
+			role(mygo.RoleRedo),
 			mygo.Separator(),
-			item("查找", "CmdOrCtrl+F", func() {
-				view.App.FindOpen = true
-				editorApp.InvalidateUI()
-			}),
+			role(mygo.RoleCut),
+			role(mygo.RoleCopy),
+			role(mygo.RolePaste),
+			role(mygo.RoleSelectAll),
 			mygo.Separator(),
-			item("加粗", "CmdOrCtrl+B", func() { view.WrapAction("**") }),
-			item("斜体", "CmdOrCtrl+I", func() { view.WrapAction("*") }),
-			item("标题", "CmdOrCtrl+1", func() { view.HeadingAction() }),
-			item("无序列表", "CmdOrCtrl+Shift+8", func() { view.ListAction(false) }),
-			item("有序列表", "CmdOrCtrl+Shift+7", func() { view.ListAction(true) }),
-			item("引用", "CmdOrCtrl+Shift+.", func() { view.QuoteAction() }),
+			item("删除所选备忘录", "", func() { view.DeleteNoteAction() }),
 		},
 	}
 
 	viewMenu := &mygo.MenuItem{
 		Label: "视图",
 		Submenu: []*mygo.MenuItem{
-			check("源码模式", "CmdOrCtrl+E", func(checked bool) {
-				if checked {
-					view.App.Mode = app.ModeSource
-				} else {
-					view.App.Mode = app.ModeLive
-					view.App.Refresh()
-				}
-				editorApp.InvalidateUI()
-			}),
-			check("显示大纲", "CmdOrCtrl+B", func(checked bool) {
-				view.App.Sidebar = checked
-				editorApp.InvalidateUI()
-			}),
+			item("预览 / 编辑", "CmdOrCtrl+E", func() { view.ToggleModeAction() }),
 			mygo.Separator(),
 			item("放大", "CmdOrCtrl+=", func() { zoomBy(0.1) }),
 			item("缩小", "CmdOrCtrl+-", func() { zoomBy(-0.1) }),
 			item("实际大小", "CmdOrCtrl+0", func() { view.App.Zoom = 1; editorApp.InvalidateUI() }),
 			mygo.Separator(),
 			item("切换深浅色", "", func() { view.ToggleThemeAction() }),
+			role(mygo.RoleToggleFullScreen),
 		},
 	}
 
 	helpMenu := &mygo.MenuItem{
 		Label: "帮助",
 		Submenu: []*mygo.MenuItem{
-			item("关于 Corra", "", func() {
-				mygo.App.ShowAboutPanel(mygo.AboutPanelOptions{})
-			}),
+			role(mygo.RoleAbout),
 		},
 	}
 

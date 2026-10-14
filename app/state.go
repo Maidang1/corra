@@ -4,6 +4,7 @@ package app
 
 import (
 	"image"
+	"path/filepath"
 	"sync"
 
 	"github.com/egoist/mygo/ui"
@@ -21,12 +22,14 @@ const (
 	ThemeDark
 )
 
-// Mode is the editing mode.
+// Mode is the pane mode of the editor column. The rendered preview is
+// the default, the way Apple Notes opens a note; Aa (Cmd+E) switches to
+// the Markdown source editor.
 type Mode int
 
 const (
-	ModeLive   Mode = iota // single-pane block editing
-	ModeSource             // whole-document source editing
+	ModePreview Mode = iota // rendered, read-only document
+	ModeEdit                // full Markdown source editing
 )
 
 // App is the editor's root state. The view is a function of App; mutations
@@ -57,6 +60,13 @@ type App struct {
 	// Recent files, most recent first.
 	Recent []string
 
+	// Notes library: a folder of Markdown files, listed like Apple Notes.
+	LibraryRoot string
+	Lib         *Library
+	SelFolder   string // selected sidebar folder, "" = all notes
+	SelNote     string // path of the note open in the editor column
+	Query       string // search filter for the notes list
+
 	// External change conflict.
 	Conflict      bool
 	conflictDirty bool // we had unsaved changes when the file changed
@@ -80,6 +90,10 @@ type App struct {
 	images     map[string]*imageEntry
 	invalidate func() // window invalidate, set at startup
 	services   ui.Services
+
+	// NoteOpened, when set, is called after OpenNote loads a note (main
+	// uses it to re-arm the external-change watcher).
+	NoteOpened func(path string)
 }
 
 type imageEntry struct {
@@ -95,33 +109,48 @@ func New() *App {
 		Zoom:   1,
 		images: map[string]*imageEntry{},
 	}
-	a.Source = welcome
+	a.Source = Welcome
 	a.reparse()
 	a.Hist.PushBase(a.Source)
 	a.Title = "未命名"
 	return a
 }
 
-const welcome = `# 欢迎使用 Corra
+// Welcome is the seeded first note of a fresh library.
+const Welcome = `# 欢迎使用 Corra
 
-一个用 Go 写的原生 Markdown 编辑器：**单栏**所见即所得，双击文字即可编辑。
+一个用 Go 写的原生 Markdown 备忘录，布局像 Apple Notes，编辑像真正的代码编辑器。
+
+## 三栏布局
+
+- **左栏**：备忘录文件夹（库根目录的子文件夹）
+- **中栏**：按日期分组的备忘录列表，顶部可全文搜索
+- **右栏**：编辑区，顶部显示笔记日期
+
+## 编辑与预览
+
+右栏默认是**编辑模式**：完整的 Markdown 源码编辑，语法高亮、软换行、
+多光标、查找替换（Cmd+F）、撤销重做（Cmd+Z）都能用，输入即时自动保存。
+Cmd+E 或工具栏「预览」切换到渲染后的阅读视图；代码块、表格、公式、
+图表在预览中点击可回到源码编辑。
 
 ## 功能一览
 
-- GFM 全要素：表格、任务列表、删除线、脚注
+- GFM 全要素：表格、任务列表（可点击勾选）、删除线、脚注
 - 数学公式：行内 $E=mc^2$ 与块级公式
-- 图表：mermaid、d2、goat 与数据图表
 
 $$
 a^2 + b^2 = c^2
 $$
 
-- [ ] 试试点击复选框
+- 图表：mermaid、d2、goat 与数据图表
+
+- [ ] 试试在预览里点击复选框
 - [x] 已完成
 
 ` + "```chart\ntype: bar\ntitle: 示例\nlabels: [一, 二, 三, 四]\nseries:\n  - name: 销量\n    data: [3, 7, 5, 9]\n```" + `
 
-> 左栏可打开大纲导航；文件菜单可导出 PDF。
+> 文件菜单一键导出 PDF；插入图片可自动上传 GitHub 图床。
 `
 
 // reparse refreshes Doc from Source. Callers hold no lock; internal only.
@@ -140,14 +169,22 @@ func (a *App) SetSource(src string, caret int) {
 	a.InvalidateUI()
 }
 
-// MarkSourceDirty notes a source edit made in the source pane without
+// MarkSourceDirty notes a source edit made in the editor pane without
 // reparsing on every keystroke; the document re-parses when the pane
-// toggles back to live mode.
+// toggles back to preview mode.
 func (a *App) MarkSourceDirty(src string) {
 	a.mu.Lock()
 	a.Source = src
 	a.Dirty = true
 	a.mu.Unlock()
+}
+
+// MarkSaved clears the dirty flag after an autosave.
+func (a *App) MarkSaved() {
+	a.mu.Lock()
+	a.Dirty = false
+	a.mu.Unlock()
+	a.InvalidateUI()
 }
 
 // Refresh reparses Source (used when leaving source mode).
@@ -176,7 +213,11 @@ func (a *App) Loaded(path, src string) {
 	a.Source = src
 	a.reparse()
 	a.Dirty = false
-	a.Title = path
+	if path == "" {
+		a.Title = "未命名"
+	} else {
+		a.Title = filepath.Base(path)
+	}
 	a.Hist.PushBase(src)
 	a.Conflict = false
 	a.pushRecent(path)

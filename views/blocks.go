@@ -17,55 +17,140 @@ import (
 // diagramTimeout bounds WASM and layout engine work.
 const diagramTimeout = 20 * time.Second
 
-// block renders one document block in single-pane mode.
+// block renders one document block in preview mode, read-only. Rich text
+// blocks render their inline formatting; structured blocks (code, tables,
+// math, diagrams, charts) render as cards and open the source editor on
+// click, the way Apple Notes' previews stay out of the way of reading.
 func (v *View) block(c *ui.Context, i int) {
 	b := &v.App.Doc.Blocks[i]
 	t := c.Theme()
-	key := i // stable identity across reparses as long as possible
 
-	wrap := ui.Box(c).Key(key).FillWidth()
-	if v.jumpTo == i {
-		wrap.ScrollIntoView()
-		v.jumpTo = -1
+	switch b.Kind {
+	case render.KindHeading:
+		v.headingBlock(c, i)
+	case render.KindParagraph:
+		ui.RichText(c, v.inlineSpans(b.Source, t)...).
+			FontSize(t.FontSize).LineHeight(1.65).FillWidth().
+			OnClick(func() { v.toggleMode() })
+	case render.KindCodeBlock:
+		v.codeBlock(c, i)
+	case render.KindQuote:
+		v.quoteBlock(c, i)
+	case render.KindList:
+		v.listBlock(c, i)
+	case render.KindTable:
+		v.tableBlock(c, i)
+	case render.KindMathBlock:
+		v.mathBlock(c, i)
+	case render.KindDiagram:
+		v.diagramBlock(c, i)
+	case render.KindChart:
+		v.chartBlock(c, i)
+	case render.KindImage:
+		v.imageBlock(c, i)
+	case render.KindHR:
+		ui.Divider(c).FillWidth().PaddingY(6)
+	case render.KindHTML:
+		ui.Box(c).FillWidth().Padding(10, 12).Background(t.Surface).
+			Border(1, t.Border).Children(func() {
+			ui.Text(c, strings.TrimSpace(b.Source)).Font(fontMono).FontSize(11.5).
+				TextColor(t.TextMuted)
+		})
+	default:
+		ui.Text(c, b.Source)
 	}
-	wrap.Children(func() {
-		switch b.Kind {
-		case render.KindHeading:
-			v.headingBlock(c, i)
-		case render.KindParagraph:
-			v.paragraphBlock(c, i)
-		case render.KindCodeBlock:
-			v.codeBlock(c, i)
-		case render.KindQuote:
-			v.quoteBlock(c, i)
-		case render.KindList:
-			v.listBlock(c, i)
-		case render.KindTable:
-			v.tableBlock(c, i)
-		case render.KindMathBlock:
-			v.mathBlock(c, i)
-		case render.KindDiagram:
-			v.diagramBlock(c, i)
-		case render.KindChart:
-			v.chartBlock(c, i)
-		case render.KindImage:
-			v.imageBlock(c, i)
-		case render.KindHR:
-			ui.Divider(c).FillWidth().PaddingY(6)
-		case render.KindHTML:
-			ui.Box(c).FillWidth().Padding(10, 12).Background(t.Surface).
-				Border(1, t.Border).Children(func() {
-				ui.Text(c, strings.TrimSpace(b.Source)).Font(fontMono).FontSize(11.5).
-					TextColor(t.TextMuted)
-			})
-		default:
-			ui.Text(c, b.Source)
-		}
-	})
 }
 
+// inlineSpans converts a markdown source's inline formatting into RichText
+// spans, recursing through nested emphasis.
+func (v *View) inlineSpans(src string, t *ui.Theme) []ui.Span {
+	return v.spansOf(render.ParseInlines(src), t)
+}
+
+func (v *View) spansOf(ins []render.Inline, t *ui.Theme) []ui.Span {
+	var out []ui.Span
+	for _, in := range ins {
+		switch in.Kind {
+		case render.InlineBold:
+			sp := v.spansOf(in.Children, t)
+			for i := range sp {
+				sp[i].Weight = 700
+			}
+			if len(sp) == 0 {
+				sp = []ui.Span{{Text: in.Text, Weight: 700}}
+			}
+			out = append(out, sp...)
+		case render.InlineItalic:
+			sp := v.spansOf(in.Children, t)
+			for i := range sp {
+				sp[i].Italic = true
+			}
+			if len(sp) == 0 {
+				sp = []ui.Span{{Text: in.Text, Italic: true}}
+			}
+			out = append(out, sp...)
+		case render.InlineCode:
+			out = append(out, ui.Span{
+				Text:   in.Text,
+				Font:   fontMono,
+				Color:  t.Accent,
+				Size:   -1, // one step smaller than the surrounding text
+				Weight: 500,
+			})
+		case render.InlineStrikethrough:
+			sp := v.spansOf(in.Children, t)
+			for i := range sp {
+				sp[i].Strikethrough = true
+			}
+			if len(sp) == 0 {
+				sp = []ui.Span{{Text: in.Text, Strikethrough: true}}
+			}
+			out = append(out, sp...)
+		case render.InlineLink:
+			label := in.Text
+			if label == "" {
+				label = inlinePlainOf(in.Children)
+			}
+			out = append(out, ui.Span{
+				Text:      label,
+				Color:     t.Accent,
+				Underline: true,
+			})
+		case render.InlineImage:
+			out = append(out, ui.Span{
+				Text:  "🖼 " + in.Text,
+				Color: t.TextMuted,
+			})
+		case render.InlineHardBreak:
+			out = append(out, ui.Span{Text: "\n"})
+		default: // InlineText, InlineMath
+			if len(in.Children) > 0 {
+				out = append(out, v.spansOf(in.Children, t)...)
+			} else {
+				out = append(out, ui.Span{Text: in.Text})
+			}
+		}
+	}
+	return out
+}
+
+// inlinePlainOf flattens nested inline children to plain text.
+func inlinePlainOf(ins []render.Inline) string {
+	var s string
+	for _, in := range ins {
+		if len(in.Children) > 0 {
+			s += inlinePlainOf(in.Children)
+		} else {
+			s += in.Text
+		}
+	}
+	return s
+}
+
+// headingSize keeps headings close to Apple Notes' title scale: the
+// first line reads as a note title, not a banner.
 func headingSize(level int, base float32) float32 {
-	sz := map[int]float32{1: 26, 2: 21.5, 3: 18, 4: 16, 5: 14.5, 6: 13.5}[level]
+	sz := map[int]float32{1: 22, 2: 19, 3: 17, 4: 15.5, 5: 14.5, 6: 13.5}[level]
 	if sz == 0 {
 		sz = 13.5
 	}
@@ -76,48 +161,17 @@ func (v *View) headingBlock(c *ui.Context, i int) {
 	b := &v.App.Doc.Blocks[i]
 	t := c.Theme()
 	size := headingSize(b.Level, t.FontSize)
-	el := ui.EditableText(c, &v.editBufs[i]).
-		FontSize(size).LineHeight(1.3).FillWidth()
+	// Strip the leading #'s so they don't show in the preview.
+	src := strings.TrimLeft(b.Source, "#")
+	el := ui.RichText(c, v.inlineSpans(src, t)...).
+		FontSize(size).LineHeight(1.3).FillWidth().
+		OnClick(func() { v.toggleMode() })
 	if b.Level <= 2 {
 		el = el.Bold()
 	}
 	if b.Level == 1 {
-		el = el.PaddingY(6)
+		el = el.PaddingY(4)
 	}
-	if el.Changed() {
-		text := strings.TrimSpace(v.editBufs[i])
-		if text == "" {
-			v.App.ReplaceBlockRange(i, "")
-			return
-		}
-		prefix := strings.Repeat("#", b.Level) + " "
-		if !strings.HasPrefix(text, "#") {
-			v.App.ReplaceBlockRange(i, prefix+text)
-		} else {
-			v.App.ReplaceBlockRange(i, text)
-		}
-	}
-}
-
-func (v *View) paragraphBlock(c *ui.Context, i int) {
-	t := c.Theme()
-	el := ui.EditableText(c, &v.editBufs[i]).
-		FontSize(t.FontSize).LineHeight(1.65).FillWidth()
-	if el.Changed() {
-		v.commitTextBlock(i)
-	}
-}
-
-// commitTextBlock writes an edited paragraph/quote source back.
-func (v *View) commitTextBlock(i int) {
-	text := v.editBufs[i]
-	if strings.TrimSpace(text) == "" {
-		v.App.ReplaceBlockRange(i, "")
-		return
-	}
-	// Trigger conversions: typing "# ", "- ", "> " at the start changes
-	// the block kind naturally on re-parse.
-	v.App.ReplaceBlockRange(i, text)
 }
 
 func (v *View) quoteBlock(c *ui.Context, i int) {
@@ -128,92 +182,46 @@ func (v *View) quoteBlock(c *ui.Context, i int) {
 			Border(1, t.Border).Children(func() {
 			ui.Column(c).FillWidth().Gap(8).Children(func() {
 				for j := range b.Items {
-					item := &b.Items[j]
-					el := ui.EditableText(c, &item.Source).
-						FontSize(t.FontSize).LineHeight(1.65).Italic().FillWidth()
-					if el.Changed() {
-						v.commitQuoteItem(i, j)
-					}
+					ui.RichText(c, v.inlineSpans(b.Items[j].Source, t)...).
+						FontSize(t.FontSize).LineHeight(1.65).Italic().FillWidth().
+						OnClick(func() { v.toggleMode() })
 				}
 			})
 		})
 	})
 }
 
-func (v *View) commitQuoteItem(blockIdx, itemIdx int) {
-	b := &v.App.Doc.Blocks[blockIdx]
-	lines := make([]string, len(b.Items))
-	for j := range b.Items {
-		src := strings.TrimSpace(b.Items[j].Source)
-		if !strings.HasPrefix(src, ">") {
-			src = "> " + src
-		}
-		lines[j] = src
-	}
-	v.App.ReplaceBlockRange(blockIdx, strings.Join(lines, "\n"))
-}
-
 func (v *View) listBlock(c *ui.Context, i int) {
 	b := &v.App.Doc.Blocks[i]
 	t := c.Theme()
-	ui.Column(c).FillWidth().Gap(6).Children(func() {
+	ui.Column(c).FillWidth().Gap(3).Children(func() {
 		for j := range b.Items {
 			item := &b.Items[j]
-			ui.Row(c).FillWidth().Gap(8).Children(func() {
-				marker := "•"
-				if b.Ordered {
-					marker = fmt.Sprintf("%d.", j+1)
-				}
+			idx, depth := j, item.Depth
+			ui.Row(c).FillWidth().Gap(10).Center().
+				Padding(0, 0, 0, float32(depth)*18).Children(func() {
 				if item.Task {
 					done := item.Done
 					ui.Checkbox(c, &done, "").OnChange(func() {
-						v.toggleTask(i, j)
+						v.toggleTask(i, idx)
 					})
+				} else if b.Ordered {
+					ui.Text(c, fmt.Sprintf("%d.", idx+1)).TextColor(t.TextMuted).
+						FontSize(t.FontSize - 2).NoWrap()
 				} else {
-					ui.Text(c, marker).TextColor(t.TextMuted).FontSize(t.FontSize)
+					ui.Text(c, "•").TextColor(t.TextMuted).
+						FontSize(t.FontSize + 2).NoWrap()
 				}
-				el := ui.EditableText(c, &item.Source).
-					FontSize(t.FontSize).LineHeight(1.6).FillWidth()
-				if el.Changed() {
-					v.commitListItem(i)
-					return
-				}
+				ui.RichText(c, v.inlineSpans(item.Source, t)...).
+					FontSize(t.FontSize).LineHeight(1.6).FillWidth().
+					OnClick(func() { v.toggleMode() })
 			})
 		}
 	})
 }
 
-// commitListItem rebuilds the list block from its item bindings.
-func (v *View) commitListItem(i int) {
-	b := &v.App.Doc.Blocks[i]
-	marker := "- "
-	if b.Ordered {
-		marker = "1. "
-	}
-	lines := make([]string, 0, len(b.Items))
-	for j := range b.Items {
-		item := &b.Items[j]
-		src := strings.TrimSpace(item.Source)
-		if src == "" {
-			continue
-		}
-		line := marker + src
-		if item.Task {
-			box := "[ ]"
-			if item.Done {
-				box = "[x]"
-			}
-			line = "- " + box + " " + src
-		}
-		lines = append(lines, line)
-	}
-	if len(lines) == 0 {
-		v.App.ReplaceBlockRange(i, "")
-		return
-	}
-	v.App.ReplaceBlockRange(i, strings.Join(lines, "\n"))
-}
-
+// toggleTask flips one task list item's checkbox, keeping the rest of the
+// block's items as they are.
 func (v *View) toggleTask(blockIdx, itemIdx int) {
 	b := &v.App.Doc.Blocks[blockIdx]
 	marker := "- "
@@ -261,9 +269,6 @@ func (v *View) codeBlock(c *ui.Context, i int) {
 					ui.Text(c, b.Language).FontSize(11).TextColor(t.TextMuted)
 				}
 				v.richLines(c, code, b.Language, colors, t.FontSize-1)
-				ui.Text(c, "双击编辑代码").FontSize(10.5).TextColor(t.TextMuted).OnClick(func() {
-					v.openBlockEditor(i, code, false)
-				})
 			})
 		})
 	}).OnClick(func() {
@@ -416,11 +421,21 @@ func (v *View) imageBlock(c *ui.Context, i int) {
 	})
 }
 
-func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return s[:i]
+func (v *View) footnotes(c *ui.Context) {
+	if len(v.App.Doc.Footnotes) == 0 {
+		return
 	}
-	return s
+	t := c.Theme()
+	ui.Column(c).FillWidth().Gap(4).PaddingY(8).Children(func() {
+		ui.Divider(c).FillWidth()
+		for i, fn := range v.App.Doc.Footnotes {
+			idx := i
+			ui.RichText(c,
+				ui.Span{Text: fmt.Sprintf("[%d] ", idx+1), Weight: 600},
+				ui.Span{Text: fn, Color: t.TextMuted},
+			).FontSize(12)
+		}
+	})
 }
 
 func dirOf(p string) string {

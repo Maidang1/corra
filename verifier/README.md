@@ -28,4 +28,8 @@ Extends v1 with check 8 (icon generation via `go run ./internal/genicon`) and ch
 (binary + desktop entry + archive + deb) — the same command the release
 workflow runs per platform. v1 checks unchanged.
 
+2026-10-14 amendment: check 9 accepts a macOS `.app` bundle executable
+(`Corra.app/Contents/MacOS/Corra`) in addition to the plain `corra`
+binary Linux/Windows package — the gate now passes on macOS hosts too.
+
 Run: `sh verifier/v2/check.sh`

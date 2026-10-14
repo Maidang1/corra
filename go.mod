@@ -3,6 +3,7 @@ module github.com/Maidang1/corra
 go 1.27.1
 
 require (
+	codeberg.org/go-fonts/liberation v0.5.0
 	codeberg.org/go-latex/latex v0.3.0
 	git.sr.ht/~sbinet/gg v0.8.0
 	github.com/alecthomas/chroma/v2 v2.27.0
@@ -20,7 +21,6 @@ require (
 
 require (
 	codeberg.org/go-fonts/latin-modern v0.5.0 // indirect
-	codeberg.org/go-fonts/liberation v0.5.0 // indirect
 	github.com/PuerkitoBio/goquery v1.10.0 // indirect
 	github.com/andybalholm/brotli v1.2.0 // indirect
 	github.com/andybalholm/cascadia v1.3.2 // indirect

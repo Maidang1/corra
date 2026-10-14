@@ -14,6 +14,9 @@ import (
 type FileOps struct {
 	App    *App
 	Window *mygo.Window
+	// OnOpened, when set, is called after a path is loaded (restart
+	// the external-change watcher, for example).
+	OnOpened func(path string)
 }
 
 var mdFilters = []mygo.FileFilter{
@@ -39,6 +42,9 @@ func (f *FileOps) OpenPath(path string) {
 		return
 	}
 	f.App.Loaded(path, string(data))
+	if f.OnOpened != nil {
+		f.OnOpened(path)
+	}
 }
 
 // OpenDropped opens a file dropped onto the window (called from OnFileDrop).

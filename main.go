@@ -19,12 +19,13 @@ import (
 )
 
 var (
-	editorApp *app.App
-	fileOps   *app.FileOps
-	view      *views.View
-	images    *app.ImageLoader
-	watcher   *app.Watcher
-	configDir string
+	editorApp   *app.App
+	fileOps     *app.FileOps
+	view        *views.View
+	images      *app.ImageLoader
+	watcher     *app.Watcher
+	configDir   string
+	libraryRoot string
 )
 
 func main() {
@@ -32,21 +33,23 @@ func main() {
 
 	mygo.App.WhenReady(func() {
 		setupDirs()
+		setupLibrary()
 
 		images = app.NewImageLoader(filepath.Join(configDir, "image-cache"))
 
 		win := mygo.NewWindow(mygo.WindowOptions{
 			Title:     "Corra",
-			Width:     1080,
-			Height:    760,
-			MinWidth:  640,
-			MinHeight: 480,
+			Width:     1280,
+			Height:    820,
+			MinWidth:  960,
+			MinHeight: 560,
 			Content:   ui.View(buildView),
 		})
 
 		fileOps = &app.FileOps{App: editorApp, Window: win}
 		view = views.New(editorApp, images)
 		view.OnConflictResolve = func(reload bool) { fileOps.ResolveConflict(reload) }
+		view.OnNoteSaved = watchCurrent // our own autosave: re-arm the watcher
 		view.OnSaveHosting = func(cfg app.HostingConfig) {
 			if err := app.SaveHosting(configDir, cfg); err != nil {
 				mygo.Dialog.Error("保存设置失败", err.Error())
@@ -54,20 +57,31 @@ func main() {
 			editorApp.Hosting = cfg
 		}
 		view.OnOpenRecent = func(path string) { fileOps.OpenPath(path) }
-		view.OnExportPDF = func() { fileOps.ExportPDF(exportPDF) }
-		view.OnSave = func() bool { return fileOps.Save() }
+		view.OnExportPDF = func() {
+			view.FlushAutosave()
+			fileOps.ExportPDF(exportPDF)
+		}
+		view.OnSave = func() bool {
+			view.FlushAutosave()
+			return fileOps.Save()
+		}
 		view.OnOpen = func() { fileOps.Open() }
 		view.OnInsertImage = func() { insertImageAndUpload(win) }
 
 		editorApp.Hosting = app.LoadHosting(configDir)
 		editorApp.HasSysDark = true
 		editorApp.SysDark = mygo.Theme.IsDark()
+		editorApp.NoteOpened = func(string) { watchCurrent() }
+		fileOps.OnOpened = func(string) { watchCurrent() }
 
 		mygo.App.SetMenu(buildMenu())
 
-		// Open a file from the command line or a file association.
+		// A command-line path or file association opens that file;
+		// otherwise the most recent library note opens.
+		opened := false
 		if len(os.Args) > 1 {
 			fileOps.OpenPath(os.Args[1])
+			opened = true
 		}
 		mygo.App.OnOpenFile(func(path string) {
 			fileOps.OpenPath(path)
@@ -77,6 +91,9 @@ func main() {
 				fileOps.OpenPath(args[1])
 			}
 		})
+		if !opened {
+			openMostRecent()
+		}
 
 		win.OnFileDrop(func(e *mygo.FileDropEvent) {
 			for _, p := range e.Paths {
@@ -108,6 +125,36 @@ func setupDirs() {
 	}
 }
 
+// setupLibrary points the app at its notes folder (a folder of Markdown
+// files, like Apple Notes' storage) and seeds a welcome note the first
+// time the folder is empty.
+func setupLibrary() {
+	libraryRoot = filepath.Join(configDir, "备忘录")
+	if err := os.MkdirAll(libraryRoot, 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "library dir: %v\n", err)
+	}
+	editorApp.LibraryRoot = libraryRoot
+	if lib := app.ScanLibrary(libraryRoot); len(lib.Notes) == 0 {
+		path := filepath.Join(libraryRoot, "欢迎使用 Corra.md")
+		if err := os.WriteFile(path, []byte(app.Welcome), 0o644); err != nil {
+			fmt.Fprintf(os.Stderr, "seed note: %v\n", err)
+		}
+	}
+	editorApp.ScanLibrary()
+}
+
+// openMostRecent opens the newest library note, if any.
+func openMostRecent() {
+	editorApp.ScanLibrary()
+	notes := editorApp.VisibleNotes()
+	if len(notes) == 0 {
+		return
+	}
+	if err := editorApp.OpenNote(notes[0].Path); err != nil {
+		fmt.Fprintf(os.Stderr, "open note: %v\n", err)
+	}
+}
+
 // watchCurrent (re)starts the external-change watcher for the open file.
 func watchCurrent() {
 	if watcher != nil {
@@ -120,13 +167,10 @@ func watchCurrent() {
 	}
 }
 
-// exportPDF renders the current document to PDF bytes.
+// exportPDF renders the current document to PDF bytes. The source is
+// parsed fresh so edits made after the last preview are never lost.
 func exportPDF(title string) ([]byte, error) {
-	doc := editorApp.CurrentDoc()
-	if doc == nil || len(doc.Blocks) == 0 {
-		doc = render.Parse(editorApp.CurrentSource())
-	}
-	return render.ExportPDF(context.Background(), doc, title)
+	return render.ExportPDF(context.Background(), render.Parse(editorApp.CurrentSource()), title)
 }
 
 // insertImageAndUpload asks for an image file, uploads it when hosting is

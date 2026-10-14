@@ -85,7 +85,7 @@ func (r *rounded) At(x, y int) color.Color {
 type gradientImage struct{ top, bot color.RGBA }
 
 func (g *gradientImage) ColorModel() color.Model { return color.RGBAModel }
-func (g *gradientImage) Bounds() image.Rectangle  { return image.Rect(0, 0, size, size) }
+func (g *gradientImage) Bounds() image.Rectangle { return image.Rect(0, 0, size, size) }
 func (g *gradientImage) At(x, y int) color.Color {
 	t := float64(y) / (size - 1)
 	return color.RGBA{

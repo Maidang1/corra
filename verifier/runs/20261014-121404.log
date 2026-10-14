@@ -1,0 +1,16 @@
+command: sh verifier/v2/check.sh
+date: Wed Oct 14 12:14:04 CST 2026
+platform: darwin/arm64
+
+== 1. gofmt (excluding vendored deps)
+== 2. go vet
+== 3. go build
+== 4. go test
+== 5. no frontend artifacts (no HTML/JS frontend code)
+== 6. required files
+== 7. native UI only (no webview window in main)
+VERIFIER v1: PASS
+== 8. icon generation (go run ./internal/genicon)
+== 9. mygo packaging (go tool mygo build)
+packaged binary: /tmp/corra-verify-build/darwin-arm64/Corra.app/Contents/MacOS/Corra ( 42M)
+VERIFIER v2: PASS

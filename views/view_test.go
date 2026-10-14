@@ -1,7 +1,10 @@
 package views
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
@@ -66,12 +69,47 @@ $$
 	}
 }
 
-// TestViewSourceMode renders the source pane.
-func TestViewSourceMode(t *testing.T) {
+// TestViewPreviewMode renders the preview pane.
+func TestViewPreviewMode(t *testing.T) {
 	a := app.New()
-	a.Mode = app.ModeSource
+	a.Mode = app.ModePreview
 	v := New(a, app.NewImageLoader(""))
 	img := ui.Render(v.Build, 800, 600, 1)
+	if img == nil {
+		t.Fatal("nil render")
+	}
+}
+
+// TestViewNotesLibrary renders the full three-column Notes UI with a
+// real library on disk: folders sidebar, dated note list, editor column.
+func TestViewNotesLibrary(t *testing.T) {
+	root := t.TempDir()
+	write := func(name, src string, age time.Duration) string {
+		p := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		mt := time.Now().Add(-age)
+		if err := os.Chtimes(p, mt, mt); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	today := write("today.md", "# 今天的笔记\n\n内容 A", 2*time.Hour)
+	write("work/plan.md", "# 计划\n\n工作内容", 48*time.Hour)
+	write("work/old.md", "# 旧笔记\n\n更久以前", 2000*time.Hour)
+
+	a := app.New()
+	a.LibraryRoot = root
+	a.ScanLibrary()
+	if err := a.OpenNote(today); err != nil {
+		t.Fatal(err)
+	}
+	v := New(a, app.NewImageLoader(""))
+	img := ui.Render(v.Build, 1200, 800, 1)
 	if img == nil {
 		t.Fatal("nil render")
 	}

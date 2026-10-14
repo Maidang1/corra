@@ -10,7 +10,9 @@ go run ./internal/genicon > /tmp/icon.log 2>&1 || { echo "FAIL: genicon: $(cat /
 echo "== 9. mygo packaging (go tool mygo build)"
 rm -rf /tmp/corra-verify-build
 if go tool mygo build -o /tmp/corra-verify-build > /tmp/pkg.log 2>&1; then
-  bin=$(find /tmp/corra-verify-build -name corra -type f | head -1)
+  # Linux/Windows package a plain binary named after the module; macOS
+  # packages a signed .app bundle whose executable is named after the app.
+  bin=$(find /tmp/corra-verify-build -type f \( -name corra -o -name Corra \) | head -1)
   if [ -n "$bin" ]; then
     sz=$(du -h "$bin" | cut -f1)
     echo "packaged binary: $bin ($sz)"
