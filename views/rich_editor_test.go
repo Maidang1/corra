@@ -16,6 +16,7 @@ type fakeRichEditor struct {
 	command                  string
 	err                      error
 	x, y, width, height      float64
+	codeLineNumbers          bool
 }
 
 func (e *fakeRichEditor) Load(s string) { e.source = s; e.changed = false; e.loads++ }
@@ -36,11 +37,12 @@ func (e *fakeRichEditor) ShowFindBar()                               {}
 func (e *fakeRichEditor) RevealHeading(int)                          {}
 func (e *fakeRichEditor) Print()                                     {}
 
-func (e *fakeRichEditor) SetBaseDir(dir string)   {}
-func (e *fakeRichEditor) SetMathNumbering(string) {}
-func (e *fakeRichEditor) Focus()                  { e.focuses++ }
-func (e *fakeRichEditor) Blur()                   {}
-func (e *fakeRichEditor) Close()                  { e.closed = true }
+func (e *fakeRichEditor) SetBaseDir(dir string)         {}
+func (e *fakeRichEditor) SetMathNumbering(string)       {}
+func (e *fakeRichEditor) SetCodeLineNumbers(value bool) { e.codeLineNumbers = value }
+func (e *fakeRichEditor) Focus()                        { e.focuses++ }
+func (e *fakeRichEditor) Blur()                         {}
+func (e *fakeRichEditor) Close()                        { e.closed = true }
 
 func TestRichDefaultLayoutAndNoReloadOnSave(t *testing.T) {
 	v, tt := notesFixture(t)
@@ -60,6 +62,24 @@ func TestRichDefaultLayoutAndNoReloadOnSave(t *testing.T) {
 	got, _ := os.ReadFile(v.App.Path)
 	if string(got) != e.source || e.loads != loads {
 		t.Fatalf("save lost native text or reset selection: %q loads=%d", got, e.loads)
+	}
+}
+
+func TestRichCodeLineNumbersFollowPreference(t *testing.T) {
+	v, tt := notesFixture(t)
+	e := &fakeRichEditor{}
+	v.AttachRichEditor(e)
+	tt.Frame()
+	loads := e.loads
+	v.App.CodeLineNumbers = true
+	tt.Frame()
+	if !e.codeLineNumbers || e.loads != loads {
+		t.Fatal("native code preference was not forwarded without reloading text")
+	}
+	v.App.CodeLineNumbers = false
+	tt.Frame()
+	if e.codeLineNumbers || e.loads != loads {
+		t.Fatal("native code line numbers did not turn off without reloading text")
 	}
 }
 

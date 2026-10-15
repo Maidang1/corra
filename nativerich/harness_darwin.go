@@ -6,7 +6,10 @@ package nativerich
 #include "bridge.h"
 */
 import "C"
-import "runtime/cgo"
+import (
+	"runtime/cgo"
+	"unsafe"
+)
 
 // The unexported harness operates on real NSTextView instances, without AX or
 // synthetic system input. AppKit itself runs on the process's initial thread.
@@ -59,3 +62,15 @@ func nativeTestScreenshot(e *Editor, path string) bool {
 	return C.cr_test_screenshot(e.native, p) != 0
 }
 func nativeTestLayout(e *Editor) bool { return C.cr_test_layout(e.native) != 0 }
+
+func nativeTestText(e *Editor) string {
+	value := C.cr_test_text(e.native)
+	defer C.free(unsafe.Pointer(value))
+	return C.GoString(value)
+}
+
+func nativeTestCodeControls(e *Editor) string {
+	value := C.cr_test_code_controls(e.native)
+	defer C.free(unsafe.Pointer(value))
+	return C.GoString(value)
+}

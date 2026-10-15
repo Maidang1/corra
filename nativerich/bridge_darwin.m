@@ -57,6 +57,9 @@ extern char *cr_render_math_document(uintptr_t handle, const char *document, int
 @property NSRange draftGroup; // contiguous source/body paragraphs the caret is in
 @property BOOL focusMode;
 @property BOOL typewriter;
+@property BOOL codeLineNumbers;
+@property CGFloat codeGutter;
+@property NSUInteger documentRevision;
 @property NSUInteger lastCaret;
 - (void)restyle;
 - (void)normalize;
@@ -69,6 +72,15 @@ extern char *cr_render_math_document(uintptr_t handle, const char *document, int
 - (BOOL)pasteTableText:(NSString *)text;
 - (void)indentList:(BOOL)outdent;
 - (BOOL)indentCode:(BOOL)outdent;
+- (void)codeNewline;
+- (BOOL)replaceCodeRange:(NSRange)range withText:(NSString *)text;
+- (BOOL)replaceCodeRange:(NSRange)range withText:(NSString *)text newlineCommand:(BOOL)newlineCommand;
+- (void)setCodeLanguage:(NSString *)language;
+- (void)setCodeLanguage:(NSString *)language atLocation:(NSUInteger)location;
+- (CGFloat)codeGutterWidth;
+- (void)drawCodeLineNumbers:(NSRect)dirty;
+- (NSDictionary *)codeControlState;
+- (NSArray *)codeBlocks;
 - (BOOL)indentQuote:(BOOL)outdent;
 - (void)continueListParagraph;
 - (void)beginStructuralCommand;
@@ -77,9 +89,11 @@ extern char *cr_render_math_document(uintptr_t handle, const char *document, int
 - (NSDictionary *)nextMath;
 - (NSImage *)mathImage:(NSDictionary *)result;
 - (void)refreshMath;
-- (void)finishInlineMath:(BOOL)force;
+- (void)finishInlineSource:(BOOL)force;
 - (BOOL)revealInlineMathAt:(NSUInteger)location;
-- (BOOL)finishMathEditing;
+- (BOOL)revealInlineAt:(NSUInteger)location;
+- (BOOL)prepareInlineReplacement:(NSRange *)range;
+- (BOOL)finishSourceEditing;
 - (void)refreshAllMath;
 - (void)replace:(NSRange)range with:(NSAttributedString *)value selection:(NSRange)selection;
 - (void)restore:(NSAttributedString *)value selection:(NSRange)selection typing:(NSDictionary *)typing ending:(NSDictionary *)ending;
@@ -135,6 +149,7 @@ static NSDictionary *CRFresh(NSDictionary *p) {
     if (p[@"listId"]) fresh[@"listId"] = p[@"listId"];
     if (p[@"listContainer"]) fresh[@"listContainer"] = p[@"listContainer"];
     if (p[@"listMarker"]) fresh[@"listMarker"] = p[@"listMarker"];
+    if (CRKind(p,@"code")) for (NSString *key in @[@"codeNewline",@"codeClose",@"codeSeparator"]) if (p[key]) fresh[key]=p[key];
     if (CRList(p)) fresh[@"listItem"]=NSUUID.UUID.UUIDString;
     if (CROrdered(p)) fresh[@"ordinal"] = @([p[@"ordinal"] integerValue] + 1);
     return fresh;
@@ -157,6 +172,9 @@ static NSRange CRContent(NSString *string, NSRange range) {
 static NSDictionary *CRParagraphAt(CREditor *e, NSUInteger location) {
     if (location < e.text.textStorage.length) return [e.text.textStorage attribute:CRParagraph atIndex:location effectiveRange:NULL] ?: CRBody();
     return e.emptyParagraph ?: e.text.typingAttributes[CRParagraph] ?: CRBody();
+}
+static CGFloat CRTopInset(CREditor *editor) {
+    return (22+(CRKind(CRParagraphAt(editor,0),@"code") ? 20 : 0))*editor.zoom;
 }
 // CRHlColor maps a chroma token class (see render.Highlight) to a theme color.
 // A one-palette-each-mode scheme keeps the code chip legible without a full
@@ -299,6 +317,8 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
         style.paragraphSpacing = (CRBlockEnding(p) ? 16 : 3) * _zoom;
         style.lineSpacing = 3 * _zoom;
     }
+    if (CRKind(p,@"code") && [p[@"open"] length]) style.paragraphSpacingBefore=20*_zoom;
+    if (CRKind(p,@"code") && [p[@"close"] length]) style.paragraphSpacing=20*_zoom;
     if (cell) {
         style.textBlocks = @[cell];
         style.paragraphSpacing = 0;
@@ -324,6 +344,10 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
         style.firstLineHeadIndent = (30 + MAX(0,[p[@"depth"] integerValue])*26 + (CRKind(p,@"checklist") && CROrdered(p) ? 24 : 0)) * _zoom;
         style.headIndent = style.firstLineHeadIndent;
     }
+    if (CRKind(p,@"code") && _codeLineNumbers) {
+        style.firstLineHeadIndent=[self codeGutterWidth];
+        style.headIndent=style.firstLineHeadIndent;
+    }
     out[NSParagraphStyleAttributeName] = style;
     [out removeObjectForKey:NSBackgroundColorAttributeName];
     [out removeObjectForKey:NSUnderlineStyleAttributeName];
@@ -344,52 +368,11 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
     if (attrs[CRHl]) out[NSForegroundColorAttributeName] = CRHlColor(attrs[CRHl],_dark);
     return out;
 }
-// highlightCode tokenizes each fenced code block with chroma (via cr_highlight)
-// and tags its characters with CRHl token classes, which -visual: maps to
-// theme colors. Contiguous "code" paragraphs form one block so multi-line
-// strings and comments tokenize correctly; the fence lives in metadata, not in
-// the text, so the block's language comes from its first paragraph's "open".
-- (void)highlightCode {
-    NSArray *ranges=CRRanges(_text.string);
-    // Clear any stale token colors first; a re-parse may have changed the code.
-    [_text.textStorage removeAttribute:CRHl range:NSMakeRange(0,_text.string.length)];
-    for (NSUInteger i=0;i<ranges.count;) {
-        NSDictionary *p=CRParagraphAt(self,[ranges[i] rangeValue].location);
-        if (!CRKind(p,@"code")) { i++; continue; }
-        // Accumulate the contiguous run of code lines into one block.
-        NSString *lang=@""; NSString *open=[p[@"open"] isKindOfClass:NSString.class] ? p[@"open"] : @"";
-        if (open.length) lang=[[open stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"`~ "]] lowercaseString];
-        NSUInteger start=CRContent(_text.string,[ranges[i] rangeValue]).location;
-        NSUInteger end=start; NSUInteger j=i;
-        for (;j<ranges.count;j++) {
-            NSDictionary *q=CRParagraphAt(self,[ranges[j] rangeValue].location);
-            if (!CRKind(q,@"code")) break;
-            end=NSMaxRange(CRContent(_text.string,[ranges[j] rangeValue]));
-        }
-        i=j;
-        if (end<=start) continue;
-        if (!lang.length) continue; // no language tag: leave the code untinted
-        NSRange block=NSMakeRange(start,end-start);
-        NSString *code=[_text.string substringWithRange:block];
-        char *out=cr_highlight((char *)code.UTF8String,(char *)lang.UTF8String);
-        if (!out) continue;
-        NSArray *spans=[NSJSONSerialization JSONObjectWithData:[[NSString stringWithUTF8String:out] dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL];
-        free(out);
-        NSUInteger cursor=start;
-        for (NSDictionary *span in spans) {
-            NSString *text=span[@"Text"]; NSString *cls=span[@"Class"];
-            NSUInteger len=text.length;
-            if (cursor+len>end) len=end>cursor ? end-cursor : 0;
-            if (len && cls.length && ![cls isEqual:@"text"]) [_text.textStorage addAttribute:CRHl value:cls range:NSMakeRange(cursor,len)];
-            cursor+=text.length;
-            if (cursor>=end) break;
-        }
-    }
-}
 - (void)restyle {
     BOOL wasSuppress = _suppress; _suppress = YES;
     NSArray *selection = _text.selectedRanges;
     [self highlightCode];
+    _text.textContainerInset=NSMakeSize(_text.textContainerInset.width,CRTopInset(self));
     [_text.textStorage beginEditing];
     NSAttributedString *copy = [_text.textStorage copy];
     [copy enumerateAttributesInRange:NSMakeRange(0,copy.length) options:0 usingBlock:^(NSDictionary *attrs, NSRange range, BOOL *stop) {
@@ -536,6 +519,15 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
             NSMutableArray *runs = [NSMutableArray array];
             [_text.textStorage enumerateAttributesInRange:range options:0 usingBlock:^(NSDictionary *attrs, NSRange r, BOOL *stop) {
                 if (attrs[CRInlineSource]) {
+                    id origin=attrs[CRInlineSource];
+                    if ([origin isKindOfClass:NSDictionary.class]) {
+                        NSRange expanded;
+                        [self.text.textStorage attribute:CRInlineSource atIndex:r.location longestEffectiveRange:&expanded inRange:NSMakeRange(0,self.text.string.length)];
+                        if (NSIntersectionRange(range,expanded).length==expanded.length && [[self.text.string substringWithRange:expanded] isEqual:origin[@"source"]]) {
+                            if (r.location==expanded.location) [runs addObjectsFromArray:origin[@"runs"] ?: @[]];
+                            return;
+                        }
+                    }
                     NSString *source=[self.text.string substringWithRange:r];
                     if ([runs.lastObject[@"source"] boolValue]) {
                         NSString *previous=runs.lastObject[@"text"];
@@ -635,7 +627,7 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
 - (void)textViewDidChangeSelection:(NSNotification *)notification {
     [self updateTypingParagraph];
     [self finishDraftGroup];
-    [self finishInlineMath:NO];
+    [self finishInlineSource:NO];
     if (_suppress || _text.hasMarkedText) return;
     if (_focusMode) [self restyle]; // the dimmed paragraphs follow the caret
     if (_typewriter) [self centerCaretLine];
@@ -648,7 +640,7 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
     NSRange group=_draftGroup;
     _draftGroup=NSMakeRange(NSNotFound,0);
     if (group.location!=NSNotFound) [self renderDraftGroup:group];
-    [self finishInlineMath:YES];
+    [self finishInlineSource:YES];
 }
 - (void)updateTypingParagraph {
     if (_suppress || _text.hasMarkedText || _text.selectedRange.length) return;
@@ -686,6 +678,15 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
     [self notify];
 }
 - (void)format:(NSString *)command {
+    if ([command hasPrefix:@"code-line-numbers:"]) {
+        BOOL enabled=[[command substringFromIndex:18] boolValue];
+        if (_codeLineNumbers!=enabled) { _codeLineNumbers=enabled; [self restyle]; }
+        return;
+    }
+    if ([command hasPrefix:@"code-language:"]) {
+        [self setCodeLanguage:[command substringFromIndex:14]];
+        return;
+    }
     if ([command hasPrefix:@"math-numbering:"]) {
         if (_text.hasMarkedText) return;
         NSString *mode=[command substringFromIndex:15];
@@ -694,6 +695,7 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
     }
     if ([command isEqual:@"math-refresh"]) { [self refreshAllMath]; return; }
     if (!_text.editable || _text.hasMarkedText) return;
+    [self finishInlineSource:YES];
     if ([command hasPrefix:@"table:"]) { [self tableCommand:command]; return; }
     if ([command isEqual:@"list-paragraph"]) { [self continueListParagraph]; return; }
     if ([command isEqual:@"indent"] || [command isEqual:@"outdent"]) {
@@ -793,6 +795,7 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
     if (CRCellAt(self,selection.location)) { [self moveTableCell:NO]; return; }
     NSRange paragraph=[_text.string paragraphRangeForRange:NSMakeRange(selection.location,0)];
     NSDictionary *p=CRParagraphAt(self,paragraph.location);
+    if (CRKind(p,@"code")) { [self codeNewline]; return; }
     BOOL list=CRKind(p,@"checklist") || CRKind(p,@"bullet") || CRKind(p,@"ordered");
     // Enter on an empty list item or quote line leaves the block (Typora).
     if ((list || CRKind(p,@"quote")) && CRContent(_text.string,paragraph).length==0) {
@@ -883,8 +886,10 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
 #include "table_editing_darwin.h"
 #include "list_editing_darwin.h"
 #include "code_editing_darwin.h"
+#include "code_controls_darwin.h"
 #include "container_editing_darwin.h"
 #include "math_document_darwin.h"
+#include "inline_source_darwin.h"
 
 - (BOOL)moveTableCell:(BOOL)backward {
     if (!_text.editable || _text.hasMarkedText) return NO;
@@ -923,6 +928,7 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
 - (void)applyInputRules {
     if (_text.hasMarkedText || !_text.editable || _text.selectedRange.length) return;
     NSUInteger caret = _text.selectedRange.location;
+    if (_text.typingAttributes[CRInlineSource] || (caret && [_text.textStorage attribute:CRInlineSource atIndex:caret-1 effectiveRange:NULL])) return;
     NSRange paragraphRange = [_text.string paragraphRangeForRange:NSMakeRange(caret,0)];
     NSDictionary *paragraph = CRParagraphAt(self,paragraphRange.location);
     if (CRKind(paragraph,@"opaque") || CRKind(paragraph,@"source") || CRKind(paragraph,@"code")) return;
@@ -1302,9 +1308,12 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
     // range. Substituting the caret here would strand the pinyin as plain
     // text and append the composed characters after it.
     NSRange effective = range;
-    if (effective.location==NSNotFound) effective = self.markedRange;
+    if (effective.location==NSNotFound && self.hasMarkedText) effective = self.markedRange;
     if (effective.location==NSNotFound) effective = self.selectedRange;
+    if ([self.owner prepareInlineReplacement:&effective]) range=effective;
     if (![self.owner allowRange:effective]) return;
+    NSString *codeText=[value isKindOfClass:NSAttributedString.class] ? [value string] : value;
+    if (!self.hasMarkedText && (effective.length || [codeText rangeOfCharacterFromSet:NSCharacterSet.newlineCharacterSet].location!=NSNotFound) && [self.owner replaceCodeRange:effective withText:codeText]) return;
     BOOL opaque=NO;
     for (NSValue *v in CRRanges(self.string)) if (NSIntersectionRange(v.rangeValue,effective).length && CRKind(CRParagraphAt(self.owner,v.rangeValue.location),@"opaque")) opaque=YES;
     NSTextTableBlock *targetCell=CRCellAt(self.owner,effective.location);
@@ -1376,6 +1385,12 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
     // Between an empty auto-pair, one Backspace removes both characters.
     CREditor *e=self.owner;
     NSRange selection=self.selectedRange;
+    [e prepareInlineReplacement:&selection];
+    if (!e.suppress && !self.hasMarkedText) {
+        NSRange edit=selection;
+        if (!edit.length && edit.location && [self.string characterAtIndex:edit.location-1]=='\n') edit=NSMakeRange(edit.location-1,1);
+        if (edit.length && [e replaceCodeRange:edit withText:@""]) return;
+    }
     if (!e.suppress && self.editable && !self.hasMarkedText && selection.length==0) {
         // Backspace at the start of a heading, list item or quote turns it
         // back into body text first, the way Typora does.
@@ -1395,15 +1410,53 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
             NSDictionary *p=CRParagraphAt(e,selection.location);
             BOOL plain=!(CRKind(p,@"code") || CRKind(p,@"source") || CRKind(p,@"math") || CRKind(p,@"opaque")) && !CRCellAt(e,selection.location);
             NSDictionary *before=[self.textStorage attributesAtIndex:selection.location-1 effectiveRange:NULL];
-            if (plain && !before[CRCode] && !before[CRMathText]) {
+            if (plain && !before[CRCode] && !before[CRMathText] && !before[CRInlineSource]) {
                 [e replace:NSMakeRange(selection.location-1,2) with:[[NSAttributedString alloc] initWithString:@"" attributes:self.typingAttributes] selection:NSMakeRange(selection.location-1,0)];
                 return;
             }
         }
     }
-    [super deleteBackward:sender];
+    BOOL source=selection.location<self.string.length && [self.textStorage attribute:CRInlineSource atIndex:selection.location effectiveRange:NULL]!=nil;
+    if (!source && selection.location) source=[self.textStorage attribute:CRInlineSource atIndex:selection.location-1 effectiveRange:NULL]!=nil;
+    if (source && !e.suppress && !self.hasMarkedText) {
+        e.suppress=YES;
+        [super deleteBackward:sender];
+        e.suppress=NO;
+        [e normalize]; [e notify];
+    } else [super deleteBackward:sender];
 }
-- (void)setMarkedText:(id)value selectedRange:(NSRange)selection replacementRange:(NSRange)replacement { [super setMarkedText:value selectedRange:selection replacementRange:replacement]; [self.owner notify]; }
+- (void)deleteForward:(id)sender {
+    NSRange selection=self.selectedRange;
+    [self.owner prepareInlineReplacement:&selection];
+    if (!self.owner.suppress && !self.hasMarkedText) {
+        NSRange edit=selection;
+        if (!edit.length && edit.location<self.string.length && [self.string characterAtIndex:edit.location]=='\n') edit.length=1;
+        if (edit.length && [self.owner replaceCodeRange:edit withText:@""]) return;
+    }
+    BOOL source=selection.location<self.string.length && [self.textStorage attribute:CRInlineSource atIndex:selection.location effectiveRange:NULL]!=nil;
+    if (source && !self.owner.suppress && !self.hasMarkedText) {
+        self.owner.suppress=YES;
+        [super deleteForward:sender];
+        self.owner.suppress=NO;
+        [self.owner normalize]; [self.owner notify];
+    } else [super deleteForward:sender];
+}
+- (void)setMarkedText:(id)value selectedRange:(NSRange)selection replacementRange:(NSRange)replacement {
+    NSRange effective=replacement;
+    if (effective.location==NSNotFound && self.hasMarkedText) effective=self.markedRange;
+    if (effective.location==NSNotFound) effective=self.selectedRange;
+    // Composition stays native inside a code body. Replacing its display
+    // separator would remove a hidden fence belonging to the next block.
+    if (effective.length) for (NSDictionary *block in [self.owner codeBlocks]) {
+        NSRange range=[block[@"range"] rangeValue];
+        if (!NSIntersectionRange(effective,range).length) continue;
+        NSRange last=[[block[@"lines"] lastObject] rangeValue];
+        NSUInteger end=NSMaxRange(CRContent(self.string,last));
+        if (effective.location<range.location || NSMaxRange(effective)>end) return;
+    }
+    [super setMarkedText:value selectedRange:selection replacementRange:replacement];
+    [self.owner notify];
+}
 - (void)unmarkText { [super unmarkText]; if (!self.owner.suppress) { [self.owner normalize]; [self.owner notify]; } }
 - (void)drawRect:(NSRect)dirty {
     CREditor *e=self.owner;
@@ -1413,18 +1466,24 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
     [self.backgroundColor setFill];
     NSRectFill(dirty);
     __block NSRect group=NSZeroRect;
+    __block BOOL groupCode=NO;
+    NSRect (^chipBounds)(void)=^NSRect {
+        CGFloat header=groupCode ? 20*e.zoom : 0;
+        return NSMakeRect(self.textContainerOrigin.x,group.origin.y-7*e.zoom-header,self.textContainer.size.width,group.size.height+14*e.zoom+header);
+    };
     void (^flush)(void)=^{
         if (NSIsEmptyRect(group)) return;
         // Set the fill here: drawing a language tag leaves its gray behind.
         [(e.dark ? [NSColor colorWithWhite:0.23 alpha:1] : [NSColor colorWithWhite:0.94 alpha:1]) setFill];
-        NSRect chip=NSMakeRect(self.textContainerOrigin.x,group.origin.y-7*e.zoom,self.textContainer.size.width,group.size.height+14*e.zoom);
+        NSRect chip=chipBounds();
         if (NSIntersectsRect(chip,dirty)) [[NSBezierPath bezierPathWithRoundedRect:chip xRadius:6*e.zoom yRadius:6*e.zoom] fill];
         group=NSZeroRect;
+        groupCode=NO;
     };
     __block NSString *groupLang=nil;
     void (^flushWithLabel)(void)=^{
         // Chip first, then the language tag on top of it.
-        NSRect chip=NSIsEmptyRect(group) ? NSZeroRect : NSMakeRect(self.textContainerOrigin.x,group.origin.y-7*e.zoom,self.textContainer.size.width,group.size.height+14*e.zoom);
+        NSRect chip=NSIsEmptyRect(group) ? NSZeroRect : chipBounds();
         flush();
         if (groupLang.length) {
             NSDictionary *attrs=@{NSFontAttributeName:[NSFont systemFontOfSize:10.5*e.zoom],NSForegroundColorAttributeName:e.dark ? [NSColor colorWithWhite:0.55 alpha:1] : [NSColor colorWithWhite:0.6 alpha:1]};
@@ -1437,22 +1496,27 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
         NSDictionary *p=CRParagraphAt(e,v.rangeValue.location);
         // A blank or rich paragraph closes the block's chip.
         if (!CRKind(p,@"source") && !CRKind(p,@"code") && !CRKind(p,@"opaque")) { flushWithLabel(); continue; }
+        if (CRKind(p,@"code") && [p[@"open"] length]) flushWithLabel();
         [self.layoutManager ensureLayoutForTextContainer:self.textContainer];
         NSRange content=CRContent(self.string,v.rangeValue);
         if (!content.length && NSMaxRange(v.rangeValue)>content.location) content=NSMakeRange(content.location,1); // empty source line: the newline's own line
         NSRange glyph=[self.layoutManager glyphRangeForCharacterRange:content actualCharacterRange:NULL];
-        if (!glyph.length) continue;
-        NSRect r=[self.layoutManager boundingRectForGlyphRange:glyph inTextContainer:self.textContainer];
+        NSRect r=glyph.length ? [self.layoutManager boundingRectForGlyphRange:glyph inTextContainer:self.textContainer] : self.layoutManager.extraLineFragmentRect;
+        if (!glyph.length && !CRKind(p,@"code")) continue;
+        if (r.size.height<=0) r.size.height=[self.layoutManager defaultLineHeightForFont:[NSFont monospacedSystemFontOfSize:13.5*e.zoom weight:NSFontWeightRegular]];
         r=NSOffsetRect(r,self.textContainerOrigin.x,self.textContainerOrigin.y);
         // A small vertical gap means the same block; more starts a new chip.
         if (!NSIsEmptyRect(group) && r.origin.y-NSMaxY(group) < 10*e.zoom) group=NSUnionRect(group,r);
         else {
             flushWithLabel();
             group=r;
+            groupCode=CRKind(p,@"code");
             if (CRKind(p,@"code")) {
                 // The language tag comes from the hidden opening fence.
                 NSString *open=[p[@"open"] isKindOfClass:NSString.class] ? p[@"open"] : @"";
                 groupLang=[open stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"`~ 	"]];
+                groupLang=[[groupLang componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceCharacterSet] firstObject];
+                if (!groupLang.length) groupLang=@"text";
             }
         }
         // A paragraph ending in a blank line closes its block.
@@ -1460,6 +1524,7 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
     }
     flushWithLabel();
     [super drawRect:dirty];
+    [e drawCodeLineNumbers:dirty];
     for (NSValue *v in CRRanges(self.string)) {
         NSDictionary *p=CRParagraphAt(e,v.rangeValue.location);
         if ([p[@"listContinuation"] boolValue]) continue;
@@ -1510,10 +1575,38 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
         if (CRKind(p,@"checklist") && ![p[@"listContinuation"] boolValue] && NSPointInRect(point,[self.owner markerRect:v.rangeValue])) { [self.owner toggleCheckbox:v.rangeValue.location]; return; }
     }
     NSUInteger index=[self characterIndexForInsertionAtPoint:point];
-    if ([self.owner revealInlineMathAt:index]) { [self.window makeFirstResponder:self]; return; }
+    BOOL simpleClick=event.clickCount==1 && !(event.modifierFlags & (NSEventModifierFlagShift|NSEventModifierFlagCommand|NSEventModifierFlagOption|NSEventModifierFlagControl));
+    NSPoint containerPoint=NSMakePoint(point.x-self.textContainerOrigin.x,point.y-self.textContainerOrigin.y);
+    NSUInteger glyph=[self.layoutManager glyphIndexForPoint:containerPoint inTextContainer:self.textContainer];
+    if (simpleClick && glyph<self.layoutManager.numberOfGlyphs && NSPointInRect(containerPoint,[self.layoutManager boundingRectForGlyphRange:NSMakeRange(glyph,1) inTextContainer:self.textContainer])) {
+        NSUInteger hit=[self.layoutManager characterIndexForGlyphAtIndex:glyph];
+        NSDictionary *attrs=hit<self.string.length ? [self.textStorage attributesAtIndex:hit effectiveRange:NULL] : @{};
+        BOOL styled=attrs[CRMathText]!=nil;
+        for (NSString *key in @[CRBold,CRItalic,CRCode,NSStrikethroughStyleAttributeName,CRUnderline,CRHighlight,CRSup,CRSub,NSLinkAttributeName]) if (attrs[key] && ![attrs[key] isEqual:@NO]) styled=YES;
+        if (styled && !attrs[CRInlineSource]) {
+            // Wait for release or the first drag, leaving the event queued for
+            // NSTextView when the gesture becomes a native selection drag.
+            NSEvent *next=[self.window nextEventMatchingMask:NSEventMaskLeftMouseUp|NSEventMaskLeftMouseDragged untilDate:NSDate.distantFuture inMode:NSEventTrackingRunLoopMode dequeue:NO];
+            if (next.type==NSEventTypeLeftMouseUp) {
+                [self.window makeFirstResponder:self];
+                self.selectedRange=NSMakeRange(index,0);
+                NSInteger shift=(NSInteger)self.selectedRange.location-(NSInteger)index;
+                NSInteger mappedHit=(NSInteger)hit+shift;
+                if (mappedHit>=0 && [self.owner revealInlineAt:(NSUInteger)mappedHit]) {
+                    [self.window nextEventMatchingMask:NSEventMaskLeftMouseUp untilDate:NSDate.distantPast inMode:NSEventTrackingRunLoopMode dequeue:YES];
+                    return;
+                }
+            }
+        }
+    }
     if (index < self.string.length && (CRKind(CRParagraphAt(self.owner,index),@"math") || CRKind(CRParagraphAt(self.owner,index),@"diagram") || CRKind(CRParagraphAt(self.owner,index),@"image"))) { [self.window makeFirstResponder:self]; [self.owner revealSourceAt:index]; return; }
     if (index < self.string.length && CRKind(CRParagraphAt(self.owner,index),@"opaque")) { [self.owner source]; return; }
     [super mouseDown:event];
+    if (simpleClick && !self.selectedRange.length) {
+        if (![self.owner revealInlineAt:self.selectedRange.location]) {
+            if (glyph<self.layoutManager.numberOfGlyphs && NSPointInRect(containerPoint,[self.layoutManager boundingRectForGlyphRange:NSMakeRange(glyph,1) inTextContainer:self.textContainer])) [self.owner revealInlineAt:[self.layoutManager characterIndexForGlyphAtIndex:glyph]];
+        }
+    }
 }
 - (void)copy:(id)sender {
     if (!self.selectedRange.length || ![self.owner allowRange:self.selectedRange]) return;
@@ -1543,7 +1636,25 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
 - (void)cut:(id)sender { if (![self.owner allowRange:self.selectedRange]) return; [self copy:sender]; [self insertText:@"" replacementRange:self.selectedRange]; }
 - (void)paste:(id)sender {
     NSPasteboard *pb=NSPasteboard.generalPasteboard;
+    NSRange replacement=self.selectedRange;
+    [self.owner prepareInlineReplacement:&replacement];
     NSTextTableBlock *cell=CRCellAt(self.owner,self.selectedRange.location);
+    id source=self.selectedRange.location<self.string.length ? [self.textStorage attribute:CRInlineSource atIndex:self.selectedRange.location effectiveRange:NULL] : self.typingAttributes[CRInlineSource];
+    if (source) {
+        NSString *plain=[pb stringForType:NSPasteboardTypeString];
+        if (!plain) {
+            NSData *rtf=[pb dataForType:NSPasteboardTypeRTF];
+            if (rtf) plain=[[NSAttributedString alloc] initWithRTF:rtf documentAttributes:NULL].string;
+        }
+        if (!plain) { NSBeep(); return; }
+        if (cell) plain=[[plain componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet] componentsJoinedByString:@" "];
+        NSDictionary *paragraph=CRParagraphAt(self.owner,self.selectedRange.location);
+        NSMutableDictionary *attrs=[@{CRParagraph:paragraph,CRInlineSource:source} mutableCopy];
+        if (cell) attrs[CRTableCell]=cell;
+        self.typingAttributes=[self.owner visual:attrs paragraph:paragraph];
+        [self.owner replace:self.selectedRange with:[[NSAttributedString alloc] initWithString:plain attributes:self.typingAttributes] selection:NSMakeRange(self.selectedRange.location+plain.length,0)];
+        return;
+    }
     if (cell) {
         NSString *plain=[pb stringForType:NSPasteboardTypeString];
         if (plain) {
@@ -1555,6 +1666,12 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
         }
         return;
     }
+    NSString *codePlain=[pb stringForType:NSPasteboardTypeString];
+    if (!codePlain) {
+        NSData *rtf=[pb dataForType:NSPasteboardTypeRTF];
+        if (rtf) codePlain=[[NSAttributedString alloc] initWithRTF:rtf documentAttributes:NULL].string;
+    }
+    if (codePlain && [self.owner replaceCodeRange:replacement withText:codePlain]) return;
     NSData *own=[pb dataForType:CROwnPaste];
     if (own) {
         NSDictionary *document=[NSJSONSerialization JSONObjectWithData:own options:0 error:NULL];
@@ -1684,7 +1801,7 @@ uintptr_t cr_new(uintptr_t window, uintptr_t callback) {
     return (uintptr_t)(__bridge_retained void *)e;
 }
 void cr_close(uintptr_t ptr) { CREditor *e=(__bridge_transfer CREditor *)(void *)ptr; e.callback=0; e.text.delegate=nil; [e.scroll removeFromSuperview]; [e.undo removeAllActions]; }
-void cr_load(uintptr_t ptr,const char *json) { CREditor *e=CRE(ptr); e.suppress=YES; NSAttributedString *value=[e attributedDocument:CRJSON(json)]; [e.text.textStorage setAttributedString:value]; e.text.selectedRange=NSMakeRange(0,0); e.text.typingAttributes=@{CRParagraph: value.length ? [value attribute:CRParagraph atIndex:0 effectiveRange:NULL] : e.emptyParagraph ?: CRBody()}; [e.undo removeAllActions]; e.suppress=NO; [e restyle]; [e refreshMath]; }
+void cr_load(uintptr_t ptr,const char *json) { CREditor *e=CRE(ptr); e.documentRevision++; e.suppress=YES; NSAttributedString *value=[e attributedDocument:CRJSON(json)]; [e.text.textStorage setAttributedString:value]; e.text.selectedRange=NSMakeRange(0,0); e.text.typingAttributes=@{CRParagraph: value.length ? [value attribute:CRParagraph atIndex:0 effectiveRange:NULL] : e.emptyParagraph ?: CRBody()}; [e.undo removeAllActions]; e.suppress=NO; [e restyle]; [e refreshMath]; }
 char *cr_snapshot(uintptr_t ptr,int *marked) { CREditor *e=CRE(ptr); *marked=e.text.hasMarkedText; if (*marked) return NULL; NSData *data=[NSJSONSerialization dataWithJSONObject:[e document] options:0 error:NULL]; if (!data) return NULL; return strdup([[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding].UTF8String); }
 void cr_format(uintptr_t ptr,const char *command) { [CRE(ptr) format:[NSString stringWithUTF8String:command]]; }
 void cr_insert(uintptr_t ptr,const char *json) {
@@ -1714,7 +1831,7 @@ static void CRUpdateInset(CREditor *e) {
     CGFloat maxW=760*e.zoom;
     CGFloat width=e.scroll.contentSize.width;
     CGFloat x=MAX(36*e.zoom,(width-maxW)/2);
-    NSSize inset=NSMakeSize(x,22*e.zoom);
+    NSSize inset=NSMakeSize(x,CRTopInset(e));
     if (!NSEqualSizes(e.text.textContainerInset,inset)) e.text.textContainerInset=inset;
 }
 void cr_frame(uintptr_t ptr,double x,double y,double w,double h) { CREditor *e=CRE(ptr); NSView *parent=e.scroll.superview; CGFloat top=parent.isFlipped ? y : parent.bounds.size.height-y-h; NSRect frame=NSMakeRect(x,top,MAX(0,w),MAX(0,h)); if (!NSEqualRects(frame,e.scroll.frame)) { e.scroll.frame=frame; CRUpdateInset(e); } }
@@ -1783,6 +1900,13 @@ int cr_test_finish_event(uintptr_t ptr) {
 uintptr_t cr_test_window(void) { NSWindow *window=[[NSWindow alloc] initWithContentRect:NSMakeRect(0,0,720,500) styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO]; window.releasedWhenClosed=NO; return (uintptr_t)(__bridge_retained void *)window; }
 void cr_test_close_window(uintptr_t ptr) { NSWindow *window=(__bridge_transfer NSWindow *)(void *)ptr; [window close]; }
 void cr_test_select(uintptr_t ptr,int start,int length) { CRE(ptr).text.selectedRange=NSMakeRange(start,length); }
+char *cr_test_text(uintptr_t ptr) { return strdup(CRE(ptr).text.string.UTF8String); }
+char *cr_test_code_controls(uintptr_t ptr) {
+    CREditor *editor=CRE(ptr);
+    NSDictionary *state=[editor respondsToSelector:@selector(codeControlState)] ? [editor codeControlState] : @{};
+    NSData *json=[NSJSONSerialization dataWithJSONObject:state options:0 error:NULL];
+    return strdup([[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding].UTF8String);
+}
 void cr_test_selection(uintptr_t ptr,int *start,int *length) { NSRange r=CRE(ptr).text.selectedRange; *start=(int)r.location; *length=(int)r.length; }
 void cr_test_action(uintptr_t ptr,const char *action,const char *text) {
     CREditor *e=CRE(ptr); NSString *a=[NSString stringWithUTF8String:action], *s=[NSString stringWithUTF8String:text];
@@ -1794,23 +1918,41 @@ void cr_test_action(uintptr_t ptr,const char *action,const char *text) {
         NSEvent *event=[NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:flags timestamp:0 windowNumber:e.window.windowNumber context:nil characters:characters charactersIgnoringModifiers:characters isARepeat:NO keyCode:0];
         [e.text keyDown:event];
     }
-    else if ([a isEqual:@"context"] || [a isEqual:@"click"]) {
+    else if ([a isEqual:@"context"] || [a isEqual:@"context-at"] || [a isEqual:@"click"] || [a isEqual:@"click-trailing"] || [a isEqual:@"drag"]) {
         [e.text.layoutManager ensureLayoutForTextContainer:e.text.textContainer];
-        NSRange glyph=[e.text.layoutManager glyphRangeForCharacterRange:NSMakeRange(e.text.selectedRange.location,1) actualCharacterRange:NULL];
+        NSUInteger target=e.text.selectedRange.location;
+        if ([a isEqual:@"context-at"]) {
+            NSArray *parts=[s componentsSeparatedByString:@"|"];
+            if (parts.count!=2) return;
+            target=MAX(0,[parts[0] integerValue]); s=parts[1];
+        }
+        NSRange glyph=[e.text.layoutManager glyphRangeForCharacterRange:NSMakeRange(target,1) actualCharacterRange:NULL];
         NSRect rect=[e.text.layoutManager boundingRectForGlyphRange:glyph inTextContainer:e.text.textContainer];
         NSPoint point=NSMakePoint(NSMinX(rect)+e.text.textContainerOrigin.x+1,NSMidY(rect)+e.text.textContainerOrigin.y);
+        if ([a isEqual:@"click-trailing"]) point.x=NSMaxX(rect)+e.text.textContainerOrigin.x-1;
         point=[e.text convertPoint:point toView:nil];
-        NSEvent *event=[NSEvent mouseEventWithType:[a isEqual:@"click"] ? NSEventTypeLeftMouseDown : NSEventTypeRightMouseDown location:point modifierFlags:0 timestamp:0 windowNumber:e.window.windowNumber context:nil eventNumber:0 clickCount:1 pressure:1];
-        if ([a isEqual:@"click"]) {
+        BOOL click=![a isEqual:@"context"] && ![a isEqual:@"context-at"];
+        NSEvent *event=[NSEvent mouseEventWithType:click ? NSEventTypeLeftMouseDown : NSEventTypeRightMouseDown location:point modifierFlags:0 timestamp:0 windowNumber:e.window.windowNumber context:nil eventNumber:0 clickCount:1 pressure:1];
+        if (click) {
             NSEvent *up=[NSEvent mouseEventWithType:NSEventTypeLeftMouseUp location:point modifierFlags:0 timestamp:0 windowNumber:e.window.windowNumber context:nil eventNumber:1 clickCount:1 pressure:0];
             [NSApp postEvent:up atStart:YES];
+            if ([a isEqual:@"drag"]) {
+                NSEvent *drag=[NSEvent mouseEventWithType:NSEventTypeLeftMouseDragged location:NSMakePoint(point.x+24,point.y) modifierFlags:0 timestamp:0 windowNumber:e.window.windowNumber context:nil eventNumber:2 clickCount:1 pressure:1];
+                [NSApp postEvent:drag atStart:YES];
+            }
             [e.text mouseDown:event]; return;
         }
         NSMenu *menu=[e.text menuForEvent:event];
-        for (NSInteger i=0; i<menu.numberOfItems; i++) if ([[menu itemAtIndex:i].representedObject isEqual:s]) { [menu performActionForItemAtIndex:i]; break; }
+        for (NSInteger i=0; i<menu.numberOfItems; i++) {
+            id represented=[menu itemAtIndex:i].representedObject;
+            NSString *command=[represented isKindOfClass:NSDictionary.class] ? represented[@"command"] : represented;
+            if ([command isEqual:s]) { [menu performActionForItemAtIndex:i]; break; }
+        }
     }
     else if ([a isEqual:@"newline"]) [e.text insertNewline:nil];
-    else if ([a isEqual:@"reveal"]) { if (![e revealInlineMathAt:e.text.selectedRange.location]) [e revealSourceAt:e.text.selectedRange.location]; }
+    else if ([a isEqual:@"reveal"]) { if (![e revealInlineAt:e.text.selectedRange.location]) [e revealSourceAt:e.text.selectedRange.location]; }
+    else if ([a isEqual:@"move-right"]) [e.text moveRight:nil];
+    else if ([a isEqual:@"move-left"]) [e.text moveLeft:nil];
     else if ([a isEqual:@"blur"]) [e textDidEndEditing:[NSNotification notificationWithName:NSTextDidEndEditingNotification object:e.text]];
     else if ([a isEqual:@"linebreak"]) [e.text insertLineBreak:nil];
     else if ([a isEqual:@"tab"]) [e.text insertTab:nil];
@@ -1822,6 +1964,7 @@ void cr_test_action(uintptr_t ptr,const char *action,const char *text) {
     else if ([a isEqual:@"underlinePaste"]) { NSMutableAttributedString *rich=[[NSMutableAttributedString alloc] initWithString:@"underlined" attributes:@{NSUnderlineStyleAttributeName:@1}]; NSData *rtf=[rich RTFFromRange:NSMakeRange(0,rich.length) documentAttributes:@{}]; [NSPasteboard.generalPasteboard clearContents]; [NSPasteboard.generalPasteboard setData:rtf forType:NSPasteboardTypeRTF]; [e.text paste:nil]; }
     else if ([a isEqual:@"unsupportedPaste"]) { NSMutableAttributedString *rich=[[NSMutableAttributedString alloc] initWithString:@"superscript" attributes:@{NSSuperscriptAttributeName:@1}]; NSData *rtf=[rich RTFFromRange:NSMakeRange(0,rich.length) documentAttributes:@{}]; [NSPasteboard.generalPasteboard clearContents]; [NSPasteboard.generalPasteboard setData:rtf forType:NSPasteboardTypeRTF]; [e.text paste:nil]; }
     else if ([a isEqual:@"backspace"]) [e.text deleteBackward:nil];
+    else if ([a isEqual:@"delete"]) [e.text deleteForward:nil];
     else if ([a isEqual:@"pngPaste"]) { NSBitmapImageRep *rep=[[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL pixelsWide:4 pixelsHigh:4 bitsPerSample:8 samplesPerPixel:4 hasAlpha:YES isPlanar:NO colorSpaceName:NSCalibratedRGBColorSpace bytesPerRow:0 bitsPerPixel:0]; [NSPasteboard.generalPasteboard clearContents]; [NSPasteboard.generalPasteboard setData:[rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}] forType:NSPasteboardTypePNG]; [e.text paste:nil]; }
     else if ([a isEqual:@"htmlPaste"]) { [NSPasteboard.generalPasteboard clearContents]; [NSPasteboard.generalPasteboard setString:s forType:NSPasteboardTypeHTML]; [e.text paste:nil]; }
     else if ([a isEqual:@"filePaste"]) { [NSPasteboard.generalPasteboard clearContents]; [NSPasteboard.generalPasteboard setPropertyList:[s componentsSeparatedByString:@"|"] forType:NSFilenamesPboardType]; [e.text paste:nil]; }
@@ -1943,10 +2086,10 @@ int cr_test_layout(uintptr_t ptr) {
     NSDictionary *p=CRParagraphAt(self,range.location);
     if (CRKind(p,@"code") || CRKind(p,@"source") || CRKind(p,@"math") || CRKind(p,@"opaque")) return NO;
     if (CRCellAt(self,range.location)) return NO;
-    if (_text.typingAttributes[CRCode] || _text.typingAttributes[CRMathText]) return NO;
+    if (_text.typingAttributes[CRCode] || _text.typingAttributes[CRMathText] || _text.typingAttributes[CRInlineSource]) return NO;
     if (range.location && range.location<=_text.textStorage.length) {
         NSDictionary *before=[_text.textStorage attributesAtIndex:range.location-1 effectiveRange:NULL];
-        if (before[CRCode] || before[CRMathText]) return NO;
+        if (before[CRCode] || before[CRMathText] || before[CRInlineSource]) return NO;
     }
     if (range.length) {
         if (!closer && !wrapOnly) return NO;

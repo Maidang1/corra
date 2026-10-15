@@ -242,6 +242,17 @@ a grid. Code block selections indent/outdent without replacing their contents.
 Typing highlight, superscript, subscript and common inline HTML updates the rich
 format immediately. Click an image to edit its Markdown in place.
 
+Click styled inline text or move into it with arrow keys to edit its Markdown
+in place. Leaving the fragment, blurring the editor or pressing Cmd+Return folds
+it back into native text. This includes links and table-cell formats, with UTF-16
+caret/selection mapping and undo/redo. Merely revealing syntax keeps the stored
+paragraph's original spelling; edited fragments use the existing serializer.
+
+Native code blocks offer a context-menu language chooser and optional logical
+line numbers. Newlines, selected replacements and multiline plain-text paste
+preserve fence spelling, line endings and undo/redo. Replacements crossing a
+code-block boundary are currently rejected to protect hidden fences.
+
 Multi-paragraph list items and paragraph-only nested quotes are editable natively.
 Option+Return adds a paragraph inside a list item. Lists/quotes containing other
 block types, footnotes and HTML/media can still require source editing. Math
