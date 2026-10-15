@@ -573,3 +573,94 @@ func TestNativeParityHardBreak(t *testing.T) {
 		}
 	})
 }
+
+// TestNativeParityFigureRestore proves a rendered figure (a formula) that is
+// clicked open for editing re-renders to its figure form once the editor loses
+// focus, even when it is the first block.
+func TestNativeParityFigureRestore(t *testing.T) {
+	nativeTestMain(func() {
+		window := nativeTestWindow()
+		defer nativeTestCloseWindow(window)
+		e := New(window, nil, nil)
+		defer e.Close()
+		e.Load("$$\na^2 + b^2 = c^2\n$$")
+		if !nativeTestHasTraits(e, "math") {
+			t.Fatal("formula did not render on load")
+		}
+		// Click the figure to edit its source.
+		nativeTestSelect(e, 0, 0)
+		nativeTestAction(e, "reveal", "")
+		if nativeTestHasTraits(e, "math") || !nativeTestHasTraits(e, "source") {
+			t.Fatal("clicking the formula did not reveal its source")
+		}
+		// Losing focus restores the rendered figure.
+		nativeTestAction(e, "blur", "")
+		if !nativeTestHasTraits(e, "math") || nativeTestHasTraits(e, "source") {
+			t.Fatal("formula did not re-render after losing focus")
+		}
+		if got, _, _ := e.Snapshot(); got != "$$\na^2 + b^2 = c^2\n$$" {
+			t.Errorf("formula round trip: %q", got)
+		}
+	})
+}
+
+// TestNativeParityCodeHighlight proves a fenced code block with a known
+// language is syntax-highlighted: keyword/string token classes are tagged on
+// its characters, the block still round-trips byte-exact, and an unknown
+// language leaves the code untinted.
+func TestNativeParityCodeHighlight(t *testing.T) {
+	nativeTestMain(func() {
+		window := nativeTestWindow()
+		defer nativeTestCloseWindow(window)
+		e := New(window, nil, nil)
+		defer e.Close()
+		source := "```go\nfunc main() {\n\tx := \"hi\"\n}\n```"
+		e.Load(source)
+		if !nativeTestHasTraits(e, "hl:keyword") {
+			t.Error("code block keywords not highlighted")
+		}
+		if !nativeTestHasTraits(e, "hl:string") {
+			t.Error("code block strings not highlighted")
+		}
+		if got, _, _ := e.Snapshot(); got != source {
+			t.Errorf("highlighted code round trip: %q != %q", got, source)
+		}
+		// An unlabeled fence has no language: nothing to tint.
+		e.Load("```\nfunc main() {}\n```")
+		if nativeTestHasTraits(e, "hl:keyword") {
+			t.Error("unlabeled code block should not be highlighted")
+		}
+	})
+}
+
+// TestNativeParityDiagramRender proves a chart/diagram fence renders as a
+// figure on load, reveals its editable source on click, re-renders on blur,
+// and round-trips byte-exact as Markdown.
+func TestNativeParityDiagramRender(t *testing.T) {
+	nativeTestMain(func() {
+		window := nativeTestWindow()
+		defer nativeTestCloseWindow(window)
+		e := New(window, nil, nil)
+		defer e.Close()
+		source := "```chart\ntype: line\nlabels: [一, 二, 三]\nseries:\n  - name: 销量\n    data: [3, 7, 5]\n```"
+		e.Load(source)
+		if !nativeTestHasTraits(e, "diagram") {
+			t.Fatal("chart did not render as a figure on load")
+		}
+		// Click the figure to edit its source.
+		nativeTestSelect(e, 0, 0)
+		nativeTestAction(e, "reveal", "")
+		if nativeTestHasTraits(e, "diagram") || !nativeTestHasTraits(e, "source") {
+			t.Fatal("clicking the chart did not reveal its source")
+		}
+		// Losing focus restores the rendered figure.
+		nativeTestAction(e, "blur", "")
+		if !nativeTestHasTraits(e, "diagram") || nativeTestHasTraits(e, "source") {
+			t.Fatal("chart did not re-render after losing focus")
+		}
+		if got, _, _ := e.Snapshot(); got != source {
+			t.Errorf("chart round trip: %q != %q", got, source)
+		}
+	})
+}
+

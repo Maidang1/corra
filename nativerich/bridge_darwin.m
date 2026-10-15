@@ -17,6 +17,7 @@ static NSString *const CRUnderline = @"CorraUnderline";
 static NSString *const CRHighlight = @"CorraHighlight";
 static NSString *const CRSup = @"CorraSup";
 static NSString *const CRSub = @"CorraSub";
+static NSString *const CRHl = @"CorraHl"; // syntax-highlight token class on code
 static NSString *const CROwnPaste = @"app.corra.rich-document";
 // Go-side handlers for parity features (cgo exports, main thread only).
 extern char *cr_emoji(const char *word);
@@ -120,6 +121,35 @@ static NSRange CRContent(NSString *string, NSRange range) {
 static NSDictionary *CRParagraphAt(CREditor *e, NSUInteger location) {
     if (location < e.text.textStorage.length) return [e.text.textStorage attribute:CRParagraph atIndex:location effectiveRange:NULL] ?: CRBody();
     return e.emptyParagraph ?: e.text.typingAttributes[CRParagraph] ?: CRBody();
+}
+// CRHlColor maps a chroma token class (see render.Highlight) to a theme color.
+// A one-palette-each-mode scheme keeps the code chip legible without a full
+// theme engine; unknown classes inherit the default source color (nil).
+static NSColor *CRHlColor(NSString *cls, BOOL dark) {
+    static NSDictionary *lightMap=nil,*darkMap=nil;
+    if (!lightMap) {
+        lightMap=@{
+            @"keyword":[NSColor colorWithRed:0.61 green:0.14 blue:0.58 alpha:1],
+            @"string":[NSColor colorWithRed:0.11 green:0.46 blue:0.16 alpha:1],
+            @"number":[NSColor colorWithRed:0.11 green:0.30 blue:0.75 alpha:1],
+            @"literal":[NSColor colorWithRed:0.11 green:0.30 blue:0.75 alpha:1],
+            @"comment":[NSColor colorWithRed:0.50 green:0.52 blue:0.55 alpha:1],
+            @"operator":[NSColor colorWithRed:0.40 green:0.22 blue:0.56 alpha:1],
+            @"type":[NSColor colorWithRed:0.19 green:0.42 blue:0.66 alpha:1],
+            @"name":[NSColor colorWithRed:0.47 green:0.30 blue:0.07 alpha:1],
+        };
+        darkMap=@{
+            @"keyword":[NSColor colorWithRed:0.86 green:0.56 blue:0.90 alpha:1],
+            @"string":[NSColor colorWithRed:0.58 green:0.82 blue:0.52 alpha:1],
+            @"number":[NSColor colorWithRed:0.60 green:0.76 blue:0.98 alpha:1],
+            @"literal":[NSColor colorWithRed:0.60 green:0.76 blue:0.98 alpha:1],
+            @"comment":[NSColor colorWithRed:0.56 green:0.59 blue:0.63 alpha:1],
+            @"operator":[NSColor colorWithRed:0.80 green:0.68 blue:0.92 alpha:1],
+            @"type":[NSColor colorWithRed:0.56 green:0.78 blue:0.96 alpha:1],
+            @"name":[NSColor colorWithRed:0.90 green:0.74 blue:0.46 alpha:1],
+        };
+    }
+    return (dark ? darkMap : lightMap)[cls];
 }
 static NSTextTableBlock *CRCellAt(CREditor *editor, NSUInteger location) {
     if (location >= editor.text.textStorage.length) return nil;
@@ -232,11 +262,55 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
         out[NSForegroundColorAttributeName] = _dark ? [NSColor colorWithWhite:0.65 alpha:1] : [NSColor colorWithWhite:0.43 alpha:1];
     }
     if (attrs[NSLinkAttributeName]) out[NSForegroundColorAttributeName] = NSColor.linkColor;
+    if (attrs[CRHl]) out[NSForegroundColorAttributeName] = CRHlColor(attrs[CRHl],_dark);
     return out;
+}
+// highlightCode tokenizes each fenced code block with chroma (via cr_highlight)
+// and tags its characters with CRHl token classes, which -visual: maps to
+// theme colors. Contiguous "code" paragraphs form one block so multi-line
+// strings and comments tokenize correctly; the fence lives in metadata, not in
+// the text, so the block's language comes from its first paragraph's "open".
+- (void)highlightCode {
+    NSArray *ranges=CRRanges(_text.string);
+    // Clear any stale token colors first; a re-parse may have changed the code.
+    [_text.textStorage removeAttribute:CRHl range:NSMakeRange(0,_text.string.length)];
+    for (NSUInteger i=0;i<ranges.count;) {
+        NSDictionary *p=CRParagraphAt(self,[ranges[i] rangeValue].location);
+        if (!CRKind(p,@"code")) { i++; continue; }
+        // Accumulate the contiguous run of code lines into one block.
+        NSString *lang=@""; NSString *open=[p[@"open"] isKindOfClass:NSString.class] ? p[@"open"] : @"";
+        if (open.length) lang=[[open stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"`~ "]] lowercaseString];
+        NSUInteger start=CRContent(_text.string,[ranges[i] rangeValue]).location;
+        NSUInteger end=start; NSUInteger j=i;
+        for (;j<ranges.count;j++) {
+            NSDictionary *q=CRParagraphAt(self,[ranges[j] rangeValue].location);
+            if (!CRKind(q,@"code")) break;
+            end=NSMaxRange(CRContent(_text.string,[ranges[j] rangeValue]));
+        }
+        i=j;
+        if (end<=start) continue;
+        if (!lang.length) continue; // no language tag: leave the code untinted
+        NSRange block=NSMakeRange(start,end-start);
+        NSString *code=[_text.string substringWithRange:block];
+        char *out=cr_highlight((char *)code.UTF8String,(char *)lang.UTF8String);
+        if (!out) continue;
+        NSArray *spans=[NSJSONSerialization JSONObjectWithData:[[NSString stringWithUTF8String:out] dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL];
+        free(out);
+        NSUInteger cursor=start;
+        for (NSDictionary *span in spans) {
+            NSString *text=span[@"Text"]; NSString *cls=span[@"Class"];
+            NSUInteger len=text.length;
+            if (cursor+len>end) len=end>cursor ? end-cursor : 0;
+            if (len && cls.length && ![cls isEqual:@"text"]) [_text.textStorage addAttribute:CRHl value:cls range:NSMakeRange(cursor,len)];
+            cursor+=text.length;
+            if (cursor>=end) break;
+        }
+    }
 }
 - (void)restyle {
     BOOL wasSuppress = _suppress; _suppress = YES;
     NSArray *selection = _text.selectedRanges;
+    [self highlightCode];
     [_text.textStorage beginEditing];
     NSAttributedString *copy = [_text.textStorage copy];
     [copy enumerateAttributesInRange:NSMakeRange(0,copy.length) options:0 usingBlock:^(NSDictionary *attrs, NSRange range, BOOL *stop) {
@@ -307,7 +381,7 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
             _emptyParagraph = CRBody();
             continue;
         }
-        if (CRKind(p,@"math") || CRKind(p,@"image")) {
+        if (CRKind(p,@"math") || CRKind(p,@"image") || CRKind(p,@"diagram")) {
             [result appendAttributedString:[self figure:p]];
             if (i+1 < paragraphs.count) {
                 NSMutableDictionary *ending=[[self visual:@{CRParagraph:p} paragraph:p] mutableCopy];
@@ -356,7 +430,7 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
         NSTextTableBlock *cell = CRCellAt(self,range.location);
         if (selection.location != NSNotFound) { range=NSIntersectionRange(range,selection); if (!range.length) continue; }
         NSMutableDictionary *p = [CRParagraphAt(self,range.location) mutableCopy];
-        BOOL figure=CRKind(p,@"math") || CRKind(p,@"image");
+        BOOL figure=CRKind(p,@"math") || CRKind(p,@"image") || CRKind(p,@"diagram");
         if (figure && ![[_text.string substringWithRange:range] isEqual:@"\uFFFC"]) {
             // The user typed into the figure: it is source text now.
             p[@"kind"]=@"source";
@@ -459,10 +533,13 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
     if (_typewriter) [self centerCaretLine];
 }
 - (void)textDidEndEditing:(NSNotification *)notification {
-    NSUInteger caret=_text.selectedRange.location;
-    _text.selectedRange=NSMakeRange(0,0); // stepping out finishes any draft group
-    [self finishDraftGroup];
-    _text.selectedRange=NSMakeRange(caret,0);
+    // Leaving the editor finishes any open draft group: the block the caret was
+    // editing re-renders to its figure form (a formula/image/code), regardless
+    // of where the caret sat inside it.
+    if (_suppress || _text.hasMarkedText) return;
+    NSRange group=_draftGroup;
+    _draftGroup=NSMakeRange(NSNotFound,0);
+    if (group.location!=NSNotFound) [self renderDraftGroup:group];
 }
 - (void)updateTypingParagraph {
     if (_suppress || _text.hasMarkedText || _text.selectedRange.length) return;
@@ -814,6 +891,9 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
     NSAttributedString *value=[self sourceText:CRParagraphAt(self,paragraph.location)];
     if (!value.length) return;
     [self replace:CRContent(_text.string,paragraph) with:value selection:NSMakeRange(paragraph.location,0)];
+    // The replace ran suppressed, so the selection change never armed a draft
+    // group. Arm it now so leaving the revealed source re-renders the figure.
+    _draftGroup=[self draftGroupAt:_text.selectedRange.location];
 }
 
 - (NSRect)imageBounds:(NSImage *)img {
@@ -868,7 +948,7 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
     BOOL renderable=YES;
     NSMutableArray *paragraphs=[NSMutableArray array];
     for (NSDictionary *p in ps) {
-        if (!CRKind(p,@"math") && !CRKind(p,@"image") && !CRKind(p,@"code")) renderable=NO;
+        if (!CRKind(p,@"math") && !CRKind(p,@"image") && !CRKind(p,@"code") && !CRKind(p,@"diagram")) renderable=NO;
         // Fresh parse IDs collide with the document's; identity stays valid
         // through baseline, not id.
         NSMutableDictionary *clean=[p mutableCopy];
@@ -941,7 +1021,30 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
     NSImage *img=nil;
     BOOL failed=NO;
     NSTextAttachment *pending=nil;
-    if (CRKind(p,@"math")) {
+    if (CRKind(p,@"diagram")) {
+        NSString *key=[NSString stringWithFormat:@"d|%d|%f|%@",_dark,_zoom,raw];
+        id cached=_mathCache[key];
+        if ([cached isKindOfClass:NSImage.class]) img=cached;
+        else if (cached) failed=YES;
+        else {
+            // raw is a fenced block: ```lang\n...body...\n```
+            NSString *lang=@"",*body=raw;
+            NSRange nl=[raw rangeOfString:@"\n"];
+            if (nl.location!=NSNotFound) {
+                NSString *fence=[raw substringToIndex:nl.location];
+                lang=[[fence stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"`~ "]] lowercaseString];
+                body=[raw substringFromIndex:NSMaxRange(nl)];
+                NSRange last=[body rangeOfString:@"\n" options:NSBackwardsSearch];
+                if (last.location!=NSNotFound) body=[body substringToIndex:last.location];
+            }
+            char *b64=cr_render_block((char *)lang.UTF8String,(char *)body.UTF8String,_dark?1:0,_zoom);
+            NSData *data=b64 ? [[NSData alloc] initWithBase64EncodedString:[NSString stringWithUTF8String:b64] options:0] : nil;
+            if (b64) free(b64);
+            img=data.length ? [[NSImage alloc] initWithData:data] : nil;
+            if (img) { img.size=NSMakeSize(img.size.width/2,img.size.height/2); _mathCache[key]=img; } // rendered at 2x
+            else { _mathCache[key]=[NSNull null]; failed=YES; }
+        }
+    } else if (CRKind(p,@"math")) {
         NSString *key=[NSString stringWithFormat:@"%d|%f|%@",_dark,_zoom,raw];
         id cached=_mathCache[key];
         if ([cached isKindOfClass:NSImage.class]) img=cached;
@@ -1190,7 +1293,7 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
         if (CRKind(p,@"checklist") && NSPointInRect(point,[self.owner markerRect:v.rangeValue])) { [self.owner toggleCheckbox:v.rangeValue.location]; return; }
     }
     NSUInteger index=[self characterIndexForInsertionAtPoint:point];
-    if (index < self.string.length && CRKind(CRParagraphAt(self.owner,index),@"math")) { [self.owner revealSourceAt:index]; return; }
+    if (index < self.string.length && (CRKind(CRParagraphAt(self.owner,index),@"math") || CRKind(CRParagraphAt(self.owner,index),@"diagram"))) { [self.owner revealSourceAt:index]; return; }
     if (index < self.string.length && CRKind(CRParagraphAt(self.owner,index),@"opaque")) { [self.owner source]; return; }
     [super mouseDown:event];
 }
@@ -1432,6 +1535,8 @@ void cr_test_action(uintptr_t ptr,const char *action,const char *text) {
     CREditor *e=CRE(ptr); NSString *a=[NSString stringWithUTF8String:action], *s=[NSString stringWithUTF8String:text];
     if ([a isEqual:@"undo"]) { [e.text breakUndoCoalescing]; [e.undo undo]; }
     else if ([a isEqual:@"newline"]) [e.text insertNewline:nil];
+    else if ([a isEqual:@"reveal"]) [e revealSourceAt:e.text.selectedRange.location];
+    else if ([a isEqual:@"blur"]) [e textDidEndEditing:[NSNotification notificationWithName:NSTextDidEndEditingNotification object:e.text]];
     else if ([a isEqual:@"linebreak"]) [e.text insertLineBreak:nil];
     else if ([a isEqual:@"tab"]) [e.text insertTab:nil];
     else if ([a isEqual:@"backtab"]) [e.text insertBacktab:nil];
@@ -1449,7 +1554,7 @@ void cr_test_action(uintptr_t ptr,const char *action,const char *text) {
     else if ([a isEqual:@"commit"]) [e.text insertText:s replacementRange:e.text.markedRange];
     else [e.text insertText:s replacementRange:e.text.selectedRange];
 }
-int cr_test_traits(uintptr_t ptr,const char *trait) { CREditor *e=CRE(ptr); NSString *key=[NSString stringWithUTF8String:trait]; __block BOOL found=NO; [e.text.textStorage enumerateAttributesInRange:NSMakeRange(0,e.text.string.length) options:0 usingBlock:^(NSDictionary *attrs, NSRange r, BOOL *stop) { if ([key isEqual:@"bold"]) found |= ([[NSFontManager sharedFontManager] traitsOfFont:attrs[NSFontAttributeName]] & NSBoldFontMask)!=0; else if ([key isEqual:@"underline"]) found |= [attrs[NSUnderlineStyleAttributeName] integerValue]!=0; else if ([key isEqual:@"highlight"]) found |= attrs[CRHighlight]!=nil && attrs[NSBackgroundColorAttributeName]!=nil; else if ([key isEqual:@"sup"]) found |= [attrs[NSSuperscriptAttributeName] integerValue]>0; else if ([key isEqual:@"sub"]) found |= [attrs[NSSuperscriptAttributeName] integerValue]<0; else found |= CRKind(attrs[CRParagraph],key); }];
+int cr_test_traits(uintptr_t ptr,const char *trait) { CREditor *e=CRE(ptr); NSString *key=[NSString stringWithUTF8String:trait]; __block BOOL found=NO; [e.text.textStorage enumerateAttributesInRange:NSMakeRange(0,e.text.string.length) options:0 usingBlock:^(NSDictionary *attrs, NSRange r, BOOL *stop) { if ([key isEqual:@"bold"]) found |= ([[NSFontManager sharedFontManager] traitsOfFont:attrs[NSFontAttributeName]] & NSBoldFontMask)!=0; else if ([key isEqual:@"underline"]) found |= [attrs[NSUnderlineStyleAttributeName] integerValue]!=0; else if ([key isEqual:@"highlight"]) found |= attrs[CRHighlight]!=nil && attrs[NSBackgroundColorAttributeName]!=nil; else if ([key isEqual:@"sup"]) found |= [attrs[NSSuperscriptAttributeName] integerValue]>0; else if ([key isEqual:@"sub"]) found |= [attrs[NSSuperscriptAttributeName] integerValue]<0; else if ([key hasPrefix:@"hl:"]) found |= [attrs[CRHl] isEqual:[key substringFromIndex:3]]; else found |= CRKind(attrs[CRParagraph],key); }];
     if ([key isEqual:@"scrolled"]) return e.text.visibleRect.origin.y > 0.5;
     if ([key isEqual:@"findbar"]) return e.text.usesFindBar ? 1 : 0;
     if ([key hasPrefix:@"alphaAt:"]) { NSInteger index=[[key substringFromIndex:8] integerValue]; if (index>=0 && index<e.text.textStorage.length) { NSColor *color=[e.text.textStorage attribute:NSForegroundColorAttributeName atIndex:index effectiveRange:NULL]; return color && color.alphaComponent<0.99; } return 0; }
