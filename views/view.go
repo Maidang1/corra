@@ -16,17 +16,41 @@ type View struct {
 
 	// The editor column's code editor (full Markdown editing). The buffer
 	// is the editing surface; syncEditor copies it back into App.Source.
-	edState *editor.State
-	edPath  string // note path the buffer was built for
-	edBase  string // App.Source the buffer was built from
-	edVer   uint64 // buffer version last synced into App.Source
+	edState           *editor.State
+	edPath            string // note path the buffer was built for
+	edBase            string // App.Source the buffer was built from
+	edVer             uint64 // buffer version last synced into App.Source
+	rich              RichEditor
+	richPath          string
+	richBase          string
+	richLoaded        bool
+	richSnapshotError bool
 
 	// autosaveTimer debounces writes of the current note to disk.
-	autosaveTimer *time.Timer
+	autosaveTimer  *time.Timer
+	autosaveDue    time.Time
+	autosaveSource string
+	SaveError      string
+	focusEditor    bool
+	focusSearch    bool
+	FolderDialog   string
+	FolderDraft    string
+	FolderOriginal string
+	FolderError    string
+	DeleteOpen     bool
+
+	// Insert-link modal (Cmd+K).
+	LinkOpen bool
+	LinkText string
+	LinkURL  string
 
 	// Modal hosting settings bindings.
 	HostOpen  bool
 	HostDraft app.HostingConfig
+
+	// scrollToBlock asks the preview to scroll a block into view (TOC and
+	// #anchor links); -1 when idle.
+	scrollToBlock int
 
 	// invalidate triggers a window redraw (bound at startup).
 	invalidate func()
@@ -36,6 +60,7 @@ type View struct {
 	OnSaveHosting     func(cfg app.HostingConfig)
 	OnOpenRecent      func(path string)
 	OnExportPDF       func()
+	OnCopyHTML        func() ([]byte, error)
 	OnSave            func() bool
 	OnOpen            func()
 	OnInsertImage     func()
@@ -49,7 +74,17 @@ func (v *View) Bind(svc ui.Services) { v.invalidate = svc.Invalidate }
 
 // New creates the view.
 func New(a *app.App, images *app.ImageLoader) *View {
-	return &View{App: a, Images: images}
+	return &View{App: a, Images: images, scrollToBlock: -1}
+}
+
+func (v *View) Close() {
+	if v.autosaveTimer != nil {
+		v.autosaveTimer.Stop()
+	}
+	if v.rich != nil {
+		v.rich.Close()
+		v.rich = nil
+	}
 }
 
 // Serve binds window services on first build, then renders.
@@ -66,16 +101,32 @@ func (v *View) Serve(c *ui.Context) {
 // columns (folders, notes list, editor) and the modal dialogs.
 func (v *View) Build(c *ui.Context) {
 	c.SetTheme(v.theme(c))
+	if v.rich != nil && v.richPath != v.App.Path {
+		v.App.Mode = app.ModeRich
+	}
+	if v.syncEditor() {
+		v.processAutosave()
+	}
+	if v.rich != nil {
+		v.rich.SetVisible(v.richVisible())
+	}
 	conflict := v.App.Conflict
 
-	ui.Column(c).Fill().Gap(0).Children(func() {
-		v.header(c)
-		ui.Row(c).Fill().Gap(0).Children(func() {
+	ui.Row(c).Fill().Gap(0).Background(c.Theme().Surface).Children(func() {
+		if v.App.Sidebar {
 			v.foldersSidebar(c)
-			ui.Divider(c).FillHeight()
-			v.notesList(c)
-			ui.Divider(c).FillHeight()
-			v.editorPane(c)
+		}
+		ui.Column(c).Key("workspace").Fill().Gap(0).Children(func() {
+			v.header(c)
+			ui.Row(c).Fill().Gap(0).Children(func() {
+				v.notesList(c)
+				ui.Divider(c).FillHeight()
+				v.editorPane(c)
+				if v.App.Outline {
+					ui.Divider(c).FillHeight()
+					v.outlinePanel(c)
+				}
+			})
 		})
 	})
 
@@ -87,5 +138,14 @@ func (v *View) Build(c *ui.Context) {
 	}
 	if v.HostOpen {
 		v.hostingDialog(c)
+	}
+	if v.FolderDialog != "" {
+		v.folderDialog(c)
+	}
+	if v.DeleteOpen {
+		v.deleteDialog(c)
+	}
+	if v.LinkOpen {
+		v.linkDialog(c)
 	}
 }

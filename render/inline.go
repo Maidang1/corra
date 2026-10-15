@@ -13,6 +13,11 @@ const (
 	InlineImage                    // ![alt](url)
 	InlineMath                     // $x$
 	InlineHardBreak                // trailing two spaces / backslash newline
+	InlineHighlight                // ==x==
+	InlineUnderline                // <u>x</u> or <ins>x</ins>
+	InlineSuperscript              // ^x^ or <sup>x</sup>
+	InlineSubscript                // ~x~ or <sub>x</sub>
+	InlineKbd                      // <kbd>x</kbd>
 )
 
 // Inline is one run of inline content with uniform formatting.

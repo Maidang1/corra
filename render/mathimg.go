@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"codeberg.org/go-latex/latex/drawtex/drawimg"
-	"codeberg.org/go-latex/latex/font/lm"
-	"codeberg.org/go-latex/latex/mtex"
+	"codeberg.org/go-latex/latex/font/liberation"
+	mtex "github.com/Maidang1/corra/internal/mtex"
 )
 
 // mathDPI renders at twice the display resolution for crisp scaling.
@@ -20,11 +20,9 @@ const mathDPI = 144
 // go-latex (pure Go, Latin Modern fonts). fg tints the glyphs so math
 // follows the document theme.
 //
-// go-latex's mtex cannot yet typeset TeX scripts (^ and _): the parser
-// produces ast.Sup/ast.Sub nodes no visitor handles. So simple scripts are
-// first transliterated to Unicode super/subscripts (E=mc^2 -> E=mc²), which
-// covers most formulas in notes; anything still failing returns an error
-// and the view degrades to showing the source.
+// Scripts (^ and _) are typeset by the vendored mtex (internal/mtex).
+// Anything still failing returns an error and the view degrades to showing
+// the source.
 func RenderMath(expr string, display bool, fontSize float64, fg color.Color) (img image.Image, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -54,7 +52,7 @@ func renderMathOnce(expr string, size float64) (image.Image, error) {
 	if !strings.HasPrefix(trimmed, "$") && !strings.HasPrefix(trimmed, "\\(") && !strings.HasPrefix(trimmed, "\\[") {
 		wrapped = "$" + expr + "$"
 	}
-	if err := mtex.Render(r, wrapped, size, mathDPI, lm.Fonts()); err != nil {
+	if err := mtex.Render(r, wrapped, size, mathDPI, liberation.Fonts()); err != nil {
 		return nil, err
 	}
 	return png.Decode(&buf)

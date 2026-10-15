@@ -1,8 +1,10 @@
 package render
 
 import (
+	"bytes"
 	"context"
 	"image"
+	"image/png"
 	"strings"
 	"testing"
 )
@@ -61,6 +63,65 @@ Paragraph with **bold**, *italic*, ~~strike~~ and ` + "`code`" + `.
 }
 
 func TestParseTaskList(t *testing.T) {
+	t.Run("absolute checkbox offsets", func(t *testing.T) {
+		for _, src := range []string{
+			"# Before\n\n- [ ] parent\n  - [X] child **bold**\n- plain [x] text\n",
+			"1. [x] first\n   1. [ ] second\n2. ordinary\n",
+			"> intro\n>\n> - [ ] quoted\n>   - [x] nested\n",
+			"- [ ] first\r\n  - [x] second\r\n",
+		} {
+			t.Run(src, func(t *testing.T) {
+				doc := Parse(src)
+				var offsets []int
+				for _, block := range doc.Blocks {
+					for _, item := range block.Items {
+						if !item.Task {
+							if item.CheckboxOffset != -1 {
+								t.Errorf("non-task offset = %d, want -1", item.CheckboxOffset)
+							}
+							continue
+						}
+						i := item.CheckboxOffset
+						if i <= 0 || i+1 >= len(src) || src[i-1] != '[' || src[i+1] != ']' {
+							t.Fatalf("invalid checkbox offset %d in %q", i, src)
+						}
+						if item.Done != (src[i] == 'x' || src[i] == 'X') {
+							t.Errorf("checkbox state doesn't match original source at %d", i)
+						}
+						offsets = append(offsets, i)
+					}
+				}
+				if len(offsets) != 2 {
+					t.Fatalf("task offsets = %v, want exactly two", offsets)
+				}
+				wantFirst := strings.Index(src, "[") + 1
+				wantSecond := strings.Index(src[wantFirst+2:], "[") + wantFirst + 3
+				if offsets[0] != wantFirst || offsets[1] != wantSecond {
+					t.Fatalf("task offsets = %v, want %d %d", offsets, wantFirst, wantSecond)
+				}
+			})
+		}
+	})
+	t.Run("loose continuation paragraphs", func(t *testing.T) {
+		doc := Parse("- [ ] first\n\n  next paragraph\n\n  - [ ] child\n")
+		if len(doc.Blocks) != 1 || len(doc.Blocks[0].Items) != 2 || doc.Blocks[0].Items[0].Source != "first\n\nnext paragraph" {
+			t.Fatalf("continuation paragraph lost: %+v", doc.Blocks)
+		}
+	})
+	t.Run("nested items and continuation lines", func(t *testing.T) {
+		src := "- [ ] parent\n  continuation\n  - [x] child\n    - plain grandchild\n- sibling\n"
+		doc := Parse(src)
+		if len(doc.Blocks) != 1 || len(doc.Blocks[0].Items) != 4 {
+			t.Fatalf("nested list not retained: %+v", doc.Blocks)
+		}
+		wantText := []string{"parent\ncontinuation", "child", "plain grandchild", "sibling"}
+		wantDepth := []int{0, 1, 2, 0}
+		for i, item := range doc.Blocks[0].Items {
+			if item.Source != wantText[i] || item.Depth != wantDepth[i] {
+				t.Errorf("item %d = %+v, want text %q depth %d", i, item, wantText[i], wantDepth[i])
+			}
+		}
+	})
 	doc := Parse("- [ ] todo\n- [x] done\n")
 	if len(doc.Blocks) != 1 || len(doc.Blocks[0].Items) != 2 {
 		t.Fatalf("blocks = %+v", doc.Blocks)
@@ -217,12 +278,18 @@ func TestChartImage(t *testing.T) {
 }
 
 func TestMathRender(t *testing.T) {
-	img, err := RenderMath("E = mc^2", false, 14, darkInk)
-	if err != nil {
-		t.Skipf("go-latex unavailable: %v", err)
-	}
-	if !imageHasInk(img) {
-		t.Error("math image is blank")
+	// Scripts, Greek letters and big operators must all typeset: they are the
+	// reason mtex and tex are vendored (upstream go-latex lacks Sup/Sub and
+	// Latin Modern lacks the symbol glyphs).
+	for _, expr := range []string{"E = mc^2", "x^2 + y^2 = z^2", "a_i + b_{ij}", "\\alpha + \\beta", "\\int_0^1 x^2\\,dx"} {
+		img, err := RenderMath(expr, false, 14, darkInk)
+		if err != nil {
+			t.Errorf("%s: %v", expr, err)
+			continue
+		}
+		if !imageHasInk(img) {
+			t.Errorf("%s: math image is blank", expr)
+		}
 	}
 }
 
@@ -242,4 +309,138 @@ func imageHasInk(img image.Image) bool {
 		}
 	}
 	return false
+}
+
+func TestInlineExtensions(t *testing.T) {
+	src := "a ==hl== b <u>u</u> x^2^ H~2~O <kbd>⌘</kbd> :smile: ~~s~~"
+	ins := ParseInlines(src)
+	var kinds []InlineKind
+	for _, in := range ins {
+		kinds = append(kinds, in.Kind)
+	}
+	for _, want := range []InlineKind{InlineHighlight, InlineUnderline, InlineSuperscript, InlineSubscript, InlineKbd, InlineStrikethrough} {
+		found := false
+		for _, k := range kinds {
+			if k == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("missing inline kind %v in %v", want, kinds)
+		}
+	}
+	// emoji expands to unicode text
+	var hasEmoji bool
+	for _, in := range ins {
+		if in.Kind == InlineText && strings.ContainsRune(in.Text, '\U0001F604') {
+			hasEmoji = true
+		}
+	}
+	if !hasEmoji {
+		t.Fatalf("emoji not expanded: %+v", ins)
+	}
+}
+
+func TestFrontMatterAndTOC(t *testing.T) {
+	doc := Parse("---\ntitle: T\n---\n\n[TOC]\n\n# A\n")
+	if len(doc.Blocks) != 3 {
+		t.Fatalf("blocks: %d", len(doc.Blocks))
+	}
+	if doc.Blocks[0].Kind != KindFrontMatter {
+		t.Fatalf("first block: %v", doc.Blocks[0].Kind)
+	}
+	if doc.Blocks[1].Kind != KindTOC {
+		t.Fatalf("second block: %v", doc.Blocks[1].Kind)
+	}
+	if doc.Blocks[2].Kind != KindHeading {
+		t.Fatalf("third block: %v", doc.Blocks[2].Kind)
+	}
+	// offsets are relative to the original source
+	if doc.Blocks[2].Start == 0 {
+		t.Fatal("heading offset not adjusted for front matter")
+	}
+}
+
+func TestImageSizeSuffix(t *testing.T) {
+	doc := Parse("![a](<img.png =320x200>)\n")
+	if len(doc.Blocks) != 1 || doc.Blocks[0].Kind != KindImage {
+		t.Fatalf("blocks: %+v", doc.Blocks)
+	}
+	b := doc.Blocks[0]
+	if b.ImageURL != "img.png" || b.ImageWidth != 320 || b.ImageHeight != 200 {
+		t.Fatalf("size: %+v", b)
+	}
+	doc = Parse("![a](<img.png =50%>)")
+	if doc.Blocks[0].ImageZoom != 50 {
+		t.Fatalf("zoom: %+v", doc.Blocks[0])
+	}
+}
+
+func TestImgTagBlock(t *testing.T) {
+	doc := Parse(`<img src="pic.png" width="240" alt="p">`)
+	if len(doc.Blocks) != 1 || doc.Blocks[0].Kind != KindImage || doc.Blocks[0].ImageWidth != 240 {
+		t.Fatalf("img tag: %+v", doc.Blocks)
+	}
+	doc = Parse("<div>stay html</div>")
+	if doc.Blocks[0].Kind != KindHTML {
+		t.Fatalf("non-img html: %+v", doc.Blocks[0])
+	}
+}
+
+func TestSmartPunct(t *testing.T) {
+	doc := ParseOptions(`"quoted" -- dash`, true)
+	if doc.Blocks[0].Source == "" {
+		t.Fatal("empty")
+	}
+	ins := ParseInlines(`"quoted"`)
+	_ = ins // source-faithful default parse; smart variant exercises below
+	b := plainTextBody(`"a" -- b`, true)
+	if !strings.ContainsRune(b, '\u201c') {
+		t.Fatalf("smart punct missing: %q", b)
+	}
+}
+
+func TestExportHTML(t *testing.T) {
+	src := "---\ntitle: T\n---\n\n# Hi *there*\n\n==mark== <u>u</u> ^s^ ~b~ :smile: ~~x~~\n\n[TOC]\n\n## Two\n\n```mermaid\nA-->B\n```\n\n$E=mc^2$\n"
+	out, err := ExportHTML(src, "T", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	for _, want := range []string{"<title>T</title>", "<h1", "<em>there</em>", "<mark>mark</mark>", "<u>u</u>",
+		"<sup>s</sup>", "<sub>b</sub>", "<del>x</del>", `<pre class="mermaid">`, "A--&gt;B",
+		`class="toc"`, `href="#two"`, "katex", "$E=mc^2$"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("export missing %q:\n%s", want, s)
+		}
+	}
+}
+
+func TestSoftBreakRenders(t *testing.T) {
+	ins := ParseInlines("第一行\n第二行")
+	var breaks int
+	for _, in := range ins {
+		if in.Kind == InlineHardBreak {
+			breaks++
+		}
+	}
+	if breaks != 1 {
+		t.Fatalf("soft break lost: %+v", ins)
+	}
+}
+
+func TestExportPDFWithImageAndBreaks(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 8, 8))
+	var buf bytes.Buffer
+	png.Encode(&buf, img)
+	doc := Parse("# T\n\n![p](pic.png =40x)\n\n<div style=\"page-break-after: always\"></div>\n\n[TOC]\n\nsecond\n")
+	out, err := ExportPDFOpts(nil, doc, "T", func(url string) ([]byte, error) {
+		if url != "pic.png" {
+			t.Fatalf("url %q", url)
+		}
+		return buf.Bytes(), nil
+	})
+	if err != nil || len(out) < 1000 {
+		t.Fatalf("pdf: %v %d", err, len(out))
+	}
 }

@@ -29,9 +29,11 @@ func (v *View) block(c *ui.Context, i int) {
 	case render.KindHeading:
 		v.headingBlock(c, i)
 	case render.KindParagraph:
-		ui.RichText(c, v.inlineSpans(b.Source, t)...).
-			FontSize(t.FontSize).LineHeight(1.65).FillWidth().
-			OnClick(func() { v.toggleMode() })
+		v.inlineFlow(c, b.Source, t, t.FontSize)
+	case render.KindFrontMatter:
+		v.frontMatterBlock(c, b)
+	case render.KindTOC:
+		v.tocBlock(c)
 	case render.KindCodeBlock:
 		v.codeBlock(c, i)
 	case render.KindQuote:
@@ -61,100 +63,14 @@ func (v *View) block(c *ui.Context, i int) {
 	}
 }
 
-// inlineSpans converts a markdown source's inline formatting into RichText
-// spans, recursing through nested emphasis.
-func (v *View) inlineSpans(src string, t *ui.Theme) []ui.Span {
-	return v.spansOf(render.ParseInlines(src), t)
-}
-
-func (v *View) spansOf(ins []render.Inline, t *ui.Theme) []ui.Span {
-	var out []ui.Span
-	for _, in := range ins {
-		switch in.Kind {
-		case render.InlineBold:
-			sp := v.spansOf(in.Children, t)
-			for i := range sp {
-				sp[i].Weight = 700
-			}
-			if len(sp) == 0 {
-				sp = []ui.Span{{Text: in.Text, Weight: 700}}
-			}
-			out = append(out, sp...)
-		case render.InlineItalic:
-			sp := v.spansOf(in.Children, t)
-			for i := range sp {
-				sp[i].Italic = true
-			}
-			if len(sp) == 0 {
-				sp = []ui.Span{{Text: in.Text, Italic: true}}
-			}
-			out = append(out, sp...)
-		case render.InlineCode:
-			out = append(out, ui.Span{
-				Text:   in.Text,
-				Font:   fontMono,
-				Color:  t.Accent,
-				Size:   -1, // one step smaller than the surrounding text
-				Weight: 500,
-			})
-		case render.InlineStrikethrough:
-			sp := v.spansOf(in.Children, t)
-			for i := range sp {
-				sp[i].Strikethrough = true
-			}
-			if len(sp) == 0 {
-				sp = []ui.Span{{Text: in.Text, Strikethrough: true}}
-			}
-			out = append(out, sp...)
-		case render.InlineLink:
-			label := in.Text
-			if label == "" {
-				label = inlinePlainOf(in.Children)
-			}
-			out = append(out, ui.Span{
-				Text:      label,
-				Color:     t.Accent,
-				Underline: true,
-			})
-		case render.InlineImage:
-			out = append(out, ui.Span{
-				Text:  "🖼 " + in.Text,
-				Color: t.TextMuted,
-			})
-		case render.InlineHardBreak:
-			out = append(out, ui.Span{Text: "\n"})
-		default: // InlineText, InlineMath
-			if len(in.Children) > 0 {
-				out = append(out, v.spansOf(in.Children, t)...)
-			} else {
-				out = append(out, ui.Span{Text: in.Text})
-			}
-		}
-	}
-	return out
-}
-
-// inlinePlainOf flattens nested inline children to plain text.
-func inlinePlainOf(ins []render.Inline) string {
-	var s string
-	for _, in := range ins {
-		if len(in.Children) > 0 {
-			s += inlinePlainOf(in.Children)
-		} else {
-			s += in.Text
-		}
-	}
-	return s
-}
-
-// headingSize keeps headings close to Apple Notes' title scale: the
-// first line reads as a note title, not a banner.
+// headingSize mirrors the native editor's type scale (27/22/18.5/16.5/15.5/15
+// on a 16pt body): the first line reads as a note title, not a banner.
 func headingSize(level int, base float32) float32 {
-	sz := map[int]float32{1: 22, 2: 19, 3: 17, 4: 15.5, 5: 14.5, 6: 13.5}[level]
+	sz := map[int]float32{1: 23.5, 2: 19.25, 3: 16.25, 4: 14.5, 5: 13.5, 6: 13}[level]
 	if sz == 0 {
-		sz = 13.5
+		sz = 13
 	}
-	return sz * base / 13.5
+	return sz * base / 14
 }
 
 func (v *View) headingBlock(c *ui.Context, i int) {
@@ -163,30 +79,39 @@ func (v *View) headingBlock(c *ui.Context, i int) {
 	size := headingSize(b.Level, t.FontSize)
 	// Strip the leading #'s so they don't show in the preview.
 	src := strings.TrimLeft(b.Source, "#")
-	el := ui.RichText(c, v.inlineSpans(src, t)...).
-		FontSize(size).LineHeight(1.3).FillWidth().
-		OnClick(func() { v.toggleMode() })
-	if b.Level <= 2 {
-		el = el.Bold()
+	if v.App.HeadingNumbering {
+		if num := headingNumber(v.App.Doc, i); num != "" {
+			src = " " + num + src // src keeps its leading space after #'s
+		}
 	}
+	el := v.inlineFlow(c, src, t, size)
+	if b.Level <= 2 {
+		el = el.FontWeight(700)
+	} else {
+		el = el.FontWeight(600)
+	}
+	if i == v.scrollToBlock {
+		el = el.ScrollIntoView()
+		v.scrollToBlock = -1
+	}
+	// Headings belong to what follows: open room above, stay close below.
 	if b.Level == 1 {
-		el = el.PaddingY(4)
+		el = el.Padding(8, 0, 0, 0)
+	} else {
+		el = el.Padding(5, 0, 0, 0)
 	}
 }
 
 func (v *View) quoteBlock(c *ui.Context, i int) {
 	b := &v.App.Doc.Blocks[i]
 	t := c.Theme()
-	ui.Box(c).FillWidth().Padding(2, 0, 2, 14).Children(func() {
-		ui.Box(c).FillWidth().Padding(10, 14).Background(t.Surface).
-			Border(1, t.Border).Children(func() {
-			ui.Column(c).FillWidth().Gap(8).Children(func() {
-				for j := range b.Items {
-					ui.RichText(c, v.inlineSpans(b.Items[j].Source, t)...).
-						FontSize(t.FontSize).LineHeight(1.65).Italic().FillWidth().
-						OnClick(func() { v.toggleMode() })
-				}
-			})
+	// A rounded bar at the text edge, as the native editor draws quotes.
+	ui.Row(c).FillWidth().Gap(10).Padding(2, 0).Children(func() {
+		ui.Box(c).Width(3).FillHeight().Background(t.Scrollbar).Radius(1.5)
+		ui.Column(c).FillWidth().Gap(6).Padding(4, 0).Children(func() {
+			for j := range b.Items {
+				v.inlineFlow(c, b.Items[j].Source, t, t.FontSize)
+			}
 		})
 	})
 }
@@ -194,7 +119,7 @@ func (v *View) quoteBlock(c *ui.Context, i int) {
 func (v *View) listBlock(c *ui.Context, i int) {
 	b := &v.App.Doc.Blocks[i]
 	t := c.Theme()
-	ui.Column(c).FillWidth().Gap(3).Children(func() {
+	ui.Column(c).FillWidth().Gap(1).Children(func() {
 		for j := range b.Items {
 			item := &b.Items[j]
 			idx, depth := j, item.Depth
@@ -202,7 +127,7 @@ func (v *View) listBlock(c *ui.Context, i int) {
 				Padding(0, 0, 0, float32(depth)*18).Children(func() {
 				if item.Task {
 					done := item.Done
-					ui.Checkbox(c, &done, "").OnChange(func() {
+					ui.Checkbox(c, &done, "").Label("任务：" + item.Source).Disabled(!v.canEdit()).OnChange(func() {
 						v.toggleTask(i, idx)
 					})
 				} else if b.Ordered {
@@ -212,9 +137,7 @@ func (v *View) listBlock(c *ui.Context, i int) {
 					ui.Text(c, "•").TextColor(t.TextMuted).
 						FontSize(t.FontSize + 2).NoWrap()
 				}
-				ui.RichText(c, v.inlineSpans(item.Source, t)...).
-					FontSize(t.FontSize).LineHeight(1.6).FillWidth().
-					OnClick(func() { v.toggleMode() })
+				v.inlineFlow(c, item.Source, t, t.FontSize).LineHeight(1.35)
 			})
 		}
 	})
@@ -223,37 +146,24 @@ func (v *View) listBlock(c *ui.Context, i int) {
 // toggleTask flips one task list item's checkbox, keeping the rest of the
 // block's items as they are.
 func (v *View) toggleTask(blockIdx, itemIdx int) {
-	b := &v.App.Doc.Blocks[blockIdx]
-	marker := "- "
-	if b.Ordered {
-		marker = "1. "
-	}
-	lines := make([]string, 0, len(b.Items))
-	for j := range b.Items {
-		item := &b.Items[j]
-		done := item.Done
-		if j == itemIdx {
-			done = !done
-		}
-		src := strings.TrimSpace(item.Source)
-		if src == "" {
-			continue
-		}
-		if item.Task {
-			box := "[ ]"
-			if done {
-				box = "[x]"
-			}
-			lines = append(lines, "- "+box+" "+src)
-		} else {
-			lines = append(lines, marker+src)
-		}
-	}
-	if len(lines) == 0 {
-		v.App.ReplaceBlockRange(blockIdx, "")
+	if !v.canEdit() || blockIdx < 0 || blockIdx >= len(v.App.Doc.Blocks) {
 		return
 	}
-	v.App.ReplaceBlockRange(blockIdx, strings.Join(lines, "\n"))
+	b := &v.App.Doc.Blocks[blockIdx]
+	if itemIdx < 0 || itemIdx >= len(b.Items) {
+		return
+	}
+	item := b.Items[itemIdx]
+	src := v.App.Source
+	offset := item.CheckboxOffset
+	if !item.Task || offset <= 0 || offset+1 >= len(src) || src[offset-1] != '[' || src[offset+1] != ']' {
+		return
+	}
+	marker := "x"
+	if item.Done {
+		marker = " "
+	}
+	v.App.SetSource(src[:offset]+marker+src[offset+1:], offset)
 }
 
 func (v *View) codeBlock(c *ui.Context, i int) {
@@ -268,7 +178,7 @@ func (v *View) codeBlock(c *ui.Context, i int) {
 				if b.Language != "" {
 					ui.Text(c, b.Language).FontSize(11).TextColor(t.TextMuted)
 				}
-				v.richLines(c, code, b.Language, colors, t.FontSize-1)
+				v.richLines(c, code, b.Language, colors, t.FontSize-1, v.App.CodeLineNumbers)
 			})
 		})
 	}).OnClick(func() {
@@ -276,8 +186,9 @@ func (v *View) codeBlock(c *ui.Context, i int) {
 	})
 }
 
-// richLines renders code as RichText spans with highlight colors.
-func (v *View) richLines(c *ui.Context, code, language string, colors map[string]ui.Color, size float32) {
+// richLines renders code as RichText spans with highlight colors; lineNumbers
+// adds a gutter of line numbers (Typora's code-fence line-number option).
+func (v *View) richLines(c *ui.Context, code, language string, colors map[string]ui.Color, size float32, lineNumbers bool) {
 	spans := render.Highlight(code, language)
 	uiSpans := make([]ui.Span, 0, len(spans))
 	for _, s := range spans {
@@ -291,6 +202,20 @@ func (v *View) richLines(c *ui.Context, code, language string, colors map[string
 	if len(uiSpans) == 0 {
 		uiSpans = []ui.Span{{Text: code, Font: fontMono, Size: size}}
 	}
+	if lineNumbers {
+		t := c.Theme()
+		lines := strings.Count(code, "\n") + 1
+		var nums strings.Builder
+		for n := 1; n <= lines; n++ {
+			fmt.Fprintf(&nums, "%d\n", n)
+		}
+		ui.Row(c).FillWidth().Gap(10).Children(func() {
+			ui.Text(c, strings.TrimSuffix(nums.String(), "\n")).Font(fontMono).
+				FontSize(size).TextColor(t.TextMuted).LineHeight(1.5).NoWrap()
+			ui.RichText(c, uiSpans...).FillWidth().LineHeight(1.5)
+		})
+		return
+	}
 	ui.RichText(c, uiSpans...).FillWidth().LineHeight(1.5)
 }
 
@@ -300,11 +225,11 @@ func (v *View) tableBlock(c *ui.Context, i int) {
 	ui.Box(c).FillWidth().Border(1, t.Border).Padding(2, 2).Children(func() {
 		ui.Column(c).FillWidth().Gap(0).Children(func() {
 			renderRow := func(cells []render.TableCell, header bool) {
-				ui.Row(c).FillWidth().Gap(0).Children(func() {
+				ui.Row(c).FillWidth().Gap(1).Dividers(1, t.Border).Children(func() {
 					for _, cell := range cells {
-						ui.Box(c).Grow(1).Padding(8, 10).Background(func() ui.Color {
+						ui.Box(c).Grow(1).Padding(6, 10).Background(func() ui.Color {
 							if header {
-								return t.SurfacePressed
+								return t.SurfaceHover
 							}
 							return t.Surface
 						}()).Children(func() {
@@ -409,7 +334,20 @@ func (v *View) imageBlock(c *ui.Context, i int) {
 	e := v.Images.Get(b.ImageURL, baseDir, v.invalidate)
 	ui.Box(c).FillWidth().Padding(8, 0).Children(func() {
 		if bmp, ok := e.Result(); ok && bmp != nil {
-			ui.Image(c, bmp).MaxWidth(680)
+			img := ui.Image(c, bmp).MaxWidth(680)
+			// Typora-style sizing: =WxH / =NN% suffix or <img width height>.
+			w, h := bmp.Size()
+			switch {
+			case b.ImageWidth > 0 && b.ImageHeight > 0:
+				img = img.Width(float32(b.ImageWidth) * v.App.Zoom).Height(float32(b.ImageHeight) * v.App.Zoom)
+			case b.ImageWidth > 0:
+				img = img.Width(float32(b.ImageWidth) * v.App.Zoom)
+			case b.ImageHeight > 0:
+				img = img.Height(float32(b.ImageHeight) * v.App.Zoom)
+			case b.ImageZoom > 0 && w > 0:
+				img = img.Width(float32(w) * float32(b.ImageZoom) / 100 * v.App.Zoom)
+			}
+			_ = h // h reserved for aspect-fit sizing
 			if b.ImageAlt != "" {
 				ui.Text(c, b.ImageAlt).FontSize(11.5).TextColor(t.TextMuted).Center()
 			}
@@ -443,4 +381,83 @@ func dirOf(p string) string {
 		return p[:i]
 	}
 	return ""
+}
+
+// frontMatterBlock renders YAML front matter as a quiet metadata card.
+func (v *View) frontMatterBlock(c *ui.Context, b *render.Block) {
+	t := c.Theme()
+	lines := strings.Split(b.Source, "\n")
+	if len(lines) >= 2 {
+		lines = lines[1 : len(lines)-1] // drop --- fences
+	}
+	ui.Box(c).FillWidth().Padding(4, 0).Children(func() {
+		ui.Column(c).FillWidth().Gap(2).Padding(8, 12).Radius(8).
+			Background(t.SurfaceHover).Children(func() {
+			for _, line := range lines {
+				ui.Text(c, line).Font(fontMono).FontSize(11).TextColor(t.TextMuted).FillWidth()
+			}
+		})
+	})
+}
+
+// tocBlock renders [TOC] as the document's heading outline; entries scroll
+// the preview to their heading.
+func (v *View) tocBlock(c *ui.Context) {
+	t := c.Theme()
+	ui.Column(c).FillWidth().Gap(3).Padding(4, 0).Children(func() {
+		ui.Text(c, "目录").FontSize(11).TextColor(t.TextMuted)
+		for i := range v.App.Doc.Blocks {
+			hb := &v.App.Doc.Blocks[i]
+			if hb.Kind != render.KindHeading {
+				continue
+			}
+			idx := i
+			ui.Text(c, hb.HeadingText()).
+				FontSize(t.FontSize-1).TextColor(t.Accent).
+				Padding(0, 0, 0, float32(hb.Level-1)*16).
+				Cursor(ui.CursorPointer).
+				OnClick(func() {
+					v.scrollToBlock = idx
+					v.App.InvalidateUI()
+				})
+		}
+	})
+}
+
+// headingNumber computes the 1.2.3-style number of the i-th block when it is
+// a heading, from the heading sequence of the document.
+func headingNumber(doc *render.Document, i int) string {
+	if i < 0 || i >= len(doc.Blocks) || doc.Blocks[i].Kind != render.KindHeading {
+		return ""
+	}
+	var counters [6]int
+	for k := 0; k <= i; k++ {
+		hb := &doc.Blocks[k]
+		if hb.Kind != render.KindHeading {
+			continue
+		}
+		level := hb.Level
+		if level < 1 {
+			level = 1
+		}
+		if level > 6 {
+			level = 6
+		}
+		counters[level-1]++
+		for m := level; m < 6; m++ {
+			counters[m] = 0
+		}
+	}
+	level := doc.Blocks[i].Level
+	if level < 1 {
+		level = 1
+	}
+	var parts []string
+	for m := 0; m < level; m++ {
+		if counters[m] == 0 {
+			counters[m] = 1
+		}
+		parts = append(parts, fmt.Sprintf("%d", counters[m]))
+	}
+	return strings.Join(parts, ".") + "."
 }

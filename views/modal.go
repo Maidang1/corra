@@ -14,6 +14,29 @@ import (
 // openBlockEditor opens the modal source editor for block i. If isNew, the
 // block is appended on commit instead.
 func (v *View) openBlockEditor(i int, source string, isNew bool) {
+	if !v.canEdit() {
+		return
+	}
+	// Structured previews navigate into the same source buffer; replacing a
+	// reconstructed block would lose fences, indentation, or table source.
+	if !isNew {
+		v.App.Mode = app.ModeEdit
+		v.ensureEditor()
+		if i >= 0 && i < len(v.App.Doc.Blocks) {
+			b := v.App.Doc.Blocks[i]
+			pos := b.Start
+			if b.Source != "" {
+				if found := strings.Index(v.App.Source, b.Source); found >= 0 {
+					pos = found
+				}
+			}
+			pos = max(0, min(pos, v.edState.Buffer.Len()))
+			v.edState.Select(pos, pos)
+		}
+		v.focusEditor = true
+		v.App.InvalidateUI()
+		return
+	}
 	v.App.EditBlock = i
 	v.App.EditText = source
 	v.App.EditOpen = true
@@ -43,6 +66,10 @@ func (v *View) blockEditorModal(c *ui.Context) {
 						v.App.InvalidateUI()
 					})
 					ui.PrimaryButton(c, "确定").OnClick(func() {
+						if !v.canEdit() {
+							v.App.EditOpen = false
+							return
+						}
 						text := v.App.EditText
 						v.App.EditOpen = false
 						if v.App.EditIsNew {
@@ -73,11 +100,9 @@ func (v *View) conflictDialog(c *ui.Context) {
 					FontSize(13).TextColor(t.TextMuted).LineHeight(1.5)
 				ui.Row(c).FillWidth().Gap(8).Children(func() {
 					ui.Button(c, "保留我的版本").OnClick(func() {
-						v.App.Conflict = false
 						v.saveAndReloadConflict(false)
 					})
 					ui.Button(c, "重新加载").OnClick(func() {
-						v.App.Conflict = false
 						v.saveAndReloadConflict(true)
 					})
 				})
@@ -85,8 +110,8 @@ func (v *View) conflictDialog(c *ui.Context) {
 		})
 	})
 	if !open {
-		// Dismissed: keep our version but stop nagging until next change.
-		v.App.Conflict = false
+		// Keep the conflict pending; dismissing is not consent to overwrite.
+		v.App.Conflict = true
 	}
 }
 
@@ -94,7 +119,14 @@ func (v *View) conflictDialog(c *ui.Context) {
 // FileOps into the view; the saver is bound at startup).
 func (v *View) saveAndReloadConflict(reload bool) {
 	if fn := v.OnConflictResolve; fn != nil {
+		if !reload && !v.syncEditor() {
+			return
+		}
 		fn(reload)
+		v.SaveError = ""
+		if reload {
+			v.edState = nil
+		}
 	}
 }
 
