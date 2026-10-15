@@ -10,7 +10,7 @@ func isList(p Paragraph) bool {
 }
 
 func listFingerprint(p Paragraph) string {
-	return fmt.Sprintf("%s:%d:%d:%s:%s", p.Kind, p.Depth, p.Ordinal, p.ListContainer, p.ListMarker)
+	return fmt.Sprintf("%s:%d:%d:%s:%s:%t", p.Kind, p.Depth, p.Ordinal, p.ListContainer, p.ListMarker, p.ListContinuation)
 }
 
 func listMarker(p Paragraph) string {
@@ -61,6 +61,9 @@ func listSources(doc Document) map[int]string {
 			indent := p.ListIndent
 			if structural {
 				indent = strings.Repeat(" ", columns[depth])
+				if p.ListContinuation {
+					indent = strings.Repeat(" ", columns[min(depth+1, len(columns)-1)])
+				}
 			}
 			line := p.Raw
 			if p.Baseline == "" || p.Baseline != fingerprint(p) || p.ListBaseline != listFingerprint(p) {
@@ -69,7 +72,9 @@ func listSources(doc Document) map[int]string {
 				line = strings.TrimLeft(line, " \t")
 			}
 			out[i] = indent + line
-			columns = append(columns[:depth+1], columns[depth]+originalMarkerWidth(line))
+			if !p.ListContinuation {
+				columns = append(columns[:depth+1], columns[depth]+originalMarkerWidth(line))
+			}
 		}
 		start = end
 	}

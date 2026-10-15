@@ -35,20 +35,22 @@ type Paragraph struct {
 	Ordinal int    `json:"ordinal,omitempty"`
 	Depth   int    `json:"depth,omitempty"`
 	// List metadata preserves original indentation until the tree is changed.
-	ListIndent    string   `json:"listIndent,omitempty"`
-	ListID        string   `json:"listId,omitempty"`
-	ListContainer string   `json:"listContainer,omitempty"`
-	ListMarker    string   `json:"listMarker,omitempty"`
-	ListBaseline  string   `json:"listBaseline,omitempty"`
-	Runs          []Run    `json:"runs"`
-	Raw           string   `json:"raw,omitempty"`
-	RawBase64     string   `json:"rawBase64,omitempty"`
-	Prefix        string   `json:"prefix,omitempty"`
-	Separator     string   `json:"separator,omitempty"`
-	Baseline      string   `json:"baseline,omitempty"`
-	NextID        string   `json:"nextId,omitempty"`
-	Rows          [][]Cell `json:"rows,omitempty"`
-	Alignments    []string `json:"alignments,omitempty"`
+	ListIndent       string   `json:"listIndent,omitempty"`
+	ListID           string   `json:"listId,omitempty"`
+	ListContainer    string   `json:"listContainer,omitempty"`
+	ListMarker       string   `json:"listMarker,omitempty"`
+	ListBaseline     string   `json:"listBaseline,omitempty"`
+	ListItem         string   `json:"listItem,omitempty"`
+	ListContinuation bool     `json:"listContinuation,omitempty"`
+	Runs             []Run    `json:"runs"`
+	Raw              string   `json:"raw,omitempty"`
+	RawBase64        string   `json:"rawBase64,omitempty"`
+	Prefix           string   `json:"prefix,omitempty"`
+	Separator        string   `json:"separator,omitempty"`
+	Baseline         string   `json:"baseline,omitempty"`
+	NextID           string   `json:"nextId,omitempty"`
+	Rows             [][]Cell `json:"rows,omitempty"`
+	Alignments       []string `json:"alignments,omitempty"`
 	// Open and Close hold a code block's fences so the lines between them can
 	// be edited without the fences on screen (Typora-style).
 	Open  string `json:"open,omitempty"`
@@ -115,14 +117,16 @@ func Parse(source string) Document {
 	root := md.Parser().Parse(text.NewReader(src))
 	mdext.TransformHTML(root, src)
 	type block struct {
-		node      ast.Node
-		start     int
-		kind      string
-		ordinal   int
-		depth     int
-		listID    string
-		container string
-		marker    string
+		node         ast.Node
+		start        int
+		kind         string
+		ordinal      int
+		depth        int
+		listID       string
+		container    string
+		marker       string
+		item         string
+		continuation bool
 	}
 	var blocks []block
 	var flattenList func(*ast.List, int, string)
@@ -133,13 +137,23 @@ func Parse(source string) Document {
 			if list.IsOrdered() {
 				kind = "ordered"
 			}
-			blocks = append(blocks, block{node: item, start: lineStart(source, item.Pos()), kind: kind, ordinal: ordinal, depth: depth, listID: id, container: fmt.Sprintf("list%d", list.Pos()), marker: string(list.Marker)})
-			ordinal++
+			if isTask(item) {
+				kind = "checklist"
+			}
+			itemID := fmt.Sprintf("item%d", item.Pos())
+			first := true
+			if item.FirstChild() == nil {
+				blocks = append(blocks, block{node: item, start: lineStart(source, item.Pos()), kind: kind, ordinal: ordinal, depth: depth, listID: id, container: fmt.Sprintf("list%d", list.Pos()), marker: string(list.Marker), item: itemID})
+			}
 			for child := item.FirstChild(); child != nil; child = child.NextSibling() {
 				if nested, ok := child.(*ast.List); ok {
 					flattenList(nested, depth+1, id)
+				} else {
+					blocks = append(blocks, block{node: child, start: lineStart(source, child.Pos()), kind: kind, ordinal: ordinal, depth: depth, listID: id, container: fmt.Sprintf("list%d", list.Pos()), marker: string(list.Marker), item: itemID, continuation: !first})
+					first = false
 				}
 			}
+			ordinal++
 		}
 	}
 	for node := root.FirstChild(); node != nil; node = node.NextSibling() {
@@ -184,11 +198,12 @@ func Parse(source string) Document {
 			if ps[0].Checked || isTask(b.node) {
 				ps[0].Kind = "checklist"
 			}
-			if b.kind == "ordered" {
+			if b.marker == "." || b.marker == ")" {
 				ps[0].Ordinal = b.ordinal
 			}
 			ps[0].Depth, ps[0].ListID = b.depth, b.listID
 			ps[0].ListContainer, ps[0].ListMarker = b.container, b.marker
+			ps[0].ListItem, ps[0].ListContinuation = b.item, b.continuation
 			ps[0].ListIndent = raw[:len(raw)-len(strings.TrimLeft(raw, " \t"))]
 			ps[0].ListBaseline = listFingerprint(ps[0])
 		}
@@ -292,16 +307,23 @@ func editableList(list *ast.List, src []byte) bool {
 		if child.Kind() != ast.KindTextBlock && child.Kind() != ast.KindParagraph {
 			return false
 		}
-		if child.Lines().Len() != 1 {
-			return false
-		}
 		p := Paragraph{}
 		if !collectRuns(child, src, Run{}, &p) {
 			return false
 		}
 		for child = child.NextSibling(); child != nil; child = child.NextSibling() {
 			nested, ok := child.(*ast.List)
-			if !ok || !editableList(nested, src) {
+			if ok {
+				if !editableList(nested, src) {
+					return false
+				}
+				continue
+			}
+			if child.Kind() != ast.KindParagraph && child.Kind() != ast.KindTextBlock {
+				return false
+			}
+			p := Paragraph{}
+			if !collectRuns(child, src, Run{}, &p) {
 				return false
 			}
 		}
@@ -417,13 +439,7 @@ func convertBlock(node ast.Node, src []byte, raw string) []Paragraph {
 		}
 		node = n.FirstChild()
 	case *ast.Blockquote:
-		if n.ChildCount() > 1 {
-			return quoteParagraphs(n, src, raw)
-		}
-		if n.ChildCount() != 1 || n.FirstChild().Kind() != ast.KindParagraph {
-			return sourceLines(raw)
-		}
-		p.Kind, node = "quote", n.FirstChild()
+		return quoteParagraphs(n, src, raw)
 	case *ast.FencedCodeBlock:
 		if lang := fenceLanguage(n, src); lang == "chart" || lang == "mermaid" || lang == "d2" || lang == "goat" {
 			// A diagram/chart fence renders as a figure (like math): the raw
@@ -450,50 +466,6 @@ func convertBlock(node ast.Node, src []byte, raw string) []Paragraph {
 		return sourceLines(raw)
 	}
 	return []Paragraph{p}
-}
-
-// quoteParagraphs splits a blockquote of several paragraphs into one quote
-// paragraph each. The ">" line between two paragraphs is their separator, so
-// unedited paragraphs keep their exact bytes.
-func quoteParagraphs(quote *ast.Blockquote, src []byte, raw string) []Paragraph {
-	nl := "\n"
-	if strings.Contains(raw, "\r\n") {
-		nl = "\r\n"
-	}
-	var groups [][]string
-	current := []string{}
-	for _, line := range strings.Split(raw, "\n") {
-		line = strings.TrimSuffix(line, "\r")
-		if strings.TrimSpace(line) == ">" {
-			if len(current) == 0 {
-				return sourceLines(raw) // two marker lines in a row
-			}
-			groups, current = append(groups, current), []string{}
-			continue
-		}
-		current = append(current, line)
-	}
-	if len(current) == 0 {
-		return sourceLines(raw)
-	}
-	groups = append(groups, current)
-	if len(groups) != quote.ChildCount() {
-		return sourceLines(raw)
-	}
-	out := make([]Paragraph, 0, len(groups))
-	child := quote.FirstChild()
-	for _, group := range groups {
-		if child.Kind() != ast.KindParagraph {
-			return sourceLines(raw)
-		}
-		p := Paragraph{Kind: "quote", Runs: []Run{}, Raw: strings.Join(group, nl), Separator: nl + ">" + nl}
-		if !collectRuns(child, src, Run{}, &p) {
-			return sourceLines(raw)
-		}
-		out = append(out, p)
-		child = child.NextSibling()
-	}
-	return out
 }
 
 // appendMathRuns splits text on inline math ($...$), keeping the exact source
@@ -763,6 +735,7 @@ func fingerprint(p Paragraph) string {
 	p.ID, p.Raw, p.RawBase64, p.Prefix, p.Separator, p.Baseline, p.NextID = "", "", "", "", "", "", ""
 	p.ListIndent, p.ListID, p.ListBaseline = "", "", ""
 	p.ListContainer, p.ListMarker = "", ""
+	p.ListItem = ""
 	normalized := Paragraph{Runs: []Run{}}
 	for _, run := range p.Runs {
 		appendRun(&normalized, run)
@@ -857,6 +830,11 @@ func Serialize(doc Document) string {
 		}
 		if i+1 < len(doc.Paragraphs) {
 			next := doc.Paragraphs[i+1]
+			if next.ListContinuation && isList(p) && p.ListID == next.ListID {
+				for strings.Count(separator, "\n") < 2 {
+					separator += newlineStyle(separator)
+				}
+			}
 			// CommonMark needs a blank line when a new nested list starts
 			// above 1, or its first item is empty ("- " can be Setext).
 			ordered := next.Kind == "ordered" || (next.Kind == "checklist" && next.Ordinal > 0)
@@ -933,6 +911,13 @@ func newlineStyle(separator string) string {
 }
 
 func serializeParagraph(p Paragraph) string {
+	if p.ListContinuation {
+		body := p
+		body.Kind = "body"
+		body.Depth = 0
+		body.ListContinuation = false
+		return serializeParagraph(body)
+	}
 	if p.Kind == "table" {
 		return serializeTable(p)
 	}
@@ -1026,7 +1011,8 @@ func blockPrefix(p Paragraph, value string) string {
 		}
 		value = prefix + "[" + mark + "] " + value
 	case "quote":
-		value = "> " + strings.ReplaceAll(value, "\n", "\n> ")
+		prefix := strings.Repeat("> ", max(1, p.Depth+1))
+		value = prefix + strings.ReplaceAll(value, "\n", "\n"+prefix)
 	}
 	return value
 }

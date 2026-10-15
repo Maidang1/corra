@@ -48,6 +48,7 @@
     [self replaceTable:tableRange paragraph:p row:r column:c];
 }
 - (void)replaceTable:(NSRange)tableRange paragraph:(NSDictionary *)p row:(NSInteger)r column:(NSInteger)c {
+    [self beginStructuralCommand];
     NSDictionary *ending = _emptyParagraph;
     NSAttributedString *value = [self attributedDocument:@{@"paragraphs":@[p]}];
     _emptyParagraph=ending;
