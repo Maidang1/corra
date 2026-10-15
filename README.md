@@ -87,10 +87,9 @@ Windows and Linux in parallel and uploads them to a draft release
 
 ### Known limits (v0.2)
 
-- go-latex cannot yet typeset TeX scripts (`^`, `_`); simple ones are
-  transliterated to Unicode (E=mc²); complex formulas show their source.
-  MathJax extensions (mhchem chemistry, equation auto-numbering) need a JS
-  engine and are out of scope
+- The native math renderer supports scripts and common symbols; unsupported
+  expressions remain editable as source. Full MathJax extensions (including
+  mhchem chemistry and equation auto-numbering) are not implemented
 - The mermaid WASM renderer is not pixel-identical to upstream mermaid;
   `%%{init}%%` directives are ignored
 - Diagrams render on a light card in both themes (by design, like GitHub)
@@ -176,9 +175,8 @@ Linux 三平台安装包并上传到草稿 Release（见
 
 ### 已知限制（v0.2）
 
-- go-latex 暂不支持 TeX 上下标（`^`、` _`）：简单公式转写为 Unicode
-  （E=mc²），复杂公式显示源码；mhchem 化学式、公式自动编号等 MathJax
-  扩展依赖 JS 引擎，不在范围内
+- 原生数学渲染器支持上下标和常用符号；不支持的表达式保留为可编辑源码。
+  mhchem 化学式、公式自动编号等完整 MathJax 扩展尚未实现
 - mermaid 的 WASM 渲染器与官方不完全像素一致，`%%{init}%%` 指令被忽略
 - 图表在两个主题下都渲染在浅色卡片上（刻意设计，与 GitHub 一致）
 - 自定义 CSS 主题与 iframe/视频嵌入需要 webview，Corra 刻意不含
@@ -230,13 +228,21 @@ Markdown 源码仍可随时切换；不提供 iCloud 同步、Apple 账户或多
 ### Rich Editor Boundaries / 富文本编辑范围
 
 The native editor supports simple paragraphs, headings, bold/italic/strike/inline
-code, links, quotes, single-level lists and checklists. Complex Markdown (tables,
-images, code fences, math, diagrams, nested lists, HTML, references) is kept as a
-protected source block, not flattened into text. Use its source action to edit,
-or **Reading preview** to see the full renderer. This is not full Apple Notes
-feature parity: in-place table/image editing and iCloud collaboration are not
-implemented. Unedited blocks preserve their original bytes; edited supported
-paragraphs may normalize Markdown spelling.
+code, titled/resolved reference links, quotes, nested lists and checklists.
+Tab/Shift+Tab and Cmd+]/Cmd+[ indent/outdent list items with their descendants;
+empty nested items outdent on Return. Native tables provide row/column insertion,
+deletion, movement and alignment in their context menu. Cmd+Return inserts a row,
+Cmd+Shift+Backspace deletes a body row, and tab-separated clipboard data pastes as
+a grid. Code block selections indent/outdent without replacing their contents.
+Typing highlight, superscript, subscript and common inline HTML updates the rich
+format immediately. Click an image to edit its Markdown in place.
+
+Multi-paragraph list items, nested quotes, footnotes, HTML/media and other complex
+constructs can still require source editing. Advanced mathematical extensions and
+visual table/image drag handles do not yet match Typora. Unedited blocks preserve
+their original bytes; edited paragraphs may normalize Markdown spelling, including
+resolved references becoming inline links while retaining their destinations and
+titles. These changes do not add iCloud collaboration.
 
 原生编辑器支持普通段落、标题、粗体/斜体/删除线/行内代码、链接、引用、
 单层列表和清单。表格、图片、代码块、公式、图表、嵌套列表等复杂内容以
