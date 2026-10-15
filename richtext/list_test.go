@@ -131,11 +131,9 @@ func TestNewMixedNestedListsSerializeAsOneTree(t *testing.T) {
 
 func TestUnsupportedNestedListKeepsEntireSource(t *testing.T) {
 	for _, source := range []string{
-		"- parent\n  - child\n\n    second paragraph\n- sibling",
+		"- parent\n  - child\n\n        indented code\n- sibling",
 		"- parent\n  > quote\n- sibling",
 		"- parent\n  - ![image](image.png)\n- sibling",
-		"- parent\n  - child\n    continuation\n- sibling",
-		"3. parent\n   7. child\n4. end",
 		"- parent\n  - \n  - next\n- end",
 	} {
 		t.Run(source, func(t *testing.T) {

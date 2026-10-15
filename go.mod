@@ -8,6 +8,7 @@ require (
 	git.sr.ht/~sbinet/gg v0.8.0
 	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/bep/goat v0.5.0
+	github.com/dop251/goja v0.0.0-20240927123429-241b342198c2
 	github.com/egoist/mygo v0.5.1
 	github.com/gpdf-dev/gpdf v1.0.13
 	github.com/srwiley/oksvg v0.0.0-20221011165216-be6e8873101c
@@ -26,7 +27,6 @@ require (
 	github.com/andybalholm/cascadia v1.3.2 // indirect
 	github.com/dlclark/regexp2 v1.11.4 // indirect
 	github.com/dlclark/regexp2/v2 v2.2.1 // indirect
-	github.com/dop251/goja v0.0.0-20240927123429-241b342198c2 // indirect
 	github.com/ebitengine/purego v0.11.1 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.4+incompatible // indirect
 	github.com/go-text/typesetting v0.3.5 // indirect

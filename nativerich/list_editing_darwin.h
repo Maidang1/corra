@@ -10,6 +10,12 @@
         NSUInteger index=[ranges indexOfObject:value];
         NSDictionary *p=CRParagraphAt(self,value.rangeValue.location);
         if (!CRList(p) || index==NSNotFound) return;
+        if ([p[@"listContinuation"] boolValue] && p[@"listItem"]) {
+            for (NSInteger parent=(NSInteger)index-1; parent>=0; parent--) {
+                NSDictionary *candidate=CRParagraphAt(self,[ranges[parent] rangeValue].location);
+                if ([candidate[@"listItem"] isEqual:p[@"listItem"]] && ![candidate[@"listContinuation"] boolValue]) { index=parent; p=candidate; break; }
+            }
+        }
         if ([affected containsIndex:index]) continue;
         NSInteger depth=[p[@"depth"] integerValue];
         if (!outdent) {
@@ -24,21 +30,26 @@
         [roots addIndex:index]; [affected addIndex:index];
         for (NSUInteger child=index+1; child<ranges.count; child++) {
             NSDictionary *next=CRParagraphAt(self,[ranges[child] rangeValue].location);
-            if (!CRList(next) || [next[@"depth"] integerValue]<=depth) break;
+            BOOL continuation=[next[@"listContinuation"] boolValue] && p[@"listItem"] && [next[@"listItem"] isEqual:p[@"listItem"]];
+            if (!CRList(next) || ([next[@"depth"] integerValue]<=depth && !continuation)) break;
             [affected addIndex:child];
         }
     }
     if (!affected.count) return;
+    [self beginStructuralCommand];
     NSMutableAttributedString *after=[_text.textStorage mutableCopy];
     NSMutableDictionary *destinations=[NSMutableDictionary dictionary];
+    NSMutableDictionary *itemDestinations=[NSMutableDictionary dictionary];
     __block NSDictionary *empty=nil;
     [affected enumerateIndexesUsingBlock:^(NSUInteger index, BOOL *stop) {
         NSRange range=[ranges[index] rangeValue];
         NSMutableDictionary *p=[CRParagraphAt(self,range.location) mutableCopy];
+        NSString *item=p[@"listItem"];
         NSInteger depth=[p[@"depth"] integerValue];
-        if (outdent && depth==0 && [roots containsIndex:index]) {
+        NSDictionary *owner=item ? itemDestinations[item] : nil;
+        if (outdent && depth==0 && ([roots containsIndex:index] || (owner && CRKind(owner,@"body")))) {
             p[@"kind"]=@"body";
-            for (NSString *key in @[@"depth",@"ordinal",@"checked",@"listIndent",@"listId",@"listBaseline",@"listContainer",@"listMarker"]) [p removeObjectForKey:key];
+            for (NSString *key in @[@"depth",@"ordinal",@"checked",@"listIndent",@"listId",@"listBaseline",@"listContainer",@"listMarker",@"listItem",@"listContinuation"]) [p removeObjectForKey:key];
         } else {
             NSInteger targetDepth=MAX(0,depth+(outdent ? -1 : 1));
             p[@"depth"]=@(targetDepth);
@@ -59,8 +70,12 @@
                 }
                 p[@"listContainer"]=destination[@"listContainer"] ?: NSUUID.UUID.UUIDString;
                 p[@"listMarker"]=destination[@"listMarker"] ?: (CROrdered(p) ? @"." : @"-");
+            } else if (owner && [p[@"listContinuation"] boolValue]) {
+                p[@"listContainer"]=owner[@"listContainer"];
+                p[@"listMarker"]=owner[@"listMarker"];
             }
         }
+        if (item && ![p[@"listContinuation"] boolValue]) itemDestinations[item]=p;
         if (range.length) [after addAttribute:CRParagraph value:p range:range];
         else empty=p;
     }];

@@ -28,6 +28,6 @@
         };
         start=adjust(start); end=adjust(end); changed=YES;
     }
-    if (changed) [self replace:NSMakeRange(0,_text.string.length) with:after selection:NSMakeRange(start,MAX(0,end-start))];
+    if (changed) { [self beginStructuralCommand]; [self replace:NSMakeRange(0,_text.string.length) with:after selection:NSMakeRange(start,MAX(0,end-start))]; }
     return YES;
 }

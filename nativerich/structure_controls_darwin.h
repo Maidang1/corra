@@ -6,6 +6,9 @@
     modifiers &= ~(NSEventModifierFlagCapsLock | NSEventModifierFlagNumericPad | NSEventModifierFlagFunction);
     NSString *key=event.charactersIgnoringModifiers;
     BOOL table=CRCellAt(self.owner,self.selectedRange.location)!=nil;
+    if (modifiers==NSEventModifierFlagOption && [key isEqual:@"\r"] && CRList(CRParagraphAt(self.owner,self.selectedRange.location))) {
+        [self.owner continueListParagraph]; return YES;
+    }
     if (table && modifiers==NSEventModifierFlagCommand && [key isEqual:@"\r"]) {
         [self.owner tableCommand:@"table:row-below"]; return YES;
     }
@@ -13,7 +16,7 @@
         [self.owner tableCommand:@"table:delete-row"]; return YES;
     }
     NSDictionary *paragraph=CRParagraphAt(self.owner,self.selectedRange.location);
-    if (modifiers==NSEventModifierFlagCommand && ([@[@"[",@"]"] containsObject:key]) && (CRList(paragraph) || CRKind(paragraph,@"code"))) {
+    if (modifiers==NSEventModifierFlagCommand && ([@[@"[",@"]"] containsObject:key]) && (CRList(paragraph) || CRKind(paragraph,@"code") || CRKind(paragraph,@"quote"))) {
         [self.owner format:[key isEqual:@"["] ? @"outdent" : @"indent"]; return YES;
     }
     return NO;
@@ -41,7 +44,7 @@
         @[@"在左侧插入列",@"table:column-left"], @[@"在右侧插入列",@"table:column-right"],
         @[@"删除当前列",@"table:delete-column"], @[@"左移当前列",@"table:column-leftward"], @[@"右移当前列",@"table:column-rightward"],
         @[@"当前列左对齐",@"table:align-left"], @[@"当前列居中",@"table:align-center"], @[@"当前列右对齐",@"table:align-right"]
-    ] : @[@[@"增加列表缩进",@"indent"], @[@"减少列表缩进",@"outdent"]];
+    ] : @[@[@"增加列表缩进",@"indent"], @[@"减少列表缩进",@"outdent"], @[@"在列表项内新建段落",@"list-paragraph"]];
     for (NSArray *entry in entries) {
         NSMenuItem *item=[[NSMenuItem alloc] initWithTitle:entry[0] action:@selector(structuralAction:) keyEquivalent:@""];
         item.target=self; item.representedObject=entry[1];

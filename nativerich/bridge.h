@@ -23,6 +23,7 @@ void cr_reveal_heading(uintptr_t editor, int index);
 void cr_print(uintptr_t editor);
 
 int cr_test_loop(void);
+int cr_test_finish_event(uintptr_t editor);
 void cr_test_exit(int code);
 void cr_test_main(uintptr_t handle);
 void cr_test_callback(uintptr_t handle);

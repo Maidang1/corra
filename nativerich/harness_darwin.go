@@ -22,6 +22,9 @@ func nativeTestMain(fn func()) {
 func cr_test_callback(handle C.uintptr_t)  { cgo.Handle(handle).Value().(func())() }
 func nativeTestWindow() uintptr            { return uintptr(C.cr_test_window()) }
 func nativeTestCloseWindow(window uintptr) { C.cr_test_close_window(C.uintptr_t(window)) }
+
+// Call outside nativeTestMain so AppKit can finish its outer input event.
+func nativeTestFinishEvent(e *Editor) bool { return C.cr_test_finish_event(e.native) != 0 }
 func nativeTestSelect(e *Editor, start, length int) {
 	C.cr_test_select(e.native, C.int(start), C.int(length))
 }
