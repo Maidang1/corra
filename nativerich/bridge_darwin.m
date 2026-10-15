@@ -13,6 +13,7 @@ static NSString *const CRCode = @"CorraCode";
 static NSString *const CRTableCell = @"CorraTableCell";
 static NSString *const CRMathText = @"CorraMathText";
 static NSString *const CRMathExpr = @"CorraMathExpr";
+static NSString *const CRLinkTitle = @"CorraLinkTitle";
 static NSString *const CRUnderline = @"CorraUnderline";
 static NSString *const CRHighlight = @"CorraHighlight";
 static NSString *const CRSup = @"CorraSup";
@@ -54,6 +55,11 @@ extern char *cr_html_to_markdown(const char *html);
 - (void)source;
 - (BOOL)allowRange:(NSRange)range;
 - (void)format:(NSString *)command;
+- (void)tableCommand:(NSString *)command;
+- (void)replaceTable:(NSRange)range paragraph:(NSDictionary *)p row:(NSInteger)row column:(NSInteger)column;
+- (BOOL)pasteTableText:(NSString *)text;
+- (void)indentList:(BOOL)outdent;
+- (BOOL)indentCode:(BOOL)outdent;
 - (void)replace:(NSRange)range with:(NSAttributedString *)value selection:(NSRange)selection;
 - (void)restore:(NSAttributedString *)value selection:(NSRange)selection typing:(NSDictionary *)typing ending:(NSDictionary *)ending;
 - (NSDictionary *)document;
@@ -98,10 +104,16 @@ static BOOL CRBlockEnding(NSDictionary *p) {
     return [[separator stringByReplacingOccurrencesOfString:@"\r" withString:@""] rangeOfString:@"\n\n"].location != NSNotFound;
 }
 static BOOL CRKind(NSDictionary *p, NSString *kind) { return [p[@"kind"] isEqual:kind]; }
+static BOOL CRList(NSDictionary *p) { return CRKind(p,@"bullet") || CRKind(p,@"ordered") || CRKind(p,@"checklist"); }
+static BOOL CROrdered(NSDictionary *p) { return CRKind(p,@"ordered") || (CRKind(p,@"checklist") && [p[@"ordinal"] integerValue]>0); }
 static NSDictionary *CRFresh(NSDictionary *p) {
     NSMutableDictionary *fresh = [@{@"kind": p[@"kind"] ?: @"body", @"runs": @[]} mutableCopy];
     if (p[@"level"]) fresh[@"level"] = p[@"level"];
-    if (CRKind(p,@"ordered")) fresh[@"ordinal"] = @([p[@"ordinal"] integerValue] + 1);
+    if (p[@"depth"]) fresh[@"depth"] = p[@"depth"];
+    if (p[@"listId"]) fresh[@"listId"] = p[@"listId"];
+    if (p[@"listContainer"]) fresh[@"listContainer"] = p[@"listContainer"];
+    if (p[@"listMarker"]) fresh[@"listMarker"] = p[@"listMarker"];
+    if (CROrdered(p)) fresh[@"ordinal"] = @([p[@"ordinal"] integerValue] + 1);
     return fresh;
 }
 static NSArray<NSValue *> *CRRanges(NSString *string) {
@@ -174,6 +186,31 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
         }
     }
     return ranges;
+}
+
+static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
+    NSMutableArray *result=[NSMutableArray array];
+    NSMutableDictionary *identifiers=[NSMutableDictionary dictionary];
+    NSInteger base=-1;
+    for (NSDictionary *original in paragraphs) {
+        NSMutableDictionary *p=[original mutableCopy];
+        [p removeObjectForKey:@"id"]; [p removeObjectForKey:@"nextId"];
+        if (CRList(p)) {
+            NSInteger depth=MAX(0,[p[@"depth"] integerValue]);
+            base=base<0 ? depth : MIN(base,depth);
+            p[@"depth"]=@(depth-base);
+            // Clipboard fragments form their own forest, without the omitted
+            // ancestors or identities belonging to the source document.
+            for (NSString *field in @[@"listId",@"listContainer"]) {
+                NSString *key=[NSString stringWithFormat:@"%@:%@",field,p[field] ?: @""];
+                if (!identifiers[key]) identifiers[key]=NSUUID.UUID.UUIDString;
+                p[field]=identifiers[key];
+            }
+            [p removeObjectForKey:@"listBaseline"]; [p removeObjectForKey:@"listIndent"];
+        } else base=-1;
+        [result addObject:p];
+    }
+    return result;
 }
 
 @implementation CREditor
@@ -252,7 +289,8 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
         cell.backgroundColor = cell.startingRow == 0 ? (_dark ? [NSColor colorWithWhite:0.235 alpha:1] : [NSColor colorWithWhite:0.95 alpha:1]) : NSColor.clearColor;
     }
     if (list || CRKind(p,@"quote")) {
-        style.firstLineHeadIndent = 30 * _zoom; style.headIndent = 30 * _zoom;
+        style.firstLineHeadIndent = (30 + (list ? MAX(0,[p[@"depth"] integerValue])*26 : 0) + (CRKind(p,@"checklist") && CROrdered(p) ? 24 : 0)) * _zoom;
+        style.headIndent = style.firstLineHeadIndent;
     }
     out[NSParagraphStyleAttributeName] = style;
     [out removeObjectForKey:NSBackgroundColorAttributeName];
@@ -360,6 +398,7 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
         if ([run[@"sup"] boolValue]) attrs[CRSup] = @YES;
         if ([run[@"sub"] boolValue]) attrs[CRSub] = @YES;
         if ([run[@"link"] length]) attrs[NSLinkAttributeName] = run[@"link"];
+        if ([run[@"linkTitle"] length]) attrs[CRLinkTitle] = run[@"linkTitle"];
         [result appendAttributedString:[[NSAttributedString alloc] initWithString:run[@"text"] ?: @"" attributes:[self visual:attrs paragraph:paragraph]]];
     }
     return result;
@@ -437,7 +476,15 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
         NSRange range = CRContent(_text.string,v.rangeValue);
         if (range.length == 0 && range.location == _text.string.length && range.location > 0 && CRCellAt(self,range.location-1)) continue;
         NSTextTableBlock *cell = CRCellAt(self,range.location);
-        if (selection.location != NSNotFound) { range=NSIntersectionRange(range,selection); if (!range.length) continue; }
+        if (selection.location != NSNotFound) {
+            BOOL selectedEmptyCell=NO;
+            if (cell && !range.length) {
+                NSRange tableRange=CRTableRange(self,cell.table);
+                selectedEmptyCell=selection.location<=tableRange.location && NSMaxRange(selection)>=NSMaxRange(tableRange);
+            }
+            range=NSIntersectionRange(range,selection);
+            if (!range.length && !selectedEmptyCell) continue;
+        }
         NSMutableDictionary *p = [CRParagraphAt(self,range.location) mutableCopy];
         BOOL figure=CRKind(p,@"math") || CRKind(p,@"image") || CRKind(p,@"diagram");
         if (figure && ![[_text.string substringWithRange:range] isEqual:@"\uFFFC"]) {
@@ -464,6 +511,7 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
                 if ([attrs[CRSup] boolValue]) base[@"sup"]=@YES;
                 if ([attrs[CRSub] boolValue]) base[@"sub"]=@YES;
                 if (attrs[NSLinkAttributeName]) base[@"link"]=[attrs[NSLinkAttributeName] description];
+                if (attrs[NSLinkAttributeName] && attrs[CRLinkTitle]) base[@"linkTitle"]=attrs[CRLinkTitle];
                 // U+2028 line separators become break runs so a soft visual
                 // line survives the round-trip as a Markdown hard break.
                 NSArray *pieces=[chunk componentsSeparatedByString:@"\u2028"];
@@ -583,6 +631,12 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
 }
 - (void)format:(NSString *)command {
     if (!_text.editable || _text.hasMarkedText) return;
+    if ([command hasPrefix:@"table:"]) { [self tableCommand:command]; return; }
+    if ([command isEqual:@"indent"] || [command isEqual:@"outdent"]) {
+        BOOL outdent=[command isEqual:@"outdent"];
+        if (![self indentCode:outdent]) [self indentList:outdent];
+        return;
+    }
     NSRange selection = _text.selectedRange;
     for (NSValue *v in CRSelectedParagraphs(self)) if (CRKind(CRParagraphAt(self,v.rangeValue.location),@"opaque")) { [self source]; return; }
     if ([command hasPrefix:@"link:"]) {
@@ -634,6 +688,9 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
             NSMutableDictionary *p=[CRParagraphAt(self,r.location) mutableCopy];
             p[@"kind"]=kind;
             [p removeObjectForKey:@"level"]; [p removeObjectForKey:@"checked"]; [p removeObjectForKey:@"ordinal"];
+            if (![@[@"bullet",@"ordered",@"checklist"] containsObject:kind]) {
+                for (NSString *field in @[@"depth",@"listId",@"listIndent",@"listBaseline",@"listContainer",@"listMarker"]) [p removeObjectForKey:field];
+            }
             if ([kind isEqual:@"heading"]) p[@"level"]=@(level);
             if ([kind isEqual:@"ordered"]) p[@"ordinal"]=@1;
             if (r.length) [after addAttribute:CRParagraph value:p range:r];
@@ -641,11 +698,12 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
         }
         if (clear) {
             // Clear strips the inline traits as well as the paragraph kind.
-            NSArray *traits=@[CRBold,CRItalic,CRCode,CRUnderline,CRHighlight,CRSup,CRSub,NSStrikethroughStyleAttributeName,NSLinkAttributeName];
+            NSArray *traits=@[CRBold,CRItalic,CRCode,CRUnderline,CRHighlight,CRSup,CRSub,NSStrikethroughStyleAttributeName,NSLinkAttributeName,CRLinkTitle];
             if (selection.length) for (NSString *trait in traits) [after removeAttribute:trait range:selection];
             else {
                 NSMutableDictionary *p=[CRParagraphAt(self,selection.location) mutableCopy];
                 p[@"kind"]=@"body"; [p removeObjectForKey:@"level"]; [p removeObjectForKey:@"checked"]; [p removeObjectForKey:@"ordinal"];
+                for (NSString *field in @[@"depth",@"listId",@"listIndent",@"listBaseline",@"listContainer",@"listMarker"]) [p removeObjectForKey:field];
                 NSMutableDictionary *typing=[_text.typingAttributes mutableCopy];
                 for (NSString *trait in traits) [typing removeObjectForKey:trait];
                 typing[CRParagraph]=p;
@@ -668,7 +726,11 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
     NSDictionary *p=CRParagraphAt(self,paragraph.location);
     BOOL list=CRKind(p,@"checklist") || CRKind(p,@"bullet") || CRKind(p,@"ordered");
     // Enter on an empty list item or quote line leaves the block (Typora).
-    if ((list || CRKind(p,@"quote")) && CRContent(_text.string,paragraph).length==0) { [self format:@"body"]; return; }
+    if ((list || CRKind(p,@"quote")) && CRContent(_text.string,paragraph).length==0) {
+        if (list && [p[@"depth"] integerValue]>0) [self indentList:YES];
+        else [self format:@"body"];
+        return;
+    }
     if (CRKind(p,@"opaque")) { [self source]; return; }
     NSRange content=CRContent(_text.string,paragraph);
     if (CRKind(p,@"code")) {
@@ -718,24 +780,39 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
 // renumber keeps each run of ordered items counting up from its first
 // ordinal, so inserting or removing an item never leaves a duplicate number.
 - (void)renumber {
-    NSInteger expected=0;
+    NSMutableDictionary<NSNumber *,NSNumber *> *expected=[NSMutableDictionary dictionary];
+    NSMutableDictionary<NSNumber *,NSString *> *containers=[NSMutableDictionary dictionary];
+    NSDictionary *previous=nil;
     BOOL wasSuppress=_suppress; _suppress=YES;
     for (NSValue *v in CRRanges(_text.string)) {
         NSRange r=v.rangeValue;
         NSDictionary *p=CRParagraphAt(self,r.location);
-        if (!CRKind(p,@"ordered")) { expected=0; continue; }
+        if (!CRList(p)) { [expected removeAllObjects]; [containers removeAllObjects]; previous=nil; continue; }
+        if (previous && ((p[@"listId"] && previous[@"listId"] && ![p[@"listId"] isEqual:previous[@"listId"]]) ||
+            (!p[@"listId"] && !previous[@"listId"] && CRBlockEnding(previous)))) { [expected removeAllObjects]; [containers removeAllObjects]; }
+        NSNumber *depth=@(MAX(0,[p[@"depth"] integerValue]));
+        for (NSNumber *key in containers.allKeys) if (key.integerValue>depth.integerValue) { [expected removeObjectForKey:key]; [containers removeObjectForKey:key]; }
+        NSString *container=p[@"listContainer"] ?: @"";
+        if (containers[depth] && ![containers[depth] isEqual:container]) [expected removeObjectForKey:depth];
+        containers[depth]=container;
+        previous=p;
+        if (!CROrdered(p)) { [expected removeObjectForKey:depth]; continue; }
         NSInteger ordinal=[p[@"ordinal"] integerValue];
-        if (!expected) { expected=MAX(ordinal,1)+1; continue; }
-        if (ordinal!=expected) {
-            NSMutableDictionary *updated=[p mutableCopy]; updated[@"ordinal"]=@(expected);
+        NSInteger number=expected[depth] ? expected[depth].integerValue : MAX(ordinal,1);
+        if (ordinal!=number) {
+            NSMutableDictionary *updated=[p mutableCopy]; updated[@"ordinal"]=@(number);
             if (r.length) [_text.textStorage addAttribute:CRParagraph value:updated range:r];
             else { NSMutableDictionary *typing=[_text.typingAttributes mutableCopy]; typing[CRParagraph]=updated; _text.typingAttributes=typing; _emptyParagraph=updated; }
         }
-        expected++;
+        expected[depth]=@(number+1);
     }
     _suppress=wasSuppress;
     [_text setNeedsDisplay:YES];
 }
+#include "table_editing_darwin.h"
+#include "list_editing_darwin.h"
+#include "code_editing_darwin.h"
+
 - (BOOL)moveTableCell:(BOOL)backward {
     if (!_text.editable || _text.hasMarkedText) return NO;
     NSTextTableBlock *cell = CRCellAt(self,_text.selectedRange.location);
@@ -791,14 +868,15 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
         else if ([@[@"- ",@"* ",@"+ "] containsObject:prefix]) kind=@"bullet";
         else if ([prefix isEqual:@"> "]) kind=@"quote";
     }
-    if ((CRKind(paragraph,@"body") || CRKind(paragraph,@"bullet")) && ([@[@"[ ] ",@"[x] ",@"[X] "] containsObject:prefix])) {
+    if ((CRKind(paragraph,@"body") || CRKind(paragraph,@"bullet") || CRKind(paragraph,@"ordered")) && ([@[@"[ ] ",@"[x] ",@"[X] "] containsObject:prefix])) {
         kind=@"checklist"; checked=![[prefix substringWithRange:NSMakeRange(1,1)] isEqual:@" "];
+        if (CROrdered(paragraph)) ordinal=[paragraph[@"ordinal"] integerValue];
     }
     if (kind) {
         NSMutableDictionary *updated = [paragraph mutableCopy]; updated[@"kind"]=kind;
         [updated removeObjectForKey:@"level"]; [updated removeObjectForKey:@"ordinal"]; [updated removeObjectForKey:@"checked"];
         if (level) updated[@"level"]=@(level);
-        if ([kind isEqual:@"ordered"]) updated[@"ordinal"]=@(ordinal);
+        if ([kind isEqual:@"ordered"] || ([kind isEqual:@"checklist"] && ordinal>0)) updated[@"ordinal"]=@(ordinal);
         if ([kind isEqual:@"checklist"]) updated[@"checked"]=@(checked);
         NSMutableAttributedString *after = [_text.textStorage mutableCopy];
         [after replaceCharactersInRange:beforeCaret withString:@""];
@@ -832,7 +910,7 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
             if ([self renderSource:[_text.string substringWithRange:CRContent(_text.string,whole)] inRange:whole]) return;
         }
     }
-    NSArray *patterns = @[@"\\$[^$\\n]+\\$$", @"\\*\\*[^*\\n]+\\*\\*$", @"__[^_\\n]+__$", @"~~[^~\\n]+~~$", @"`[^`\\n]+`$", @"\\*[^*\\n]+\\*$", @"_[^_\\n]+_$", @"\\[[^\\]\\n]+\\]\\([^\\s)]+\\)$"];
+    NSArray *patterns = @[@"\\$[^$\\n]+\\$$", @"\\*\\*[^*\\n]+\\*\\*$", @"__[^_\\n]+__$", @"~~[^~\\n]+~~$", @"`[^`\\n]+`$", @"\\*[^*\\n]+\\*$", @"_[^_\\n]+_$", @"==[^=\\n]+==$", @"\\^[^^\\n]+\\^$", @"~[^~\\n]+~$", @"<u>[^\\n]+</u>$", @"<mark>[^\\n]+</mark>$", @"<sup>[^\\n]+</sup>$", @"<sub>[^\\n]+</sub>$", @"\\[[^\\]\\n]+\\]\\([^\\n]+\\)$"];
     for (NSString *pattern in patterns) {
         NSTextCheckingResult *match = [[NSRegularExpression regularExpressionWithPattern:pattern options:0 error:NULL] firstMatchInString:prefix options:0 range:NSMakeRange(0,prefix.length)];
         if (!match) continue;
@@ -848,7 +926,7 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
         if (paragraphs.count != 1 || !CRKind(paragraphs[0],@"body")) continue;
         NSArray *runs = paragraphs[0][@"runs"];
         BOOL styled=NO;
-        for (NSDictionary *run in runs) styled |= [run[@"bold"] boolValue] || [run[@"italic"] boolValue] || [run[@"strike"] boolValue] || [run[@"code"] boolValue] || [run[@"link"] length] > 0 || [run[@"math"] length] > 0;
+        for (NSDictionary *run in runs) styled |= [run[@"bold"] boolValue] || [run[@"italic"] boolValue] || [run[@"strike"] boolValue] || [run[@"code"] boolValue] || [run[@"underline"] boolValue] || [run[@"highlight"] boolValue] || [run[@"sup"] boolValue] || [run[@"sub"] boolValue] || [run[@"link"] length] > 0 || [run[@"math"] length] > 0;
         if (!styled) continue;
         NSRange range=NSMakeRange(beforeCaret.location+match.range.location,match.range.length);
         NSTextTableBlock *cell=CRCellAt(self,range.location);
@@ -874,7 +952,10 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
 }
 - (NSRect)markerRect:(NSRange)range {
     NSRect line=[self markerLineRect:range];
-    return NSMakeRect(_text.textContainerOrigin.x+4*_zoom,NSMidY(line)-9.5*_zoom,19*_zoom,19*_zoom);
+    NSDictionary *p=CRParagraphAt(self,range.location);
+    CGFloat indent=CRList(p) ? MAX(0,[p[@"depth"] integerValue])*26*_zoom : 0;
+    if (CRKind(p,@"checklist") && CROrdered(p)) indent+=24*_zoom;
+    return NSMakeRect(_text.textContainerOrigin.x+4*_zoom+indent,NSMidY(line)-9.5*_zoom,19*_zoom,19*_zoom);
 }
 - (void)toggleCheckbox:(NSUInteger)location {
     if (!_text.editable || _text.hasMarkedText) return;
@@ -989,6 +1070,11 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
 // renderDraftGroup re-renders the group the caret just left, if it parses as
 // renderable blocks.
 - (void)renderDraftGroup:(NSRange)group {
+    // Source edits can change its length before a selection notification.
+    // Derive the current block range instead of using a stale UTF-16 length.
+    if (group.location==NSNotFound || group.location>_text.string.length) return;
+    group=[self draftGroupAt:group.location];
+    if (group.location==NSNotFound) return;
     [self renderSource:[_text.string substringWithRange:CRContent(_text.string,group)] inRange:group];
 }
 
@@ -996,6 +1082,7 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
 - (void)finishDraftGroup {
     if (_suppress || _text.hasMarkedText) return;
     NSRange group=_draftGroup;
+    if (group.location!=NSNotFound && group.location<=_text.string.length) group=[self draftGroupAt:group.location];
     _draftGroup=NSMakeRange(NSNotFound,0);
     NSUInteger caret=_text.selectedRange.location;
     if (group.location!=NSNotFound && (caret<group.location || caret>NSMaxRange(group))) [self renderDraftGroup:group];
@@ -1161,6 +1248,7 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
         return;
     }
     if ([self.owner autoPair:value range:effective]) return;
+    NSDictionary *destinationParagraph=CRParagraphAt(self.owner,effective.location);
     BOOL wasSuppress=self.owner.suppress;
     if (targetCell) {
         NSString *string=[value isKindOfClass:NSAttributedString.class] ? [value string] : value;
@@ -1172,6 +1260,12 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
     self.owner.suppress=YES;
     [super insertText:value replacementRange:range];
     if (!wasSuppress && !self.hasMarkedText) {
+        NSString *inserted=[value isKindOfClass:NSAttributedString.class] ? [value string] : value;
+        if (inserted.length && [inserted rangeOfCharacterFromSet:NSCharacterSet.newlineCharacterSet].location==NSNotFound && effective.location+inserted.length<=self.string.length) {
+            // AppKit can inherit the preceding item's metadata at an empty
+            // paragraph. Use the destination identity after structural edits.
+            [self.textStorage addAttribute:CRParagraph value:destinationParagraph range:NSMakeRange(effective.location,inserted.length)];
+        }
         [self.owner normalize];
         NSString *string=[value isKindOfClass:NSAttributedString.class] ? [value string] : value;
         if (string.length && [string rangeOfCharacterFromSet:NSCharacterSet.newlineCharacterSet].location==NSNotFound) [self.owner applyInputRules];
@@ -1192,16 +1286,16 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
 }
 - (void)insertTab:(id)sender {
     if ([self.owner moveTableCell:NO]) return;
-    // Nested lists are not editable yet; a literal tab would only turn the
-    // item into "&#9;" text, so Tab stays inert inside list items.
     NSDictionary *p=CRParagraphAt(self.owner,self.selectedRange.location);
-    if (CRKind(p,@"bullet") || CRKind(p,@"ordered") || CRKind(p,@"checklist")) return;
+    if (CRList(p)) { [self.owner indentList:NO]; return; }
+    if (CRKind(p,@"code") && self.selectedRange.length && [self.owner indentCode:NO]) return;
     [super insertTab:sender];
 }
 - (void)insertBacktab:(id)sender {
     if ([self.owner moveTableCell:YES]) return;
     NSDictionary *p=CRParagraphAt(self.owner,self.selectedRange.location);
-    if (CRKind(p,@"bullet") || CRKind(p,@"ordered") || CRKind(p,@"checklist")) { [self.owner format:@"body"]; return; }
+    if (CRList(p)) { [self.owner indentList:YES]; return; }
+    if (CRKind(p,@"code") && [self.owner indentCode:YES]) return;
     [super insertBacktab:sender];
 }
 - (void)deleteBackward:(id)sender {
@@ -1214,7 +1308,10 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
         NSRange paragraph=[self.string paragraphRangeForRange:NSMakeRange(selection.location,0)];
         NSDictionary *p=CRParagraphAt(e,paragraph.location);
         BOOL block=CRKind(p,@"heading") || CRKind(p,@"bullet") || CRKind(p,@"ordered") || CRKind(p,@"checklist") || CRKind(p,@"quote");
-        if (block && selection.location==paragraph.location && !CRCellAt(e,selection.location)) { [e format:@"body"]; return; }
+        if (block && selection.location==paragraph.location && !CRCellAt(e,selection.location)) {
+            if (CRList(p) && [p[@"depth"] integerValue]>0) [e indentList:YES]; else [e format:@"body"];
+            return;
+        }
     }
     if (!e.suppress && self.editable && !self.hasMarkedText && selection.length==0 && selection.location>0 && selection.location<self.string.length) {
         unichar open=[self.string characterAtIndex:selection.location-1], close=[self.string characterAtIndex:selection.location];
@@ -1297,6 +1394,11 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
         NSRect lineRect=[e markerLineRect:v.rangeValue];
         NSColor *markerColor=e.dark ? [NSColor colorWithWhite:0.70 alpha:1] : [NSColor colorWithWhite:0.35 alpha:1];
         if (CRKind(p,@"checklist")) {
+            if (CROrdered(p)) {
+                NSFont *font=[NSFont systemFontOfSize:16*e.zoom];
+                NSString *number=[NSString stringWithFormat:@"%@.",p[@"ordinal"]];
+                [number drawAtPoint:NSMakePoint(rect.origin.x-24*e.zoom,NSMidY(lineRect)-(font.ascender-font.descender)/2) withAttributes:@{NSFontAttributeName:font,NSForegroundColorAttributeName:markerColor}];
+            }
             NSRect circle=NSInsetRect(rect,1,1);
             NSBezierPath *box=[NSBezierPath bezierPathWithOvalInRect:circle];
             box.lineWidth=1.4*e.zoom;
@@ -1329,7 +1431,7 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
         if (CRKind(p,@"checklist") && NSPointInRect(point,[self.owner markerRect:v.rangeValue])) { [self.owner toggleCheckbox:v.rangeValue.location]; return; }
     }
     NSUInteger index=[self characterIndexForInsertionAtPoint:point];
-    if (index < self.string.length && (CRKind(CRParagraphAt(self.owner,index),@"math") || CRKind(CRParagraphAt(self.owner,index),@"diagram"))) { [self.owner revealSourceAt:index]; return; }
+    if (index < self.string.length && (CRKind(CRParagraphAt(self.owner,index),@"math") || CRKind(CRParagraphAt(self.owner,index),@"diagram") || CRKind(CRParagraphAt(self.owner,index),@"image"))) { [self.owner revealSourceAt:index]; return; }
     if (index < self.string.length && CRKind(CRParagraphAt(self.owner,index),@"opaque")) { [self.owner source]; return; }
     [super mouseDown:event];
 }
@@ -1365,6 +1467,7 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
     if (cell) {
         NSString *plain=[pb stringForType:NSPasteboardTypeString];
         if (plain) {
+            if ([self.owner pasteTableText:plain]) return;
             plain=[[plain componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet] componentsJoinedByString:@" "];
             NSDictionary *paragraph=CRParagraphAt(self.owner,self.selectedRange.location);
             NSDictionary *attrs=[self.owner visual:@{CRParagraph:paragraph,CRTableCell:cell} paragraph:paragraph];
@@ -1375,8 +1478,7 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
     NSData *own=[pb dataForType:CROwnPaste];
     if (own) {
         NSDictionary *document=[NSJSONSerialization JSONObjectWithData:own options:0 error:NULL];
-        NSMutableArray *paragraphs=[NSMutableArray array];
-        for (NSDictionary *original in document[@"paragraphs"]) { NSMutableDictionary *p=[original mutableCopy]; [p removeObjectForKey:@"id"]; [p removeObjectForKey:@"nextId"]; [paragraphs addObject:p]; }
+        NSArray *paragraphs=CRImportedParagraphs(document[@"paragraphs"]);
         BOOL opaque=NO; for (NSDictionary *p in paragraphs) opaque |= CRKind(p,@"opaque") || CRKind(p,@"table") || CRKind(p,@"source");
         if (opaque && self.string.length) {
             NSData *data=[NSJSONSerialization dataWithJSONObject:@{@"paragraphs":paragraphs} options:0 error:NULL];
@@ -1470,6 +1572,7 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
     [self.owner insertMarkdownText:value];
     return YES;
 }
+#include "structure_controls_darwin.h"
 @end
 
 static NSView *CRUnderlyingResponder(NSView *view, NSView *excluded) {
@@ -1509,8 +1612,8 @@ void cr_insert(uintptr_t ptr,const char *json) {
     if (!e.text.editable || e.text.hasMarkedText || ![e allowRange:selection]) return;
     NSTextTableBlock *destination=CRCellAt(e,selection.location);
     if (destination) selection=NSMakeRange(NSMaxRange(CRTableRange(e,destination.table)),0);
-    NSMutableDictionary *doc=[CRJSON(json) mutableCopy]; NSMutableArray *paragraphs=[NSMutableArray array];
-    for (NSDictionary *original in doc[@"paragraphs"]) { NSMutableDictionary *p=[original mutableCopy]; [p removeObjectForKey:@"id"]; [p removeObjectForKey:@"nextId"]; [paragraphs addObject:p]; } doc[@"paragraphs"]=paragraphs;
+    NSMutableDictionary *doc=[CRJSON(json) mutableCopy];
+    doc[@"paragraphs"]=CRImportedParagraphs(doc[@"paragraphs"]);
     NSDictionary *ending=e.emptyParagraph;
     NSMutableAttributedString *insert=[[e attributedDocument:doc] mutableCopy];
     e.emptyParagraph=ending;
@@ -1581,6 +1684,28 @@ void cr_test_selection(uintptr_t ptr,int *start,int *length) { NSRange r=CRE(ptr
 void cr_test_action(uintptr_t ptr,const char *action,const char *text) {
     CREditor *e=CRE(ptr); NSString *a=[NSString stringWithUTF8String:action], *s=[NSString stringWithUTF8String:text];
     if ([a isEqual:@"undo"]) { [e.text breakUndoCoalescing]; [e.undo undo]; }
+    else if ([a isEqual:@"key"]) {
+        NSString *characters=[s hasSuffix:@"return"] ? @"\r" : [s hasSuffix:@"backspace"] ? @"\x7f" : [s hasSuffix:@"left"] ? @"[" : @"]";
+        NSEventModifierFlags flags=NSEventModifierFlagCommand;
+        if ([s containsString:@"shift"]) flags |= NSEventModifierFlagShift;
+        NSEvent *event=[NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:flags timestamp:0 windowNumber:e.window.windowNumber context:nil characters:characters charactersIgnoringModifiers:characters isARepeat:NO keyCode:0];
+        [e.text keyDown:event];
+    }
+    else if ([a isEqual:@"context"] || [a isEqual:@"click"]) {
+        [e.text.layoutManager ensureLayoutForTextContainer:e.text.textContainer];
+        NSRange glyph=[e.text.layoutManager glyphRangeForCharacterRange:NSMakeRange(e.text.selectedRange.location,1) actualCharacterRange:NULL];
+        NSRect rect=[e.text.layoutManager boundingRectForGlyphRange:glyph inTextContainer:e.text.textContainer];
+        NSPoint point=NSMakePoint(NSMinX(rect)+e.text.textContainerOrigin.x+1,NSMidY(rect)+e.text.textContainerOrigin.y);
+        point=[e.text convertPoint:point toView:nil];
+        NSEvent *event=[NSEvent mouseEventWithType:[a isEqual:@"click"] ? NSEventTypeLeftMouseDown : NSEventTypeRightMouseDown location:point modifierFlags:0 timestamp:0 windowNumber:e.window.windowNumber context:nil eventNumber:0 clickCount:1 pressure:1];
+        if ([a isEqual:@"click"]) {
+            NSEvent *up=[NSEvent mouseEventWithType:NSEventTypeLeftMouseUp location:point modifierFlags:0 timestamp:0 windowNumber:e.window.windowNumber context:nil eventNumber:1 clickCount:1 pressure:0];
+            [NSApp postEvent:up atStart:YES];
+            [e.text mouseDown:event]; return;
+        }
+        NSMenu *menu=[e.text menuForEvent:event];
+        for (NSInteger i=0; i<menu.numberOfItems; i++) if ([[menu itemAtIndex:i].representedObject isEqual:s]) { [menu performActionForItemAtIndex:i]; break; }
+    }
     else if ([a isEqual:@"newline"]) [e.text insertNewline:nil];
     else if ([a isEqual:@"reveal"]) [e revealSourceAt:e.text.selectedRange.location];
     else if ([a isEqual:@"blur"]) [e textDidEndEditing:[NSNotification notificationWithName:NSTextDidEndEditingNotification object:e.text]];

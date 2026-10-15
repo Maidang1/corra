@@ -75,10 +75,10 @@ func TestEditOneParagraphPreservesEveryOtherByte(t *testing.T) {
 
 func TestUnsupportedMarkdownIsEditableSource(t *testing.T) {
 	for name, source := range map[string]string{
-		"reference": "[ref]: /url\n\n[reference][ref]", "html": "hello <b>world</b>", "image": "before ![alt](image.png)",
+		"reference_definition": "[ref]: /url", "html": "hello <b>world</b>", "image": "before ![alt](image.png)",
 		"complex_table": "| a | b |\n|---|---|\n| ![image](x.png) | 2 |",
-		"indent_code":   "    code", "nested_list": "- outer\n  - inner",
-		"complex_quote": "> - nested", "link_title": "[label](/url \"title\")",
+		"indent_code":   "    code", "nested_list": "- outer\n  - inner\n\n    another paragraph",
+		"complex_quote": "> - nested", "image_link": "[![alt](image.png)](/url)",
 	} {
 		t.Run(name, func(t *testing.T) {
 			// Untouched source lines round-trip byte-exact.

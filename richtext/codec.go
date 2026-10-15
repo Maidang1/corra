@@ -28,20 +28,27 @@ type Document struct {
 }
 
 type Paragraph struct {
-	ID         string   `json:"id"`
-	Kind       string   `json:"kind"`
-	Level      int      `json:"level,omitempty"`
-	Checked    bool     `json:"checked,omitempty"`
-	Ordinal    int      `json:"ordinal,omitempty"`
-	Runs       []Run    `json:"runs"`
-	Raw        string   `json:"raw,omitempty"`
-	RawBase64  string   `json:"rawBase64,omitempty"`
-	Prefix     string   `json:"prefix,omitempty"`
-	Separator  string   `json:"separator,omitempty"`
-	Baseline   string   `json:"baseline,omitempty"`
-	NextID     string   `json:"nextId,omitempty"`
-	Rows       [][]Cell `json:"rows,omitempty"`
-	Alignments []string `json:"alignments,omitempty"`
+	ID      string `json:"id"`
+	Kind    string `json:"kind"`
+	Level   int    `json:"level,omitempty"`
+	Checked bool   `json:"checked,omitempty"`
+	Ordinal int    `json:"ordinal,omitempty"`
+	Depth   int    `json:"depth,omitempty"`
+	// List metadata preserves original indentation until the tree is changed.
+	ListIndent    string   `json:"listIndent,omitempty"`
+	ListID        string   `json:"listId,omitempty"`
+	ListContainer string   `json:"listContainer,omitempty"`
+	ListMarker    string   `json:"listMarker,omitempty"`
+	ListBaseline  string   `json:"listBaseline,omitempty"`
+	Runs          []Run    `json:"runs"`
+	Raw           string   `json:"raw,omitempty"`
+	RawBase64     string   `json:"rawBase64,omitempty"`
+	Prefix        string   `json:"prefix,omitempty"`
+	Separator     string   `json:"separator,omitempty"`
+	Baseline      string   `json:"baseline,omitempty"`
+	NextID        string   `json:"nextId,omitempty"`
+	Rows          [][]Cell `json:"rows,omitempty"`
+	Alignments    []string `json:"alignments,omitempty"`
 	// Open and Close hold a code block's fences so the lines between them can
 	// be edited without the fences on screen (Typora-style).
 	Open  string `json:"open,omitempty"`
@@ -59,6 +66,7 @@ type Run struct {
 	Strike    bool   `json:"strike,omitempty"`
 	Code      bool   `json:"code,omitempty"`
 	Link      string `json:"link,omitempty"`
+	LinkTitle string `json:"linkTitle,omitempty"`
 	Underline bool   `json:"underline,omitempty"` // <u>x</u>
 	Highlight bool   `json:"highlight,omitempty"` // ==x== or <mark>
 	Sup       bool   `json:"sup,omitempty"`       // ^x^ or <sup>
@@ -107,23 +115,36 @@ func Parse(source string) Document {
 	root := md.Parser().Parse(text.NewReader(src))
 	mdext.TransformHTML(root, src)
 	type block struct {
-		node    ast.Node
-		start   int
-		kind    string
-		ordinal int
+		node      ast.Node
+		start     int
+		kind      string
+		ordinal   int
+		depth     int
+		listID    string
+		container string
+		marker    string
 	}
 	var blocks []block
-	for node := root.FirstChild(); node != nil; node = node.NextSibling() {
-		if list, ok := node.(*ast.List); ok && simpleList(list) {
-			ordinal := list.Start
-			for item := list.FirstChild(); item != nil; item = item.NextSibling() {
-				kind := "bullet"
-				if list.IsOrdered() {
-					kind = "ordered"
-				}
-				blocks = append(blocks, block{item, lineStart(source, item.Pos()), kind, ordinal})
-				ordinal++
+	var flattenList func(*ast.List, int, string)
+	flattenList = func(list *ast.List, depth int, id string) {
+		ordinal := list.Start
+		for item := list.FirstChild(); item != nil; item = item.NextSibling() {
+			kind := "bullet"
+			if list.IsOrdered() {
+				kind = "ordered"
 			}
+			blocks = append(blocks, block{node: item, start: lineStart(source, item.Pos()), kind: kind, ordinal: ordinal, depth: depth, listID: id, container: fmt.Sprintf("list%d", list.Pos()), marker: string(list.Marker)})
+			ordinal++
+			for child := item.FirstChild(); child != nil; child = child.NextSibling() {
+				if nested, ok := child.(*ast.List); ok {
+					flattenList(nested, depth+1, id)
+				}
+			}
+		}
+	}
+	for node := root.FirstChild(); node != nil; node = node.NextSibling() {
+		if list, ok := node.(*ast.List); ok && editableList(list, src) {
+			flattenList(list, 0, fmt.Sprintf("list%d", node.Pos()))
 		} else {
 			blocks = append(blocks, block{node: node, start: lineStart(source, node.Pos())})
 		}
@@ -166,6 +187,10 @@ func Parse(source string) Document {
 			if b.kind == "ordered" {
 				ps[0].Ordinal = b.ordinal
 			}
+			ps[0].Depth, ps[0].ListID = b.depth, b.listID
+			ps[0].ListContainer, ps[0].ListMarker = b.container, b.marker
+			ps[0].ListIndent = raw[:len(raw)-len(strings.TrimLeft(raw, " \t"))]
+			ps[0].ListBaseline = listFingerprint(ps[0])
 		}
 		if len(ps) == 1 && ps[0].Kind != "code" {
 			// codeLines already set Raw per content line.
@@ -258,13 +283,10 @@ func splitSeparator(source string) (string, string) {
 	return "", source
 }
 
-func simpleList(list *ast.List) bool {
+func editableList(list *ast.List, src []byte) bool {
 	for item := list.FirstChild(); item != nil; item = item.NextSibling() {
 		if item.ChildCount() == 0 {
 			continue // an empty item ("- ") is an empty editable paragraph
-		}
-		if item.ChildCount() != 1 {
-			return false
 		}
 		child := item.FirstChild()
 		if child.Kind() != ast.KindTextBlock && child.Kind() != ast.KindParagraph {
@@ -272,6 +294,16 @@ func simpleList(list *ast.List) bool {
 		}
 		if child.Lines().Len() != 1 {
 			return false
+		}
+		p := Paragraph{}
+		if !collectRuns(child, src, Run{}, &p) {
+			return false
+		}
+		for child = child.NextSibling(); child != nil; child = child.NextSibling() {
+			nested, ok := child.(*ast.List)
+			if !ok || !editableList(nested, src) {
+				return false
+			}
 		}
 	}
 	return true
@@ -602,10 +634,11 @@ func collectRuns(parent ast.Node, src []byte, style Run, p *Paragraph) bool {
 			appendRun(p, run)
 		case *ast.Link:
 			flush()
-			if n.Reference != nil || len(n.Title) != 0 {
-				return false
+			if n.Reference != nil && strings.HasPrefix(strings.TrimSpace(string(n.Reference.Value)), "^") {
+				return false // footnotes retain their editable source representation
 			}
 			run.Link = string(decodeText(n.Destination))
+			run.LinkTitle = string(decodeText(n.Title))
 			if !collectRuns(node, src, run, p) {
 				return false
 			}
@@ -728,6 +761,8 @@ func appendRun(p *Paragraph, run Run) {
 
 func fingerprint(p Paragraph) string {
 	p.ID, p.Raw, p.RawBase64, p.Prefix, p.Separator, p.Baseline, p.NextID = "", "", "", "", "", "", ""
+	p.ListIndent, p.ListID, p.ListBaseline = "", "", ""
+	p.ListContainer, p.ListMarker = "", ""
 	normalized := Paragraph{Runs: []Run{}}
 	for _, run := range p.Runs {
 		appendRun(&normalized, run)
@@ -756,9 +791,12 @@ func fingerprint(p Paragraph) string {
 // even if a native text system accidentally changes their visible label.
 func Serialize(doc Document) string {
 	var out strings.Builder
+	lists := listSources(doc)
 	for i, p := range doc.Paragraphs {
 		out.WriteString(p.Prefix)
-		if p.Kind == "code" {
+		if line, ok := lists[i]; ok {
+			out.WriteString(line)
+		} else if p.Kind == "code" {
 			out.WriteString(codeLineSource(doc, i))
 		} else if p.Kind == "opaque" || (p.Baseline != "" && p.Baseline == fingerprint(p)) {
 			raw := p.Raw
@@ -817,6 +855,18 @@ func Serialize(doc Document) string {
 				}
 			}
 		}
+		if i+1 < len(doc.Paragraphs) {
+			next := doc.Paragraphs[i+1]
+			// CommonMark needs a blank line when a new nested list starts
+			// above 1, or its first item is empty ("- " can be Setext).
+			ordered := next.Kind == "ordered" || (next.Kind == "checklist" && next.Ordinal > 0)
+			emptyItem := next.Kind != "checklist" && PlainText(next) == ""
+			if isList(p) && isList(next) && next.Depth > p.Depth && ((ordered && next.Ordinal != 1) || emptyItem) {
+				for strings.Count(separator, "\n") < 2 {
+					separator += newlineStyle(separator)
+				}
+			}
+		}
 		out.WriteString(separator)
 	}
 	return out.String()
@@ -862,8 +912,15 @@ func codeLineSource(doc Document, i int) string {
 // sameList reports whether two adjacent items belong to one tight list, so
 // they are written on consecutive lines instead of as separate lists.
 func sameList(p, next Paragraph) bool {
-	bullet := func(kind string) bool { return kind == "bullet" || kind == "checklist" }
-	return (bullet(p.Kind) && bullet(next.Kind)) || (p.Kind == "ordered" && next.Kind == "ordered")
+	if isList(p) && isList(next) && p.Depth == next.Depth && p.ListContainer != "" && next.ListContainer != "" && p.ListContainer != next.ListContainer {
+		return false
+	}
+	if isList(p) && isList(next) && (p.Depth > 0 || next.Depth > 0) {
+		return true
+	}
+	bullet := func(p Paragraph) bool { return p.Kind == "bullet" || (p.Kind == "checklist" && p.Ordinal == 0) }
+	ordered := func(p Paragraph) bool { return p.Kind == "ordered" || (p.Kind == "checklist" && p.Ordinal > 0) }
+	return (bullet(p) && bullet(next)) || (ordered(p) && ordered(next))
 }
 
 func emptyParagraph(p Paragraph) bool { return p.Kind == "body" && PlainText(p) == "" }
@@ -955,15 +1012,19 @@ func blockPrefix(p Paragraph, value string) string {
 	case "heading":
 		value = strings.Repeat("#", min(6, max(1, p.Level))) + " " + value
 	case "bullet":
-		value = "- " + value
+		value = listMarker(p) + " " + value
 	case "ordered":
-		value = fmt.Sprintf("%d. %s", max(1, p.Ordinal), value)
+		value = fmt.Sprintf("%d%s %s", max(1, p.Ordinal), listMarker(p), value)
 	case "checklist":
 		mark := " "
 		if p.Checked {
 			mark = "x"
 		}
-		value = "- [" + mark + "] " + value
+		prefix := listMarker(p) + " "
+		if p.Ordinal > 0 {
+			prefix = fmt.Sprintf("%d%s ", p.Ordinal, listMarker(p))
+		}
+		value = prefix + "[" + mark + "] " + value
 	case "quote":
 		value = "> " + strings.ReplaceAll(value, "\n", "\n> ")
 	}
@@ -1029,7 +1090,7 @@ func serializeRun(run Run, italic string, level escapeLevel) string {
 	if run.Math != "" {
 		return run.Text // the exact $...$ source
 	}
-	if level == escapeNone && run.Link != "" && !run.Code && (run.Link == run.Text || run.Link == "http://"+run.Text || run.Link == "mailto:"+run.Text) {
+	if level == escapeNone && run.Link != "" && run.LinkTitle == "" && !run.Code && (run.Link == run.Text || run.Link == "http://"+run.Text || run.Link == "mailto:"+run.Text) {
 		// A bare URL re-links itself (GFM autolink); the caller verifies.
 		plain := run
 		plain.Link = ""
@@ -1096,7 +1157,14 @@ func serializeRun(run Run, italic string, level escapeLevel) string {
 	value = before + value + after
 	if run.Link != "" {
 		destination := strings.NewReplacer("\\", "\\\\", "<", "\\<", ">", "\\>", "&", "\\&", "\n", "%0A", "\r", "%0D").Replace(run.Link)
-		value = "[" + value + "](<" + destination + ">)"
+		title := ""
+		if run.LinkTitle != "" {
+			escaped := strings.NewReplacer("\\", "\\\\", "\"", "\\\"", "&", "\\&", "\n", "&#10;", "\r", "&#13;").Replace(run.LinkTitle)
+			title = " \"" + escaped + "\""
+		}
+		// Edited reference links use resolved inline destinations and titles;
+		// untouched paragraphs and definition blocks retain their exact Raw.
+		value = "[" + value + "](<" + destination + ">" + title + ")"
 	}
 	return value
 }
