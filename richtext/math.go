@@ -6,6 +6,8 @@ import (
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/parser"
 	"github.com/yuin/goldmark/text"
+
+	"github.com/Maidang1/corra/internal/mdext"
 )
 
 var kindMath = ast.NewNodeKind("RichTextProtectedMath")
@@ -51,3 +53,26 @@ func (mathBlockParser) Continue(node ast.Node, r text.Reader, _ parser.Context) 
 func (mathBlockParser) Close(ast.Node, text.Reader, parser.Context) {}
 func (mathBlockParser) CanInterruptParagraph() bool                 { return false }
 func (mathBlockParser) CanAcceptIndentedLine() bool                 { return false }
+
+var kindInlineMath = ast.NewNodeKind("RichTextInlineMath")
+
+type inlineMath struct {
+	ast.BaseInline
+	source, tex string
+}
+
+func (n *inlineMath) Kind() ast.NodeKind         { return kindInlineMath }
+func (n *inlineMath) Dump(src []byte, level int) { ast.DumpHelper(n, src, level, nil, nil) }
+
+type inlineMathParser struct{}
+
+func (inlineMathParser) Trigger() []byte { return []byte{'$'} }
+func (inlineMathParser) Parse(parent ast.Node, reader text.Reader, _ parser.Context) ast.Node {
+	line, _ := reader.PeekLine()
+	tex, length := mdext.MathSpan(line)
+	if length == 0 {
+		return nil
+	}
+	reader.Advance(length)
+	return &inlineMath{source: string(line[:length]), tex: mdext.MathText(parent, tex)}
+}

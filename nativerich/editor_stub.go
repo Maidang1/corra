@@ -14,6 +14,7 @@ func (*Editor) SetFrame(x, y, w, h float64)                       {}
 func (*Editor) SetVisible(bool)                                   {}
 func (*Editor) SetStyle(zoom float64, dark, editable bool)        {}
 func (*Editor) SetBaseDir(string)                                 {}
+func (*Editor) SetMathNumbering(string)                           {}
 func (*Editor) SetSpellcheck(bool)                                {}
 func (*Editor) SetFocusMode(bool)                                 {}
 func (*Editor) SetTypewriter(bool)                                {}

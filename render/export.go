@@ -39,6 +39,17 @@ func ExportPDF(ctx context.Context, doc *Document, title string) ([]byte, error)
 // and returns encoded PNG/JPEG bytes. Without a loader, image blocks render
 // their alt text.
 func ExportPDFOpts(ctx context.Context, doc *Document, title string, loadImage func(url string) ([]byte, error)) ([]byte, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	var mathResults []MathResult
+	if len(doc.MathExpressions) > 0 {
+		var err error
+		mathResults, err = RenderMathBatchContext(ctx, doc.MathExpressions, doc.MathOptions, pdfBaseSz+2, darkInk)
+		if err != nil {
+			return nil, err
+		}
+	}
 	d := gpdf.NewDocument(
 		gpdf.WithFont(pdfFont, liberationTTF()),
 		gpdf.WithDefaultFont(pdfFont, pdfBaseSz),
@@ -60,7 +71,11 @@ func ExportPDFOpts(ctx context.Context, doc *Document, title string, loadImage f
 				})
 			})
 		}
-		if err := pdfBlock(ctx, page, &b, doc, loadImage); err != nil {
+		var equation *MathResult
+		if slot, ok := doc.MathIndex(i); ok && slot < len(mathResults) {
+			equation = &mathResults[slot]
+		}
+		if err := pdfBlock(ctx, page, &b, doc, loadImage, equation); err != nil {
 			// Degrade: render failures show the block source.
 			pdfText(page, b.Source, template.FontSize(pdfBaseSz-1))
 		}
@@ -92,7 +107,7 @@ func pdfText(page *template.PageBuilder, s string, opts ...template.TextOption) 
 	})
 }
 
-func pdfBlock(ctx context.Context, page *template.PageBuilder, b *Block, doc *Document, loadImage func(string) ([]byte, error)) error {
+func pdfBlock(ctx context.Context, page *template.PageBuilder, b *Block, doc *Document, loadImage func(string) ([]byte, error), equation *MathResult) error {
 	switch b.Kind {
 	case KindFrontMatter:
 		lines := strings.Split(b.Source, "\n")
@@ -181,11 +196,17 @@ func pdfBlock(ctx context.Context, page *template.PageBuilder, b *Block, doc *Do
 			})
 		})
 	case KindMathBlock:
+		if equation != nil {
+			if equation.Error != nil {
+				return equation.Error
+			}
+			return pdfMathImage(page, equation.Image)
+		}
 		img, err := RenderMath(b.Math, true, pdfBaseSz+2, darkInk)
 		if err != nil {
 			return err
 		}
-		return pdfImage(page, img)
+		return pdfMathImage(page, img)
 	case KindDiagram:
 		svg, err := RenderDiagram(ctx, b.Diagram, b.DiagramS)
 		if err != nil {
@@ -226,6 +247,22 @@ func pdfBlock(ctx context.Context, page *template.PageBuilder, b *Block, doc *Do
 			})
 		})
 	}
+	return nil
+}
+
+func pdfMathImage(page *template.PageBuilder, img image.Image) error {
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, img); err != nil {
+		return err
+	}
+	// Math rasters contain two pixels per point. Keep their text size instead
+	// of stretching a short equation across the entire printable width.
+	width := document.Pt(min(160*72/25.4, float64(img.Bounds().Dx())/2))
+	page.AutoRow(func(row *template.RowBuilder) {
+		row.Col(12, func(col *template.ColBuilder) {
+			col.Image(encoded.Bytes(), template.FitWidth(width), template.WithAlign(document.AlignCenter))
+		})
+	})
 	return nil
 }
 

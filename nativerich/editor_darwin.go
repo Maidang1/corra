@@ -34,6 +34,7 @@ type Editor struct {
 	changed, sourceRequested func()
 	dirty                    bool
 	source                   string
+	mathKey, mathResult      string
 
 	// OnSaveImage persists (or uploads) a pasted/dropped image and returns
 	// the Markdown to insert; ok=false cancels the insertion.
@@ -115,6 +116,9 @@ func (e *Editor) Format(command string) {
 	if e == nil || e.native == 0 {
 		return
 	}
+	if command == "math-refresh" {
+		e.mathKey = ""
+	}
 	p, free := stringArg(command)
 	defer free()
 	C.cr_format(e.native, p)
@@ -156,6 +160,14 @@ func (e *Editor) SetStyle(zoom float64, dark, editable bool) {
 	if e != nil && e.native != 0 {
 		C.cr_style(e.native, C.double(zoom), boolInt(dark), boolInt(editable))
 	}
+}
+
+// SetMathNumbering changes presentation without editing Markdown or history.
+func (e *Editor) SetMathNumbering(mode string) {
+	if mode == "" {
+		mode = "none"
+	}
+	e.Format("math-numbering:" + mode)
 }
 func (e *Editor) Focus() {
 	if e != nil && e.native != 0 {
@@ -238,6 +250,27 @@ func cr_render_math(source *C.char, dark C.int, zoom C.double, inlineMath C.int)
 	return C.CString(base64.StdEncoding.EncodeToString(buf.Bytes()))
 }
 
+//export cr_render_math_document
+func cr_render_math_document(handle C.uintptr_t, document *C.char, dark C.int, zoom C.double, numbering *C.char) *C.char {
+	e := cgo.Handle(handle).Value().(*Editor)
+	var request struct {
+		richtext.Document
+		Before richtext.Document `json:"before"`
+		After  richtext.Document `json:"after"`
+	}
+	if json.Unmarshal([]byte(C.GoString(document)), &request) != nil {
+		return nil
+	}
+	previous := e.mathKey
+	result := e.documentMathContext(request.Document, request.Before, request.After, dark != 0, float64(zoom), C.GoString(numbering))
+	if e.mathKey == previous {
+		// AppKit already owns these images; avoid copying their base64 data on
+		// every prose edit. An empty response means reuse, nil means failure.
+		return C.CString("")
+	}
+	return C.CString(result)
+}
+
 //export cr_render_block
 func cr_render_block(language, body *C.char, dark C.int, zoom C.double) *C.char {
 	lang := strings.ToLower(strings.TrimSpace(C.GoString(language)))
@@ -300,6 +333,15 @@ func cr_markdown_json(value *C.char) *C.char {
 //export cr_parse_markdown
 func cr_parse_markdown(value *C.char) *C.char {
 	data, err := json.Marshal(richtext.Parse(C.GoString(value)))
+	if err != nil {
+		return nil
+	}
+	return C.CString(string(data))
+}
+
+//export cr_parse_inline
+func cr_parse_inline(value *C.char, table C.int) *C.char {
+	data, err := json.Marshal(richtext.ParseInline(C.GoString(value), table != 0))
 	if err != nil {
 		return nil
 	}

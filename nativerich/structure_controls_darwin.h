@@ -12,6 +12,7 @@
     if (table && modifiers==NSEventModifierFlagCommand && [key isEqual:@"\r"]) {
         [self.owner tableCommand:@"table:row-below"]; return YES;
     }
+    if (modifiers==NSEventModifierFlagCommand && [key isEqual:@"\r"] && [self.owner finishMathEditing]) return YES;
     if (table && modifiers==(NSEventModifierFlagCommand|NSEventModifierFlagShift) && [key isEqual:@"\x7f"]) {
         [self.owner tableCommand:@"table:delete-row"]; return YES;
     }

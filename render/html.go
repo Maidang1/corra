@@ -1,11 +1,13 @@
-// HTML export: a standalone HTML page with embedded styles, KaTeX
-// auto-render for math and mermaid.js for mermaid diagrams (both from CDN).
+// HTML export embeds document math as self-contained SVG images.
 package render
 
 import (
 	"bytes"
+	"context"
+	"encoding/base64"
 	"fmt"
 	"html"
+	"image/color"
 	"strings"
 
 	"github.com/yuin/goldmark"
@@ -22,12 +24,20 @@ import (
 )
 
 // ExportHTML renders the document source to a standalone HTML page.
-// Math stays in $...$ form with a KaTeX auto-render script; mermaid blocks
-// become <pre class="mermaid">. smartPunct applies typographic punctuation.
+// Mermaid blocks become <pre class="mermaid">. Math needs no runtime scripts.
 func ExportHTML(src, title string, smartPunct bool) ([]byte, error) {
+	return ExportHTMLOpts(context.Background(), src, title, smartPunct, MathOptions{})
+}
+
+func ExportHTMLOpts(ctx context.Context, src, title string, smartPunct bool, mathOptions MathOptions) ([]byte, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	mathRenderer := &mathHTMLRenderer{results: make(map[gast.Node]MathResult)}
 	exts := []goldmark.Extender{
 		extension.GFM,
 		extension.Footnote,
+		MathExtender,
 		mdext.InlineExtender,
 		emoji.New(),
 	}
@@ -41,6 +51,7 @@ func ExportHTML(src, title string, smartPunct bool) ([]byte, error) {
 			ghtml.WithUnsafe(), // the document is the user's own
 			renderer.WithNodeRenderers(
 				util.Prioritized(&mdHTMLRenderer{}, 500),
+				util.Prioritized(mathRenderer, 500),
 			),
 		),
 	)
@@ -50,7 +61,19 @@ func ExportHTML(src, title string, smartPunct bool) ([]byte, error) {
 		body = replaceTOC(body, toc)
 	}
 	var buf bytes.Buffer
-	if err := md.Convert([]byte(body), &buf); err != nil {
+	parsed := md.Parser().Parse(text.NewReader([]byte(body)))
+	mdext.TransformHTML(parsed, []byte(body))
+	plan := collectMath(parsed)
+	if len(plan.Expressions) > 0 {
+		results, err := RenderMathBatchContext(ctx, plan.Expressions, mathOptions, 16, color.Black)
+		if err != nil {
+			return nil, err
+		}
+		for node, index := range plan.Nodes {
+			mathRenderer.results[node] = results[index]
+		}
+	}
+	if err := md.Renderer().Render(&buf, []byte(body), parsed); err != nil {
 		return nil, err
 	}
 	var out strings.Builder
@@ -61,12 +84,9 @@ func ExportHTML(src, title string, smartPunct bool) ([]byte, error) {
 		fmt.Fprintf(&out, "<!--\n%s\n-->\n", strings.TrimRight(fm, "\n"))
 	}
 	out.WriteString(htmlStyle)
-	out.WriteString(`<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">` + "\n")
 	out.WriteString("</head><body>\n<main class=\"markdown-body\">\n")
 	out.WriteString(buf.String())
 	out.WriteString("\n</main>\n")
-	out.WriteString(`<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>` + "\n")
-	out.WriteString(`<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body,{delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}]});"></script>` + "\n")
 	out.WriteString(`<script type="module">import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs"; mermaid.initialize({startOnLoad:true});</script>` + "\n")
 	out.WriteString("</body>\n</html>\n")
 	return []byte(out.String()), nil
@@ -198,12 +218,58 @@ code,kbd{font:0.9em ui-monospace,"SF Mono",Menlo,Consolas,monospace;background:#
 pre{background:#f6f8fa;border-radius:8px;padding:12px;overflow:auto}pre code{background:none;padding:0}
 blockquote{margin:0;padding:0 1em;color:#57606a;border-left:3px solid #d0d7de}
 table{border-collapse:collapse}td,th{border:1px solid #d0d7de;padding:4px 10px}
-img{max-width:100%%}
+img{max-width:100%}
+.math-display{display:block;text-align:center;margin:1em 0;overflow-x:auto}.math-inline{vertical-align:middle}.math-error{white-space:pre-wrap;color:#a12d24}
 mark{background:#fff1a8}del{color:#57606a}
 nav.toc{border:1px solid #eaecef;border-radius:8px;padding:12px 16px;font-size:.92em;margin-bottom:1em}
 nav.toc ul{margin:.2em 0;padding-left:1.4em}nav.toc a{color:#0969da;text-decoration:none}
 </style>
 `
+
+type mathHTMLRenderer struct{ results map[gast.Node]MathResult }
+
+func (r *mathHTMLRenderer) RegisterFuncs(reg renderer.NodeRendererFuncRegisterer) {
+	reg.Register(KindMathInlineNode, r.render)
+	reg.Register(KindMathBlockNode, r.render)
+}
+
+func (r *mathHTMLRenderer) render(w util.BufWriter, source []byte, node gast.Node, entering bool) (gast.WalkStatus, error) {
+	if !entering {
+		return gast.WalkContinue, nil
+	}
+	tex, display := "", false
+	raw := ""
+	container := "div"
+	switch n := node.(type) {
+	case *mathInlineNode:
+		tex, display, raw = n.TeX, n.Display, n.Raw
+		container = "span"
+	case *mathBlockNode:
+		tex, display = n.TeX, true
+		raw = blockSource(node, source)
+	}
+	result, ok := r.results[node]
+	if !ok || result.Error != nil {
+		message := "Invalid math"
+		if result.Error != nil {
+			message = result.Error.Error()
+		}
+		_, err := fmt.Fprintf(w, `<code class="math-error" title="%s">%s</code>`, html.EscapeString(message), html.EscapeString(raw))
+		return gast.WalkSkipChildren, err
+	}
+	if display {
+		_, _ = fmt.Fprintf(w, `<%s class="math-display">`, container)
+	}
+	class := "math-inline"
+	if display {
+		class = "math-block"
+	}
+	_, err := fmt.Fprintf(w, `<img class="%s" role="math" alt="%s" data-equation-number="%s" width="%.2f" height="%.2f" src="data:image/svg+xml;base64,%s">`, class, html.EscapeString(tex), html.EscapeString(result.Number), float64(result.Image.Bounds().Dx())/2, float64(result.Image.Bounds().Dy())/2, base64.StdEncoding.EncodeToString(result.SVG))
+	if display {
+		_, _ = fmt.Fprintf(w, "</%s>", container)
+	}
+	return gast.WalkSkipChildren, err
+}
 
 // mdHTMLRenderer renders mdext inline nodes to HTML.
 type mdHTMLRenderer struct{ ghtml.Config }

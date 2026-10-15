@@ -16,6 +16,7 @@ type RichEditor interface {
 	SetVisible(bool)
 	SetStyle(zoom float64, dark, editable bool)
 	SetBaseDir(dir string)
+	SetMathNumbering(mode string)
 	// Typora-parity extensions; no-ops on platforms without a rich editor.
 	SetSpellcheck(enabled bool)
 	SetFocusMode(enabled bool)
@@ -91,6 +92,7 @@ func (v *View) richVisible() bool {
 }
 
 func (v *View) richPane(c *ui.Context) {
+	v.rich.SetMathNumbering(v.App.MathNumbering)
 	v.ensureRichEditor()
 	v.rich.SetStyle(float64(v.App.Zoom), c.Theme().Dark, v.canEdit())
 	ui.Column(c).Fill().Gap(0).Background(c.Theme().Surface).Children(func() {

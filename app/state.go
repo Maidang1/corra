@@ -56,13 +56,14 @@ type App struct {
 	FindCurrent int
 
 	// Typora-parity display options.
-	SmartPunct       bool // typographic quotes/dashes in preview & export
-	CodeLineNumbers  bool // line numbers in code fences
-	HeadingNumbering bool // 1.2.3-style numbers on headings
-	WordCount        bool // word-count status bar
-	Spellcheck       bool // continuous spell checking in the native editor
-	FocusMode        bool // dim all but the caret's paragraph
-	Typewriter       bool // keep the caret line vertically centered
+	SmartPunct       bool   // typographic quotes/dashes in preview & export
+	CodeLineNumbers  bool   // line numbers in code fences
+	HeadingNumbering bool   // 1.2.3-style numbers on headings
+	MathNumbering    string // none (default), ams, or all
+	WordCount        bool   // word-count status bar
+	Spellcheck       bool   // continuous spell checking in the native editor
+	FocusMode        bool   // dim all but the caret's paragraph
+	Typewriter       bool   // keep the caret line vertically centered
 
 	// Editing.
 	Hist editor.Undo
@@ -98,6 +99,7 @@ type App struct {
 
 	// Async rendered images (math, diagrams, charts), keyed by block content.
 	images     map[string]*imageEntry
+	mathImages *mathImageBatch
 	invalidate func() // window invalidate, set at startup
 	services   ui.Services
 

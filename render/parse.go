@@ -55,7 +55,10 @@ var markdownSmart = goldmark.New(
 
 // Document is a parsed markdown document.
 type Document struct {
-	Blocks []Block
+	Blocks          []Block
+	MathExpressions []MathExpression
+	MathOptions     MathOptions
+	mathBlocks      map[int]int
 	// Footnotes holds footnote definitions, rendered at the end.
 	Footnotes []string
 }
@@ -73,7 +76,8 @@ func ParseOptions(src string, smartPunct bool) *Document {
 	reader := text.NewReader([]byte(body))
 	parsed := md.Parser().Parse(reader)
 	mdext.TransformHTML(parsed, []byte(body))
-	doc := &Document{}
+	plan := collectMath(parsed)
+	doc := &Document{MathExpressions: plan.Expressions, mathBlocks: make(map[int]int)}
 	if fm != "" {
 		doc.Blocks = append(doc.Blocks, Block{Kind: KindFrontMatter, Source: strings.TrimRight(fm, "\r\n"), Start: 0, End: len(fm)})
 	}
@@ -94,6 +98,9 @@ func ParseOptions(src string, smartPunct bool) *Document {
 		}
 		b, ok := buildBlock(n, []byte(body))
 		if ok {
+			if slot, exists := plan.Nodes[n]; exists {
+				doc.mathBlocks[len(doc.Blocks)] = slot
+			}
 			b.Start, b.End = nodeRange(n)
 			b.Start += offset
 			b.End += offset
@@ -192,8 +199,9 @@ func buildBlock(n gast.Node, src []byte) (Block, bool) {
 		}
 		b.Kind = KindHTML
 	case *mathBlockNode:
-		if t.TeX == "" {
-			return Block{}, false // unclosed $$: not math
+		if t.open {
+			b.Kind = KindHTML // preserve malformed math as visible editable source
+			break
 		}
 		b.Kind = KindMathBlock
 		b.Math = t.TeX
@@ -340,9 +348,7 @@ func writeInline(buf *bytes.Buffer, n gast.Node, src []byte) {
 	case *east.FootnoteLink:
 		fmt.Fprintf(buf, "[%d]", t.Index)
 	case *mathInlineNode:
-		buf.WriteByte('$')
-		buf.WriteString(t.TeX)
-		buf.WriteByte('$')
+		buf.WriteString(t.Raw)
 	default:
 		for c := n.FirstChild(); c != nil; c = c.NextSibling() {
 			writeInline(buf, c, src)

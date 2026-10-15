@@ -38,7 +38,11 @@ func TestNativeImageClickEditsSourceInPlace(t *testing.T) {
 		e.SetFrame(0, 0, 720, 500)
 		e.SetVisible(true)
 		e.SetBaseDir(dir)
-		e.Load("![photo](photo.png)")
+		e.Load("![photo](photo.png)\n\nnormal prose")
+		e.SetStyle(1.2, true, true)
+		if !nativeTestHasTraits(e, "attachments-clean") {
+			t.Error("changing image presentation added attachment attributes to prose")
+		}
 		nativeTestSelect(e, 0, 0)
 		nativeTestAction(e, "click", "")
 		if !nativeTestHasTraits(e, "source") {
@@ -49,7 +53,7 @@ func TestNativeImageClickEditsSourceInPlace(t *testing.T) {
 		nativeTestAction(e, "type", "new")
 		nativeTestAction(e, "blur", "")
 		got, _, err := e.Snapshot()
-		if err != nil || got != "![new](photo.png)" || !nativeTestHasTraits(e, "image") {
+		if err != nil || got != "![new](photo.png)\n\nnormal prose" || !nativeTestHasTraits(e, "image") {
 			t.Errorf("image source edit/render: %q %v", got, err)
 		}
 	})

@@ -36,10 +36,11 @@ func (e *fakeRichEditor) ShowFindBar()                               {}
 func (e *fakeRichEditor) RevealHeading(int)                          {}
 func (e *fakeRichEditor) Print()                                     {}
 
-func (e *fakeRichEditor) SetBaseDir(dir string) {}
-func (e *fakeRichEditor) Focus()                { e.focuses++ }
-func (e *fakeRichEditor) Blur()                 {}
-func (e *fakeRichEditor) Close()                { e.closed = true }
+func (e *fakeRichEditor) SetBaseDir(dir string)   {}
+func (e *fakeRichEditor) SetMathNumbering(string) {}
+func (e *fakeRichEditor) Focus()                  { e.focuses++ }
+func (e *fakeRichEditor) Blur()                   {}
+func (e *fakeRichEditor) Close()                  { e.closed = true }
 
 func TestRichDefaultLayoutAndNoReloadOnSave(t *testing.T) {
 	v, tt := notesFixture(t)
