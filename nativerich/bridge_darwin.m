@@ -67,6 +67,7 @@ extern char *cr_html_to_markdown(const char *html);
 - (NSAttributedString *)attributedRuns:(NSArray *)runs paragraph:(NSDictionary *)paragraph extra:(NSDictionary *)extra;
 - (void)toggleCheckbox:(NSUInteger)location;
 - (NSRect)markerRect:(NSRange)range;
+- (NSRect)markerLineRect:(NSRange)range;
 - (NSAttributedString *)figure:(NSDictionary *)p;
 - (NSAttributedString *)inlineMath:(NSDictionary *)run paragraph:(NSDictionary *)paragraph extra:(NSDictionary *)extra;
 - (NSAttributedString *)sourceText:(NSDictionary *)p;
@@ -182,8 +183,12 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
 - (NSDictionary *)visual:(NSDictionary *)attrs paragraph:(NSDictionary *)p {
     NSMutableDictionary *out = [attrs mutableCopy];
     // Notes-like scale: a quiet 16pt body; weight, not size jumps, carries
-    // the hierarchy.
-    static const CGFloat headingSizes[] = {27, 22, 18.5, 16.5, 15.5, 15};
+    // the hierarchy. Sizes pair with the spacing rhythm below: bigger blocks
+    // get more air before them than after, so a heading belongs to the
+    // section it opens.
+    static const CGFloat headingSizes[] = {30, 24, 19.5, 17, 16, 15};
+    static const CGFloat headingBefore[] = {10, 26, 20, 16, 14, 12};
+    static const CGFloat headingAfter[] = {12, 8, 6, 4, 4, 4};
     BOOL heading = CRKind(p,@"heading");
     NSInteger level = [p[@"level"] integerValue];
     if (level < 1) level = 1;
@@ -192,8 +197,8 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
     NSTextTableBlock *cell = attrs[CRTableCell];
     CGFloat size = 16 * _zoom;
     if (heading) size = headingSizes[level-1] * _zoom;
-    if (cell || source) size = 14 * _zoom;
-    if ([attrs[CRCode] boolValue] && !heading) size -= 1 * _zoom;
+    if (cell || source) size = 13.5 * _zoom;
+    if ([attrs[CRCode] boolValue] && !heading) size -= 1.5 * _zoom;
     NSFont *font = ([attrs[CRCode] boolValue] || source) ? [NSFont monospacedSystemFontOfSize:size weight:NSFontWeightRegular] : [NSFont systemFontOfSize:size weight:(heading && level > 2) ? NSFontWeightSemibold : NSFontWeightRegular];
     NSFontTraitMask traits = 0;
     if ([attrs[CRBold] boolValue] || (heading && level <= 2) || (cell && cell.startingRow == 0)) traits |= NSBoldFontMask;
@@ -208,18 +213,22 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
     } else [out removeObjectForKey:NSSuperscriptAttributeName];
     out[NSFontAttributeName] = font;
     out[NSForegroundColorAttributeName] = _dark ? [NSColor colorWithRed:0.906 green:0.914 blue:0.933 alpha:1] : [NSColor colorWithWhite:0.161 alpha:1];
+    // Quotes step back: same size, quieter ink, so the bar and the tint carry
+    // the "cited, not mine" reading instead of a smaller font.
+    if (CRKind(p,@"quote")) out[NSForegroundColorAttributeName] = _dark ? [NSColor colorWithWhite:0.62 alpha:1] : [NSColor colorWithWhite:0.42 alpha:1];
     NSMutableParagraphStyle *style = [NSMutableParagraphStyle new];
-    style.lineSpacing = 4 * _zoom;
+    // ~1.55 line height keeps mixed CJK/Latin lines from rubbing shoulders.
+    style.lineSpacing = 6 * _zoom;
     // Lists hang together as a group; paragraphs breathe more.
     BOOL list = CRKind(p,@"bullet") || CRKind(p,@"ordered") || CRKind(p,@"checklist");
-    style.paragraphSpacing = (list ? 4 : 8) * _zoom;
+    style.paragraphSpacing = (list ? 6 : 12) * _zoom;
     if (heading) {
-        style.paragraphSpacingBefore = (level == 1 ? 16 : 12) * _zoom;
-        style.paragraphSpacing = 4 * _zoom;
+        style.paragraphSpacingBefore = headingBefore[level-1] * _zoom;
+        style.paragraphSpacing = headingAfter[level-1] * _zoom;
     }
     if (source) {
-        style.paragraphSpacing = (CRBlockEnding(p) ? 10 : 2) * _zoom;
-        style.lineSpacing = 2 * _zoom;
+        style.paragraphSpacing = (CRBlockEnding(p) ? 16 : 3) * _zoom;
+        style.lineSpacing = 3 * _zoom;
     }
     if (cell) {
         style.textBlocks = @[cell];
@@ -851,11 +860,21 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
         return;
     }
 }
-- (NSRect)markerRect:(NSRange)range {
+- (NSRect)markerLineRect:(NSRange)range {
     [_text.layoutManager ensureLayoutForTextContainer:_text.textContainer];
     NSRange glyph=[_text.layoutManager glyphRangeForCharacterRange:CRContent(_text.string,range) actualCharacterRange:NULL];
-    NSRect line = glyph.length ? [_text.layoutManager lineFragmentRectForGlyphAtIndex:glyph.location effectiveRange:NULL] : _text.layoutManager.extraLineFragmentRect;
-    return NSMakeRect(_text.textContainerOrigin.x+4*_zoom,_text.textContainerOrigin.y+line.origin.y+3*_zoom,19*_zoom,19*_zoom);
+    if (!glyph.length) return NSOffsetRect(_text.layoutManager.extraLineFragmentRect,_text.textContainerOrigin.x,_text.textContainerOrigin.y);
+    // Tight glyph bounds of the first line: the fragment rect includes
+    // lineSpacing below the glyphs (markers ride low) and the used rect
+    // starts at the indented first glyph (markers shift right onto text).
+    NSRange lineGlyphs;
+    [_text.layoutManager lineFragmentRectForGlyphAtIndex:glyph.location effectiveRange:&lineGlyphs];
+    NSRect bounds=[_text.layoutManager boundingRectForGlyphRange:lineGlyphs inTextContainer:_text.textContainer];
+    return NSOffsetRect(bounds,_text.textContainerOrigin.x,_text.textContainerOrigin.y);
+}
+- (NSRect)markerRect:(NSRange)range {
+    NSRect line=[self markerLineRect:range];
+    return NSMakeRect(_text.textContainerOrigin.x+4*_zoom,NSMidY(line)-9.5*_zoom,19*_zoom,19*_zoom);
 }
 - (void)toggleCheckbox:(NSUInteger)location {
     if (!_text.editable || _text.hasMarkedText) return;
@@ -1226,19 +1245,19 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
         if (NSIsEmptyRect(group)) return;
         // Set the fill here: drawing a language tag leaves its gray behind.
         [(e.dark ? [NSColor colorWithWhite:0.23 alpha:1] : [NSColor colorWithWhite:0.94 alpha:1]) setFill];
-        NSRect chip=NSMakeRect(self.textContainerOrigin.x,group.origin.y-4*e.zoom,self.textContainer.size.width,group.size.height+8*e.zoom);
-        if (NSIntersectsRect(chip,dirty)) [[NSBezierPath bezierPathWithRoundedRect:chip xRadius:5*e.zoom yRadius:5*e.zoom] fill];
+        NSRect chip=NSMakeRect(self.textContainerOrigin.x,group.origin.y-7*e.zoom,self.textContainer.size.width,group.size.height+14*e.zoom);
+        if (NSIntersectsRect(chip,dirty)) [[NSBezierPath bezierPathWithRoundedRect:chip xRadius:6*e.zoom yRadius:6*e.zoom] fill];
         group=NSZeroRect;
     };
     __block NSString *groupLang=nil;
     void (^flushWithLabel)(void)=^{
         // Chip first, then the language tag on top of it.
-        NSRect chip=NSIsEmptyRect(group) ? NSZeroRect : NSMakeRect(self.textContainerOrigin.x,group.origin.y-4*e.zoom,self.textContainer.size.width,group.size.height+8*e.zoom);
+        NSRect chip=NSIsEmptyRect(group) ? NSZeroRect : NSMakeRect(self.textContainerOrigin.x,group.origin.y-7*e.zoom,self.textContainer.size.width,group.size.height+14*e.zoom);
         flush();
         if (groupLang.length) {
             NSDictionary *attrs=@{NSFontAttributeName:[NSFont systemFontOfSize:10.5*e.zoom],NSForegroundColorAttributeName:e.dark ? [NSColor colorWithWhite:0.55 alpha:1] : [NSColor colorWithWhite:0.6 alpha:1]};
             NSSize size=[groupLang sizeWithAttributes:attrs];
-            [groupLang drawAtPoint:NSMakePoint(NSMaxX(chip)-size.width-8*e.zoom,chip.origin.y+4*e.zoom) withAttributes:attrs];
+            [groupLang drawAtPoint:NSMakePoint(NSMaxX(chip)-size.width-10*e.zoom,chip.origin.y+5*e.zoom) withAttributes:attrs];
         }
         groupLang=nil;
     };
@@ -1273,7 +1292,10 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
         NSDictionary *p=CRParagraphAt(e,v.rangeValue.location);
         NSRect rect=[e markerRect:v.rangeValue];
         if (!NSIntersectsRect(rect,dirty)) continue;
-        NSDictionary *attrs=@{NSFontAttributeName:[NSFont systemFontOfSize:15*e.zoom],NSForegroundColorAttributeName:e.dark ? [NSColor colorWithWhite:0.62 alpha:1] : [NSColor colorWithWhite:0.45 alpha:1]};
+        // Markers match the body size and sit on the line's vertical center,
+        // so bullets and ordinals read as part of the text, not as footnotes.
+        NSRect lineRect=[e markerLineRect:v.rangeValue];
+        NSColor *markerColor=e.dark ? [NSColor colorWithWhite:0.70 alpha:1] : [NSColor colorWithWhite:0.35 alpha:1];
         if (CRKind(p,@"checklist")) {
             NSRect circle=NSInsetRect(rect,1,1);
             NSBezierPath *box=[NSBezierPath bezierPathWithOvalInRect:circle];
@@ -1285,8 +1307,17 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
                 NSSize size=[@"\u2713" sizeWithAttributes:check];
                 [@"\u2713" drawAtPoint:NSMakePoint(NSMidX(circle)-size.width/2,NSMidY(circle)-size.height/2) withAttributes:check];
             }
-        } else if (CRKind(p,@"bullet")) [@"\u2022" drawAtPoint:rect.origin withAttributes:attrs];
-        else if (CRKind(p,@"ordered")) [[NSString stringWithFormat:@"%@.",p[@"ordinal"] ?: @1] drawAtPoint:rect.origin withAttributes:attrs];
+        } else if (CRKind(p,@"bullet")) {
+            // A drawn dot, not the \u2022 glyph: font bullets render tiny next to
+            // CJK glyphs no matter the point size.
+            CGFloat d=6.5*e.zoom;
+            NSRect dot=NSMakeRect(rect.origin.x+1.5*e.zoom,NSMidY(lineRect)-d/2,d,d);
+            [markerColor setFill];
+            [[NSBezierPath bezierPathWithOvalInRect:dot] fill];
+        } else if (CRKind(p,@"ordered")) {
+            NSFont *f=[NSFont systemFontOfSize:16*e.zoom];
+            [[NSString stringWithFormat:@"%@.",p[@"ordinal"] ?: @1] drawAtPoint:NSMakePoint(rect.origin.x,NSMidY(lineRect)-(f.ascender-f.descender)/2) withAttributes:@{NSFontAttributeName:f,NSForegroundColorAttributeName:markerColor}];
+        }
         else if (CRKind(p,@"quote")) { [(e.dark ? [NSColor colorWithWhite:0.40 alpha:1] : [NSColor colorWithWhite:0.80 alpha:1]) setFill]; [[NSBezierPath bezierPathWithRoundedRect:NSMakeRect(rect.origin.x+7,rect.origin.y,3*e.zoom,rect.size.height) xRadius:1.5*e.zoom yRadius:1.5*e.zoom] fill]; }
     }
 }
@@ -1458,7 +1489,7 @@ uintptr_t cr_new(uintptr_t window, uintptr_t callback) {
     e.text.richText=YES; e.text.importsGraphics=NO; e.text.allowsUndo=YES; e.text.verticallyResizable=YES; e.text.horizontallyResizable=NO;
     e.text.minSize=NSMakeSize(0,0); e.text.maxSize=NSMakeSize(CGFLOAT_MAX,CGFLOAT_MAX); e.text.autoresizingMask=NSViewWidthSizable;
     e.text.textContainer.containerSize=NSMakeSize(e.scroll.contentSize.width,CGFLOAT_MAX); e.text.textContainer.widthTracksTextView=YES;
-    e.text.textContainerInset=NSMakeSize(28,14); e.text.automaticQuoteSubstitutionEnabled=NO; e.text.automaticDashSubstitutionEnabled=NO;
+    e.text.textContainerInset=NSMakeSize(36,22); e.text.automaticQuoteSubstitutionEnabled=NO; e.text.automaticDashSubstitutionEnabled=NO;
     e.text.automaticLinkDetectionEnabled=NO; e.text.automaticDataDetectionEnabled=NO; e.text.automaticTextReplacementEnabled=NO;
     e.text.drawsBackground=NO; // CRTextView.drawRect paints canvas and chips itself
     e.draftGroup=NSMakeRange(NSNotFound,0);
@@ -1493,7 +1524,17 @@ void cr_insert(uintptr_t ptr,const char *json) {
     e.text.typingAttributes=attrs; e.emptyParagraph=CRBody(); e.suppress=NO;
     [e updateTypingParagraph]; [e notify];
 }
-void cr_frame(uintptr_t ptr,double x,double y,double w,double h) { CREditor *e=CRE(ptr); NSView *parent=e.scroll.superview; CGFloat top=parent.isFlipped ? y : parent.bounds.size.height-y-h; NSRect frame=NSMakeRect(x,top,MAX(0,w),MAX(0,h)); if (!NSEqualRects(frame,e.scroll.frame)) e.scroll.frame=frame; }
+// CRUpdateInset caps the reading measure: past ~47 CJK chars per line the eye
+// loses the return sweep, so on wide panes the text column centers itself
+// (Typora-style) instead of stretching edge to edge.
+static void CRUpdateInset(CREditor *e) {
+    CGFloat maxW=760*e.zoom;
+    CGFloat width=e.scroll.contentSize.width;
+    CGFloat x=MAX(36*e.zoom,(width-maxW)/2);
+    NSSize inset=NSMakeSize(x,22*e.zoom);
+    if (!NSEqualSizes(e.text.textContainerInset,inset)) e.text.textContainerInset=inset;
+}
+void cr_frame(uintptr_t ptr,double x,double y,double w,double h) { CREditor *e=CRE(ptr); NSView *parent=e.scroll.superview; CGFloat top=parent.isFlipped ? y : parent.bounds.size.height-y-h; NSRect frame=NSMakeRect(x,top,MAX(0,w),MAX(0,h)); if (!NSEqualRects(frame,e.scroll.frame)) { e.scroll.frame=frame; CRUpdateInset(e); } }
 void cr_visible(uintptr_t ptr,int visible) { CREditor *e=CRE(ptr); if (!visible && e.window.firstResponder==e.text) cr_focus(ptr,0); e.scroll.hidden=!visible; }
 void cr_base_dir(uintptr_t ptr,const char *path) { CRE(ptr).baseDir=[NSString stringWithUTF8String:path]; }
 void cr_style(uintptr_t ptr,double zoom,int dark,int editable) {
@@ -1501,6 +1542,7 @@ void cr_style(uintptr_t ptr,double zoom,int dark,int editable) {
     if (e.zoom==zoom && e.dark==dark && e.text.editable==editable) return;
     BOOL figures=e.zoom!=zoom || e.dark!=dark;
     e.zoom=zoom; e.dark=dark; e.text.editable=editable;
+    CRUpdateInset(e);
     if (figures && !e.text.hasMarkedText) {
         // Attachments (formula images, sizing) are baked into the storage, so
         // a zoom or theme change rebuilds the document in place.
