@@ -7,18 +7,20 @@ package render
 type Kind int
 
 const (
-	KindHeading   Kind = iota // # .. ######
-	KindParagraph             // plain text with inline formatting
-	KindCodeBlock             // fenced or indented code
-	KindQuote                 // >
-	KindList                  // -, *, 1. (flat or nested)
-	KindTable                 // GFM pipe table
-	KindMathBlock             // $$ ... $$
-	KindDiagram               // mermaid / d2 / goat fenced block
-	KindChart                 // ```chart YAML data
-	KindImage                 // standalone image paragraph
-	KindHR                    // ---
-	KindHTML                  // raw HTML block, shown as source
+	KindHeading     Kind = iota // # .. ######
+	KindParagraph               // plain text with inline formatting
+	KindCodeBlock               // fenced or indented code
+	KindQuote                   // >
+	KindList                    // -, *, 1. (flat or nested)
+	KindTable                   // GFM pipe table
+	KindMathBlock               // $$ ... $$
+	KindDiagram                 // mermaid / d2 / goat fenced block
+	KindChart                   // ```chart YAML data
+	KindImage                   // standalone image paragraph
+	KindHR                      // ---
+	KindHTML                    // raw HTML block, shown as source
+	KindFrontMatter             // YAML front matter, shown as a meta card
+	KindTOC                     // [TOC] table-of-contents marker
 )
 
 // ListItem is one item of a list block.
@@ -29,6 +31,8 @@ type ListItem struct {
 	Task  bool
 	Done  bool
 	Depth int
+	// CheckboxOffset is the absolute source byte inside [ ]/[x], or -1.
+	CheckboxOffset int
 }
 
 // TableCell is one cell of a table row.
@@ -79,9 +83,12 @@ type Block struct {
 	ChartS string // chart YAML source
 
 	// KindImage
-	ImageURL   string
-	ImageAlt   string
-	ImageTitle string
+	ImageURL    string
+	ImageAlt    string
+	ImageTitle  string
+	ImageWidth  int // pixels, 0 = auto (from =WxH or <img width>)
+	ImageHeight int
+	ImageZoom   int // percent, 0 = none (from =NN%)
 }
 
 // HeadingText returns the plain text of a heading block (for the outline).

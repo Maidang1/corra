@@ -3,6 +3,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -49,6 +50,23 @@ func TestScanLibrary(t *testing.T) {
 	if lib.Notes[0].Folder != "" || lib.Notes[2].Folder != "work" {
 		t.Fatalf("folders of notes wrong: %+v", lib.Notes)
 	}
+	t.Run("empty folders and symlinks", func(t *testing.T) {
+		root := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(root, "empty", "child"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		outside := writeNote(t, t.TempDir(), "outside.md", "# Private", 0)
+		if err := os.Symlink(outside, filepath.Join(root, "link.md")); err != nil {
+			t.Fatal(err)
+		}
+		lib := ScanLibrary(root)
+		if got := lib.Folders(); !reflect.DeepEqual(got, []string{"empty", "empty/child"}) {
+			t.Errorf("folders = %v, want empty folders indexed", got)
+		}
+		if len(lib.Notes) != 0 {
+			t.Errorf("symlink note leaked into library: %+v", lib.Notes)
+		}
+	})
 }
 
 func TestFilter(t *testing.T) {
@@ -72,6 +90,104 @@ func TestFilter(t *testing.T) {
 	if got := len(lib.Filter("", "西瓜")); got != 0 {
 		t.Fatalf("search 西瓜 = %d, want 0", got)
 	}
+	t.Run("full source", func(t *testing.T) {
+		root := t.TempDir()
+		writeNote(t, root, "long.md", "# Title\n\n"+strings.Repeat("preview ", 30)+"\n\n```\nDeepNeedle\n```", 0)
+		lib := ScanLibrary(root)
+		if got := len(lib.Filter("", " deepneedle ")); got != 1 {
+			t.Errorf("full-source matches = %d, want 1", got)
+		}
+	})
+}
+
+func TestAppVisibleNotes(t *testing.T) {
+	root := t.TempDir()
+	writeNote(t, root, "active.md", "# Active", 0)
+	trashed := writeNote(t, root, ".trash/deleted.md", "# Deleted\n\n"+strings.Repeat("body ", 30)+"unique-token", time.Hour)
+	a := New()
+	a.LibraryRoot = root
+	a.SelFolder = TrashName
+	a.Query = "unique-token"
+	a.ScanLibrary()
+	if got := a.VisibleNotes(); len(got) != 1 || got[0].Path != trashed {
+		t.Fatalf("trash visible notes = %+v, want %s", got, trashed)
+	}
+	if len(a.Lib.Notes) != 1 || a.Lib.Notes[0].Title != "Active" {
+		t.Fatalf("active library contains trash: %+v", a.Lib.Notes)
+	}
+}
+
+func TestAppNewNote(t *testing.T) {
+	a := New()
+	a.LibraryRoot = t.TempDir()
+	a.SelFolder = TrashName
+	a.Query = "unmatched search"
+	a.Mode = ModePreview
+	if err := a.NewNote(); err != nil {
+		t.Fatal(err)
+	}
+	if a.SelFolder != "" || a.Query != "" || a.Mode != ModeEdit || len(a.VisibleNotes()) != 1 {
+		t.Fatalf("new note stays hidden: folder=%q query=%q mode=%v visible=%d", a.SelFolder, a.Query, a.Mode, len(a.VisibleNotes()))
+	}
+}
+
+func TestCreateNote(t *testing.T) {
+	t.Run("reject unsafe folders", func(t *testing.T) {
+		root := t.TempDir()
+		outside := t.TempDir()
+		if err := os.Symlink(outside, filepath.Join(root, "link")); err != nil {
+			t.Fatal(err)
+		}
+		for _, folder := range []string{"../escape", ".trash", "a/../../escape", "link", outside} {
+			if path, err := CreateNote(root, folder); err == nil {
+				t.Errorf("unsafe folder %q created %s", folder, path)
+			}
+		}
+	})
+	t.Run("repeated creation never overwrites", func(t *testing.T) {
+		root := t.TempDir()
+		seen := map[string]bool{}
+		for range 30 {
+			path, err := CreateNote(root, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if seen[path] {
+				t.Fatalf("overwrote %s", path)
+			}
+			seen[path] = true
+		}
+	})
+}
+
+func TestDeleteNote(t *testing.T) {
+	t.Run("reject outside and symlink sources", func(t *testing.T) {
+		root := t.TempDir()
+		outside := writeNote(t, t.TempDir(), "outside.md", "# Keep", 0)
+		if err := DeleteNote(root, outside); err == nil {
+			t.Error("deleted outside the library")
+		}
+		link := filepath.Join(root, "link.md")
+		if err := os.Symlink(outside, link); err != nil {
+			t.Fatal(err)
+		}
+		if err := DeleteNote(root, link); err == nil {
+			t.Error("deleted a symlink note")
+		}
+	})
+	t.Run("reject symlink trash", func(t *testing.T) {
+		root := t.TempDir()
+		path := writeNote(t, root, "keep.md", "# Keep", 0)
+		if err := os.Symlink(t.TempDir(), TrashDir(root)); err != nil {
+			t.Fatal(err)
+		}
+		if err := DeleteNote(root, path); err == nil {
+			t.Fatal("wrote through symlink trash")
+		}
+		if _, err := os.Stat(path); err != nil {
+			t.Fatal("source was lost", err)
+		}
+	})
 }
 
 func TestGroupByDate(t *testing.T) {

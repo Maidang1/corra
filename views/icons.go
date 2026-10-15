@@ -10,7 +10,7 @@ import (
 const iconStroke = `xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"`
 
 var (
-	iconCompose   = ui.MustParseSVG([]byte(`<svg ` + iconStroke + `><path d="M12.5 20h7"/><path d="M16.4 3.7a2.1 2.1 0 0 1 3 3L8.5 17.6 4.5 19l1.4-4Z"/></svg>`))
+	iconCompose   = ui.MustParseSVG([]byte(`<svg ` + iconStroke + `><path d="M11 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6"/><path d="M16.4 3.7a2.1 2.1 0 0 1 3 3L8.5 17.6 4.5 19l1.4-4Z"/></svg>`))
 	iconChecklist = ui.MustParseSVG([]byte(`<svg ` + iconStroke + `><path d="M10.5 6.5h10M10.5 12h10M10.5 17.5h10"/><path d="M3.5 6.5l1.3 1.3 2.4-2.4"/><path d="M3.5 12l1.3 1.3 2.4-2.4"/><path d="M4 17.5h3.4"/></svg>`))
 	iconTable     = ui.MustParseSVG([]byte(`<svg ` + iconStroke + `><rect x="3.5" y="5" width="17" height="14" rx="1.5"/><path d="M3.5 9.7h17M3.5 14.3h17M9.8 5v14"/></svg>`))
 	iconPaperclip = ui.MustParseSVG([]byte(`<svg ` + iconStroke + `><path d="M20.5 11.2l-7 7a5 5 0 0 1-7.1-7.1l7.8-7.8a3.4 3.4 0 0 1 4.8 4.8l-7.5 7.5a1.9 1.9 0 0 1-2.7-2.7l6.6-6.6"/></svg>`))
@@ -28,9 +28,14 @@ var (
 // a 18-DIP icon, without the theme button chrome — the way Apple Notes'
 // borderless toolbar icons read.
 func iconButton(c *ui.Context, icon *ui.SVG, tip string, fn func()) ui.Element {
-	btn := ui.ButtonBase(c).Tooltip(tip).Padding(5).Radius(6)
+	btn := ui.ButtonBase(c).Key(tip).Label(tip).Tooltip(tip).Size(36, 36).Radius(18)
+	if btn.Pressed() {
+		btn.Background(c.Theme().SurfacePressed)
+	} else if btn.Hovered() {
+		btn.Background(c.Theme().SurfaceHover)
+	}
 	btn.Children(func() {
-		ui.Icon(c, icon).Size(18, 18)
+		ui.Icon(c, icon).Size(21, 21)
 	})
 	return btn.OnClick(fn)
 }

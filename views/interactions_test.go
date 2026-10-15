@@ -1,0 +1,371 @@
+package views
+
+import (
+	"image/png"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/egoist/mygo/ui"
+
+	"github.com/Maidang1/corra/app"
+)
+
+func notesFixture(t *testing.T) (*View, *ui.Tester) {
+	t.Helper()
+	root := t.TempDir()
+	p := filepath.Join(root, "note.md")
+	if err := os.WriteFile(p, []byte("# Note\n\nBody\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := app.New()
+	a.LibraryRoot = root
+	a.ScanLibrary()
+	if err := a.OpenNote(p); err != nil {
+		t.Fatal(err)
+	}
+	v := New(a, app.NewImageLoader(""))
+	t.Cleanup(func() {
+		if v.autosaveTimer != nil {
+			v.autosaveTimer.Stop()
+		}
+	})
+	tt := ui.NewTester(v.Build, 1280, 820)
+	tt.SetTitleBar(ui.TitleBar{Height: 52, Left: 100})
+	return v, tt
+}
+
+func click(t *testing.T, tt *ui.Tester, label string) {
+	t.Helper()
+	if err := tt.Click(label); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSidebarButtonChangesVisibility(t *testing.T) {
+	v, tt := notesFixture(t)
+	before := v.App.Sidebar
+	click(t, tt, "切换边栏")
+	if v.App.Sidebar == before {
+		t.Fatal("sidebar button is a no-op")
+	}
+}
+
+func TestFormatControlHasVisibleText(t *testing.T) {
+	_, tt := notesFixture(t)
+	if !tt.HasText("Aa") {
+		t.Fatal("format control has no visible Aa")
+	}
+}
+
+func TestFlushSynchronizesPendingBuffer(t *testing.T) {
+	v, tt := notesFixture(t)
+	v.App.Mode = app.ModeEdit
+	tt.Frame()
+	v.edState.Select(0, 0)
+	v.edState.Insert("pending ")
+	v.flushAutosave()
+	got, err := os.ReadFile(v.App.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(got), "pending ") {
+		t.Fatalf("unsynced buffer lost on flush: %q", got)
+	}
+}
+
+func TestFlushDoesNotTouchCleanNote(t *testing.T) {
+	v, _ := notesFixture(t)
+	old := time.Date(2020, 1, 2, 3, 4, 5, 0, time.Local)
+	if err := os.Chtimes(v.App.Path, old, old); err != nil {
+		t.Fatal(err)
+	}
+	v.flushAutosave()
+	st, err := os.Stat(v.App.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.ModTime().Equal(old) {
+		t.Fatal("opening/exporting a clean note changes its date and ordering")
+	}
+}
+
+func TestPreviewMutationSchedulesSave(t *testing.T) {
+	v, tt := notesFixture(t)
+	v.App.AppendBlock("- [ ] persisted task")
+	tt.Frame()
+	if v.autosaveTimer == nil {
+		t.Fatal("preview mutations never schedule autosave")
+	}
+	v.flushAutosave()
+	got, err := os.ReadFile(v.App.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "persisted task") {
+		t.Fatal("preview change not persisted")
+	}
+}
+
+func TestTrashCannotBeEditedByToolbar(t *testing.T) {
+	v, tt := notesFixture(t)
+	v.App.SelFolder = app.TrashName
+	before := v.App.Source
+	tt.Frame()
+	click(t, tt, "插入任务列表")
+	if v.App.Source != before {
+		t.Fatal("toolbar edits a deleted note")
+	}
+}
+
+func TestToolbarMenusAndPersistence(t *testing.T) {
+	v, tt := notesFixture(t)
+	click(t, tt, "文本格式")
+	if err := tt.ChooseMenuItem("粗体"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(v.App.Source, "**文字**") {
+		t.Fatalf("format menu didn't edit: %q", v.App.Source)
+	}
+	click(t, tt, "插入表格")
+	if !strings.Contains(v.App.Source, "| 列 1 |") {
+		t.Fatal("table missing")
+	}
+	click(t, tt, "共享与导出")
+	if err := tt.ChooseMenuItem("复制 Markdown"); err != nil {
+		t.Fatal(err)
+	}
+	if tt.Clipboard() != v.App.Source {
+		t.Fatal("clipboard not current source")
+	}
+	if !v.FlushAutosave() {
+		t.Fatal(v.SaveError)
+	}
+	got, _ := os.ReadFile(v.App.Path)
+	if string(got) != v.App.Source {
+		t.Fatal("disk not current source")
+	}
+}
+
+func TestEmptyFolderClearsEditorAndTrashRestores(t *testing.T) {
+	v, tt := notesFixture(t)
+	path := v.App.Path
+	if err := v.App.CreateFolder("Empty"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	click(t, tt, "文件夹：Empty")
+	if v.App.Path != "" || !tt.HasText("未选择备忘录") {
+		t.Fatal("empty folder shows unrelated note")
+	}
+	click(t, tt, "文件夹：全部备忘录")
+	if err := v.App.DeleteSelectedNote(); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	click(t, tt, "文件夹：最近删除")
+	if len(v.App.VisibleNotes()) != 1 || v.App.Path == "" {
+		t.Fatal("trash note not loaded")
+	}
+	click(t, tt, "备忘录选项")
+	if err := tt.ChooseMenuItem("恢复备忘录"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal(err)
+	}
+	if v.App.SelFolder == app.TrashName {
+		t.Fatal("restore didn't return to active notes")
+	}
+}
+
+func TestSaveFailurePreventsNavigationAndResurrection(t *testing.T) {
+	v, tt := notesFixture(t)
+	if err := v.App.CreateFolder("Empty"); err != nil {
+		t.Fatal(err)
+	}
+	path := v.App.Path
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	v.App.AppendBlock("unsaved")
+	tt.Frame()
+	click(t, tt, "文件夹：Empty")
+	if v.App.Path != path || v.App.SelFolder != "" || !v.App.Dirty {
+		t.Fatal("failed save navigated away")
+	}
+	if v.SaveError == "" {
+		t.Fatal("save failure is silent")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("save resurrected deleted note")
+	}
+}
+
+func TestNotesShellSizes(t *testing.T) {
+	for _, width := range []int{960, 1280} {
+		for _, dark := range []bool{false, true} {
+			v, tt := notesFixture(t)
+			v.App.SetSource("可视化能力加强\n\n- 评测流程支持可视化查看，可按需展示实验和分析阶段。\n- 增加实验数据行详情，支持查看输入、模型输出与评分。\n", 0)
+			if !v.FlushAutosave() {
+				t.Fatal(v.SaveError)
+			}
+			if dark {
+				v.App.ThemeMode = app.ThemeDark
+			}
+			tt.SetSize(width, 820)
+			for _, label := range []string{"新建备忘录 (Cmd+N)", "文本格式", "插入表格", "共享与导出", "搜索备忘录"} {
+				r, ok := tt.Find(label)
+				if !ok || r.X < 0 || r.X+r.W > float32(width)+1 || r.W < 25 {
+					t.Fatalf("%s outside %d: %+v", label, width, r)
+				}
+			}
+			if dir := os.Getenv("CORRA_SCREENSHOTS"); dir != "" {
+				name := "light"
+				if dark {
+					name = "dark"
+				}
+				f, err := os.Create(filepath.Join(dir, name+itoa(width)+".png"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := png.Encode(f, tt.Image()); err != nil {
+					t.Fatal(err)
+				}
+				f.Close()
+			}
+		}
+	}
+}
+
+func TestTypingAutosavesOnUIFrame(t *testing.T) {
+	v, tt := notesFixture(t)
+	click(t, tt, "新建备忘录 (Cmd+N)")
+	click(t, tt, "备忘录正文")
+	tt.Type("keyboard edit")
+	if !strings.Contains(v.App.Source, "keyboard edit") {
+		t.Fatalf("typing did not reach source: %q", v.App.Source)
+	}
+	v.autosaveDue = time.Now().Add(-time.Second)
+	tt.Frame()
+	got, err := os.ReadFile(v.App.Path)
+	if err != nil || string(got) != v.App.Source || v.App.Dirty {
+		t.Fatalf("UI-frame autosave failed: %s / %v", got, err)
+	}
+}
+
+func TestFolderDialogAndFullTextSearch(t *testing.T) {
+	v, tt := notesFixture(t)
+	click(t, tt, "新建文件夹")
+	click(t, tt, "文件夹名称")
+	tt.Type("Projects")
+	click(t, tt, "确定")
+	if _, err := os.Stat(filepath.Join(v.App.LibraryRoot, "Projects")); err != nil {
+		t.Fatal(err)
+	}
+	v.App.AppendBlock(strings.Repeat("long body ", 30) + "needleXYZ")
+	if !v.FlushAutosave() {
+		t.Fatal(v.SaveError)
+	}
+	tt.Frame()
+	click(t, tt, "搜索备忘录")
+	tt.Type("needleXYZ")
+	if len(v.App.VisibleNotes()) != 1 {
+		t.Fatal("full body search returned nothing")
+	}
+}
+
+func TestPreviewTaskPreservesNestedSource(t *testing.T) {
+	v, tt := notesFixture(t)
+	src := "- [ ] parent\n  - [ ] child\n    continuation\n- [x] done\n"
+	v.App.SetSource(src, 0)
+	tt.Frame()
+	click(t, tt, "任务：parent")
+	want := strings.Replace(src, "[ ]", "[x]", 1)
+	if v.App.Source != want {
+		t.Fatalf("checkbox rewrote unrelated list source: %q", v.App.Source)
+	}
+}
+
+func TestDeleteConfirmationAndRestoreClicks(t *testing.T) {
+	v, tt := notesFixture(t)
+	path := v.App.Path
+	click(t, tt, "备忘录选项")
+	if err := tt.ChooseMenuItem("删除备忘录…"); err != nil {
+		t.Fatal(err)
+	}
+	click(t, tt, "取消")
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal("cancel deleted note")
+	}
+	click(t, tt, "备忘录选项")
+	if err := tt.ChooseMenuItem("删除备忘录…"); err != nil {
+		t.Fatal(err)
+	}
+	click(t, tt, "删除")
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("delete did not move note")
+	}
+	click(t, tt, "文件夹：最近删除")
+	click(t, tt, "备忘录选项")
+	if err := tt.ChooseMenuItem("恢复备忘录"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAttachmentAndExportCallbacks(t *testing.T) {
+	v, tt := notesFixture(t)
+	v.OnInsertImage = func() { v.InsertMarkdown("![image](image.png)") }
+	exported := ""
+	v.OnExportPDF = func() { exported = v.App.Source }
+	tt.Frame()
+	click(t, tt, "插入图片（可上传图床）")
+	if !strings.Contains(v.App.Source, "![image]") {
+		t.Fatal("attachment callback not invoked")
+	}
+	click(t, tt, "共享与导出")
+	if err := tt.ChooseMenuItem("导出 PDF…"); err != nil {
+		t.Fatal(err)
+	}
+	if exported != v.App.Source {
+		t.Fatal("export did not receive current source")
+	}
+}
+
+func TestTrashCannotOpenBlockEditor(t *testing.T) {
+	v, _ := notesFixture(t)
+	v.App.SelFolder = app.TrashName
+	v.openBlockEditor(0, "text", false)
+	if v.App.EditOpen {
+		t.Fatal("trash opened editable modal")
+	}
+}
+
+func TestStructuredBlockOpensFullSourceWithoutRewriting(t *testing.T) {
+	v, tt := notesFixture(t)
+	src := "# Title\n\n```go\nfmt.Println(1)\n```\n"
+	v.App.SetSource(src, 0)
+	tt.Frame()
+	v.openBlockEditor(1, "```go\nfmt.Println(1)\n```", false)
+	tt.Frame()
+	if v.App.Mode != app.ModeEdit || v.App.EditOpen || v.App.Source != src {
+		t.Fatal("structured preview did not navigate to full source editor")
+	}
+}
+
+func TestCollapsedSidebarAtMinimumWidth(t *testing.T) {
+	_, tt := notesFixture(t)
+	tt.SetSize(960, 560)
+	click(t, tt, "切换边栏")
+	for _, label := range []string{"新建备忘录 (Cmd+N)", "文本格式", "插入表格", "共享与导出", "搜索备忘录"} {
+		r, ok := tt.Find(label)
+		if !ok || r.X+r.W > 961 || r.W < 25 {
+			t.Fatalf("collapsed toolbar %s out of bounds %+v", label, r)
+		}
+	}
+}

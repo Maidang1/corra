@@ -70,6 +70,11 @@ func (a *App) NewNote() error {
 		return err
 	}
 	a.ScanLibrary()
+	a.mu.Lock()
+	a.SelFolder = folder
+	a.Query = ""
+	a.Mode = ModeEdit
+	a.mu.Unlock()
 	return a.OpenNote(path)
 }
 

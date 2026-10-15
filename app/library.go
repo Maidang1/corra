@@ -5,6 +5,7 @@ package app
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -28,13 +29,16 @@ type Note struct {
 	Folder  string    // folder relative to the library root ("" = root)
 	Title   string    // first heading or first line
 	Snippet string    // a short plain-text preview of the body
+	Source  string    // full Markdown source, indexed for search
 	ModTime time.Time // last modification, what the list sorts and groups by
 }
 
 // Library holds the scanned state of the notes folder.
 type Library struct {
-	Root  string
-	Notes []Note // sorted by ModTime, most recent first
+	Root       string
+	Notes      []Note // sorted by ModTime, most recent first
+	trashNotes []Note
+	folders    []string
 }
 
 // mdExt reports whether path is a Markdown file the library manages.
@@ -50,20 +54,32 @@ func mdExt(path string) bool {
 // Missing or unreadable roots yield an empty library, not an error.
 func ScanLibrary(root string) *Library {
 	lib := &Library{Root: root}
-	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+	if root == "" {
+		return lib
+	}
+	dir, err := os.OpenRoot(root)
+	if err != nil {
+		return lib
+	}
+	defer dir.Close()
+	_ = fs.WalkDir(dir.FS(), ".", func(rel string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil // skip unreadable entries
 		}
+		inTrash := rel == TrashName || strings.HasPrefix(rel, TrashName+"/")
 		if d.IsDir() {
-			if d.Name() == TrashName {
-				return filepath.SkipDir // the trash is its own sidebar row
+			if d.Name() == TrashName && rel != TrashName {
+				return fs.SkipDir
+			}
+			if rel != "." && !inTrash {
+				lib.folders = append(lib.folders, rel)
 			}
 			return nil
 		}
-		if !mdExt(path) {
+		if !d.Type().IsRegular() || !mdExt(rel) {
 			return nil
 		}
-		data, err := os.ReadFile(filepath.Clean(path))
+		data, err := dir.ReadFile(filepath.FromSlash(rel))
 		if err != nil {
 			return nil
 		}
@@ -71,34 +87,49 @@ func ScanLibrary(root string) *Library {
 		if err != nil {
 			return nil
 		}
-		folder, err := filepath.Rel(root, filepath.Dir(path))
-		if err != nil || folder == "." {
+		folder := filepath.Dir(filepath.FromSlash(rel))
+		if folder == "." {
 			folder = ""
 		}
+		if inTrash {
+			folder = TrashName
+		}
 		title, snippet := NoteMeta(string(data))
-		lib.Notes = append(lib.Notes, Note{
-			Path:    path,
+		note := Note{
+			Path:    filepath.Join(root, filepath.FromSlash(rel)),
 			Folder:  filepath.ToSlash(folder),
 			Title:   title,
 			Snippet: snippet,
+			Source:  string(data),
 			ModTime: info.ModTime(),
-		})
+		}
+		if inTrash {
+			lib.trashNotes = append(lib.trashNotes, note)
+		} else {
+			lib.Notes = append(lib.Notes, note)
+		}
 		return nil
 	})
-	sort.Slice(lib.Notes, func(i, j int) bool {
-		if !lib.Notes[i].ModTime.Equal(lib.Notes[j].ModTime) {
-			return lib.Notes[i].ModTime.After(lib.Notes[j].ModTime)
-		}
-		return lib.Notes[i].Path < lib.Notes[j].Path
-	})
+	for _, notes := range [][]Note{lib.Notes, lib.trashNotes} {
+		sort.Slice(notes, func(i, j int) bool {
+			if !notes[i].ModTime.Equal(notes[j].ModTime) {
+				return notes[i].ModTime.After(notes[j].ModTime)
+			}
+			return notes[i].Path < notes[j].Path
+		})
+	}
 	return lib
 }
 
-// Folders returns the distinct folder names of the library's notes,
+// Folders returns the distinct folder names, including empty directories,
 // sorted, "" (root) excluded — root notes show under "全部".
 func (l *Library) Folders() []string {
 	seen := map[string]bool{}
 	var out []string
+	for _, folder := range l.folders {
+		seen[folder] = true
+		out = append(out, folder)
+	}
 	for _, n := range l.Notes {
 		if n.Folder == "" || seen[n.Folder] {
 			continue
@@ -110,17 +141,22 @@ func (l *Library) Folders() []string {
 	return out
 }
 
-// Filter returns the notes of a folder ("" = all) whose title or snippet
+// Filter returns the notes of a folder ("" = all active notes) whose source
 // contains query (case-insensitive, empty matches all), keeping the
 // ModTime ordering.
 func (l *Library) Filter(folder, query string) []Note {
 	q := strings.ToLower(strings.TrimSpace(query))
-	out := make([]Note, 0, len(l.Notes))
-	for _, n := range l.Notes {
+	notes := l.Notes
+	if folder == TrashName {
+		notes = l.trashNotes
+	}
+	out := make([]Note, 0, len(notes))
+	for _, n := range notes {
 		if folder != "" && n.Folder != folder {
 			continue
 		}
 		if q != "" &&
+			!strings.Contains(strings.ToLower(n.Source), q) &&
 			!strings.Contains(strings.ToLower(n.Title), q) &&
 			!strings.Contains(strings.ToLower(n.Snippet), q) {
 			continue
@@ -265,64 +301,85 @@ func NoteMeta(src string) (title, snippet string) {
 // root) and returns its path. The name is a timestamp, the way Apple
 // Notes names notes internally; the title comes from the content.
 func CreateNote(root, folder string) (string, error) {
-	dir := root
-	if folder != "" {
-		dir = filepath.Join(root, filepath.FromSlash(folder))
+	rel, err := libraryFolder(folder, true)
+	if err != nil {
+		return "", err
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	dir, err := openLibraryRoot(root, true)
+	if err != nil {
+		return "", err
+	}
+	defer dir.Close()
+	if err := checkLibraryPath(dir, rel, true); err != nil {
+		return "", err
+	}
+	if err := dir.MkdirAll(rel, 0o755); err != nil {
 		return "", err
 	}
 	name := fmt.Sprintf("备忘录 %s.md", time.Now().Format("2006-01-02 15.04.05"))
-	path := filepath.Join(dir, name)
-	if _, err := os.Stat(path); err == nil {
-		// Same-second collision: bump the name.
-		name = fmt.Sprintf("备忘录 %s %d.md", time.Now().Format("2006-01-02 15.04.05"), time.Now().Nanosecond()/1e6)
-		path = filepath.Join(dir, name)
+	for i := 1; ; i++ {
+		path := filepath.Join(rel, numberedName(name, i))
+		f, err := dir.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if os.IsExist(err) {
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		_, writeErr := f.WriteString("# 新备忘录\n\n")
+		closeErr := f.Close()
+		if writeErr != nil {
+			_ = dir.Remove(path)
+			return "", writeErr
+		}
+		if closeErr != nil {
+			_ = dir.Remove(path)
+			return "", closeErr
+		}
+		return filepath.Join(root, path), nil
 	}
-	if err := os.WriteFile(path, []byte("# 新备忘录\n\n"), 0o644); err != nil {
-		return "", err
-	}
-	return path, nil
 }
 
 // DeleteNote moves a note into the library's trash; a note already in
 // the trash is removed permanently. The caller rescans the library.
 func DeleteNote(root, path string) error {
-	if !mdExt(path) {
-		return fmt.Errorf("不是 Markdown 文件: %s", path)
-	}
-	clean := filepath.Clean(path)
-	if filepath.Dir(clean) == TrashDir(root) {
-		return os.Remove(clean)
-	}
-	if err := os.MkdirAll(TrashDir(root), 0o755); err != nil {
+	dir, err := openLibraryRoot(root, false)
+	if err != nil {
 		return err
 	}
-	ext := filepath.Ext(clean)
-	base := strings.TrimSuffix(filepath.Base(clean), ext)
-	dest := filepath.Join(TrashDir(root), filepath.Base(clean))
-	for i := 2; ; i++ {
-		if _, err := os.Stat(dest); os.IsNotExist(err) {
-			break
-		}
-		dest = filepath.Join(TrashDir(root), fmt.Sprintf("%s (%d)%s", base, i, ext))
+	defer dir.Close()
+	rel, err := libraryNotePath(dir, root, path)
+	if err != nil {
+		return err
 	}
-	return os.Rename(clean, dest)
+	if isTrashPath(rel) {
+		return dir.Remove(rel)
+	}
+	if err := checkLibraryPath(dir, TrashName, true); err != nil {
+		return err
+	}
+	if err := dir.MkdirAll(TrashName, 0o755); err != nil {
+		return err
+	}
+	_, err = moveNoteWithAttachments(dir, root, rel, TrashName)
+	return err
 }
 
 // TrashCount returns how many notes the trash holds.
 func TrashCount(root string) int {
-	entries, err := os.ReadDir(TrashDir(root))
+	dir, err := openLibraryRoot(root, false)
 	if err != nil {
 		return 0
 	}
-	n := 0
-	for _, e := range entries {
-		if !e.IsDir() && mdExt(e.Name()) {
-			n++
+	defer dir.Close()
+	count := 0
+	_ = fs.WalkDir(dir.FS(), TrashName, func(path string, d fs.DirEntry, err error) error {
+		if err == nil && d.Type().IsRegular() && mdExt(path) {
+			count++
 		}
-	}
-	return n
+		return nil
+	})
+	return count
 }
 
 // SanitizeFileName maps a title to a safe file name (used when saving a

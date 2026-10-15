@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,13 +20,18 @@ import (
 
 // Invalidate connects the app to the window's redraw mechanism.
 func (a *App) Invalidate(svc ui.Services) {
+	a.mu.Lock()
 	a.services = svc
 	a.invalidate = svc.Invalidate
+	a.mu.Unlock()
 }
 
 func (a *App) InvalidateUI() {
-	if a.invalidate != nil {
-		a.invalidate()
+	a.mu.Lock()
+	invalidate := a.invalidate
+	a.mu.Unlock()
+	if invalidate != nil {
+		invalidate()
 	}
 }
 
@@ -48,8 +54,9 @@ func (a *App) BlockImage(key string, fn func() (image.Image, error)) (image.Imag
 		}()
 		return nil, false
 	}
+	img, ready := e.img, e.ready && e.err == nil
 	a.mu.Unlock()
-	return e.img, e.ready && e.err == nil
+	return img, ready
 }
 
 // Cache key for a block's rendered image.
@@ -71,16 +78,25 @@ type ImageLoader struct {
 }
 
 type bitmapEntry struct {
+	mu    sync.RWMutex
 	ready bool
 	bmp   *ui.Bitmap
 	err   error
 }
 
 // Result returns the decoded bitmap and whether it is ready.
-func (e *bitmapEntry) Result() (*ui.Bitmap, bool) { return e.bmp, e.ready && e.err == nil }
+func (e *bitmapEntry) Result() (*ui.Bitmap, bool) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.bmp, e.ready && e.err == nil
+}
 
 // Err returns the load error, if any.
-func (e *bitmapEntry) Err() error { return e.err }
+func (e *bitmapEntry) Err() error {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.err
+}
 
 // NewImageLoader creates a loader; cacheDir may be "" (no disk cache).
 func NewImageLoader(cacheDir string) *ImageLoader {
@@ -94,20 +110,33 @@ func NewImageLoader(cacheDir string) *ImageLoader {
 // Get returns the bitmap for a markdown image URL, loading it in the
 // background on first use. Local paths resolve relative to baseDir.
 func (l *ImageLoader) Get(url, baseDir string, invalidate func()) *bitmapEntry {
+	key := url
+	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+		if parsed, err := neturl.Parse(key); err == nil && parsed.Scheme == "" {
+			key = parsed.Path
+		}
+		if !filepath.IsAbs(key) {
+			key = filepath.Join(baseDir, key)
+		}
+		if absolute, err := filepath.Abs(key); err == nil {
+			key = absolute
+		}
+		url, baseDir = key, ""
+	}
 	l.mu.Lock()
-	e, ok := l.bitmaps[url]
+	e, ok := l.bitmaps[key]
 	if ok {
 		l.mu.Unlock()
 		return e
 	}
 	e = &bitmapEntry{}
-	l.bitmaps[url] = e
+	l.bitmaps[key] = e
 	l.mu.Unlock()
 	go func() {
 		bmp, err := l.load(url, baseDir)
-		l.mu.Lock()
+		e.mu.Lock()
 		e.bmp, e.err, e.ready = bmp, err, true
-		l.mu.Unlock()
+		e.mu.Unlock()
 		if invalidate != nil {
 			invalidate()
 		}
@@ -171,4 +200,25 @@ func (l *ImageLoader) loadRemote(url string) []byte {
 		_ = os.WriteFile(p, data, 0o644)
 	}
 	return data
+}
+
+// LoadImageBytes synchronously returns the encoded image bytes (PNG/JPEG…),
+// using the disk cache for remote URLs. Used by PDF export.
+func (l *ImageLoader) LoadImageBytes(url, baseDir string) ([]byte, error) {
+	if strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://") {
+		if data := l.loadRemote(url); len(data) > 0 {
+			return data, nil
+		}
+		return nil, fmt.Errorf("image: could not load %s", url)
+	}
+	p := url
+	if baseDir != "" && !filepath.IsAbs(p) {
+		p = filepath.Join(baseDir, p)
+	}
+	if parsed, err := neturl.Parse(p); err == nil && parsed.Scheme == "" {
+		if un, err := neturl.PathUnescape(parsed.Path); err == nil {
+			p = un
+		}
+	}
+	return os.ReadFile(filepath.Clean(p))
 }

@@ -31,6 +31,14 @@ func liberationTTF() []byte { return liberationsansregular.TTF }
 // ExportPDF renders a document to PDF. Diagram, chart and math blocks are
 // rasterized and embedded as images.
 func ExportPDF(ctx context.Context, doc *Document, title string) ([]byte, error) {
+	return ExportPDFOpts(ctx, doc, title, nil)
+}
+
+// ExportPDFOpts is ExportPDF with an optional image loader: it receives the
+// image URL (already resolved against the document directory by the caller)
+// and returns encoded PNG/JPEG bytes. Without a loader, image blocks render
+// their alt text.
+func ExportPDFOpts(ctx context.Context, doc *Document, title string, loadImage func(url string) ([]byte, error)) ([]byte, error) {
 	d := gpdf.NewDocument(
 		gpdf.WithFont(pdfFont, liberationTTF()),
 		gpdf.WithDefaultFont(pdfFont, pdfBaseSz),
@@ -40,6 +48,11 @@ func ExportPDF(ctx context.Context, doc *Document, title string) ([]byte, error)
 	)
 	page := d.AddPage()
 	for i, b := range doc.Blocks {
+		// Typora's page break: <div style="page-break-after: always"></div>
+		if b.Kind == KindHTML && strings.Contains(strings.ToLower(b.Source), "page-break-after") {
+			page = d.AddPage()
+			continue
+		}
 		if i > 0 {
 			page.AutoRow(func(r *template.RowBuilder) {
 				r.Col(12, func(c *template.ColBuilder) {
@@ -47,7 +60,7 @@ func ExportPDF(ctx context.Context, doc *Document, title string) ([]byte, error)
 				})
 			})
 		}
-		if err := pdfBlock(ctx, page, &b); err != nil {
+		if err := pdfBlock(ctx, page, &b, doc, loadImage); err != nil {
 			// Degrade: render failures show the block source.
 			pdfText(page, b.Source, template.FontSize(pdfBaseSz-1))
 		}
@@ -79,8 +92,30 @@ func pdfText(page *template.PageBuilder, s string, opts ...template.TextOption) 
 	})
 }
 
-func pdfBlock(ctx context.Context, page *template.PageBuilder, b *Block) error {
+func pdfBlock(ctx context.Context, page *template.PageBuilder, b *Block, doc *Document, loadImage func(string) ([]byte, error)) error {
 	switch b.Kind {
+	case KindFrontMatter:
+		lines := strings.Split(b.Source, "\n")
+		if len(lines) >= 2 {
+			lines = lines[1 : len(lines)-1]
+		}
+		pdfText(page, strings.Join(lines, "  ·  "), template.FontSize(pdfBaseSz-2))
+	case KindTOC:
+		var items []string
+		for _, hb := range doc.Blocks {
+			if hb.Kind != KindHeading {
+				continue
+			}
+			items = append(items, strings.Repeat("　", hb.Level-1)+PlainText(hb.Source))
+		}
+		if len(items) > 0 {
+			page.AutoRow(func(r *template.RowBuilder) {
+				r.Col(12, func(c *template.ColBuilder) {
+					c.Text("目录", template.FontSize(pdfBaseSz), template.Bold())
+					c.List(items)
+				})
+			})
+		}
 	case KindHeading:
 		size := map[int]float64{1: 21, 2: 17, 3: 14, 4: 12.5, 5: 11.5, 6: 11}[b.Level]
 		if size == 0 {
@@ -172,7 +207,18 @@ func pdfBlock(ctx context.Context, page *template.PageBuilder, b *Block) error {
 		}
 		return pdfImage(page, img)
 	case KindImage:
-		return nil // remote/local images are not embedded in v1
+		if loadImage != nil {
+			if data, err := loadImage(b.ImageURL); err == nil {
+				img, _, err := image.Decode(bytes.NewReader(data))
+				if err == nil {
+					return pdfImageSized(page, img, b)
+				}
+			}
+		}
+		if b.ImageAlt != "" {
+			pdfText(page, "[图片: "+b.ImageAlt+"]", template.FontSize(pdfBaseSz-1.5))
+		}
+		return nil
 	case KindHR:
 		page.AutoRow(func(r *template.RowBuilder) {
 			r.Col(12, func(c *template.ColBuilder) {
@@ -197,6 +243,28 @@ func pdfImage(page *template.PageBuilder, img image.Image) error {
 	page.AutoRow(func(r *template.RowBuilder) {
 		r.Col(12, func(c *template.ColBuilder) {
 			c.Image(buf.Bytes(), template.FitWidth(document.Mm(160)), template.WithAlign(document.AlignCenter))
+		})
+	})
+	return nil
+}
+
+// pdfImageSized embeds an image honoring the =WxH / =NN% size hints.
+func pdfImageSized(page *template.PageBuilder, img image.Image, b *Block) error {
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		return err
+	}
+	width := document.Mm(160) // fit column by default
+	w := img.Bounds().Dx()
+	switch {
+	case b.ImageWidth > 0:
+		width = document.Pt(float64(b.ImageWidth))
+	case b.ImageZoom > 0 && w > 0:
+		width = document.Pt(float64(w) * float64(b.ImageZoom) / 100 * 0.75) // px -> pt
+	}
+	page.AutoRow(func(r *template.RowBuilder) {
+		r.Col(12, func(c *template.ColBuilder) {
+			c.Image(buf.Bytes(), template.FitWidth(width), template.WithAlign(document.AlignCenter))
 		})
 	})
 	return nil

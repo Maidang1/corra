@@ -15,12 +15,12 @@ var (
 		Dark:           false,
 		Background:     ui.Hex("#ffffff"),
 		Surface:        ui.Hex("#ffffff"),
-		SurfaceHover:   ui.Hex("#f2f2f5"),
-		SurfacePressed: ui.Hex("#e4e4e8"),
-		Border:         ui.Hex("#e0e0e4"),
-		Text:           ui.Hex("#1f2126"),
-		TextMuted:      ui.Hex("#8a8f98"),
-		Accent:         ui.Hex("#0a84ff"),
+		SurfaceHover:   ui.Hex("#f6f6f6"),
+		SurfacePressed: ui.Hex("#e9ebed"),
+		Border:         ui.Hex("#e5e5e5"),
+		Text:           ui.Hex("#292929"),
+		TextMuted:      ui.Hex("#727272"),
+		Accent:         ui.Hex("#007aff"),
 		AccentHover:    ui.Hex("#0071e3"),
 		AccentPressed:  ui.Hex("#0060c2"),
 		AccentText:     ui.Hex("#ffffff"),
@@ -28,7 +28,7 @@ var (
 		Warning:        ui.Hex("#c98a1b"),
 		Success:        ui.Hex("#3f9e5f"),
 		Selection:      ui.Hex("#d6e4ff"),
-		Focus:          ui.Hex("#0a84ff"),
+		Focus:          ui.Hex("#007aff"),
 		Inverse:        ui.Hex("#22242a"),
 		InverseText:    ui.Hex("#f2f3f5"),
 		Scrollbar:      ui.Hex("#c9c9c4"),
@@ -43,7 +43,7 @@ var (
 		Border:         ui.Hex("#3a3c44"),
 		Text:           ui.Hex("#e7e9ee"),
 		TextMuted:      ui.Hex("#8b909a"),
-		Accent:         ui.Hex("#409cff"),
+		Accent:         ui.Hex("#0a67cf"),
 		AccentHover:    ui.Hex("#5aabff"),
 		AccentPressed:  ui.Hex("#2e8bef"),
 		AccentText:     ui.Hex("#ffffff"),
@@ -51,7 +51,7 @@ var (
 		Warning:        ui.Hex("#d9a13b"),
 		Success:        ui.Hex("#5cb87e"),
 		Selection:      ui.Hex("#2e4a86"),
-		Focus:          ui.Hex("#409cff"),
+		Focus:          ui.Hex("#0a67cf"),
 		Inverse:        ui.Hex("#eceef2"),
 		InverseText:    ui.Hex("#1a1b1f"),
 		Scrollbar:      ui.Hex("#3a3d45"),
@@ -59,8 +59,8 @@ var (
 	}
 
 	// Document typography.
-	fontUI   = "Segoe UI, Inter, SF Pro Text, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, sans-serif"
-	fontMono = "Cascadia Code, JetBrains Mono, SF Mono, Menlo, Consolas, Noto Sans Mono CJK SC, monospace"
+	fontUI   = "SF Pro Text, .AppleSystemUIFont, Helvetica Neue, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, sans-serif"
+	fontMono = "SF Mono, Menlo, Cascadia Code, JetBrains Mono, Consolas, Noto Sans Mono CJK SC, monospace"
 )
 
 // theme resolves the effective theme for the app's theme mode.
@@ -85,7 +85,7 @@ func (v *View) theme(c *ui.Context) *ui.Theme {
 		zoom = 1
 	}
 	tt := *t
-	tt.FontSize = 13.5 * zoom
+	tt.FontSize = 14 * zoom
 	tt.Font = fontUI
 	tt.Spacing = 4 * minZoom(zoom)
 	return &tt

@@ -14,6 +14,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/Maidang1/corra/app"
+	"github.com/Maidang1/corra/nativerich"
 	"github.com/Maidang1/corra/render"
 	"github.com/Maidang1/corra/views"
 )
@@ -26,6 +27,7 @@ var (
 	watcher     *app.Watcher
 	configDir   string
 	libraryRoot string
+	mainWindow  *mygo.Window
 )
 
 func main() {
@@ -36,18 +38,26 @@ func main() {
 		setupLibrary()
 
 		images = app.NewImageLoader(filepath.Join(configDir, "image-cache"))
+		view = views.New(editorApp, images)
 
 		win := mygo.NewWindow(mygo.WindowOptions{
-			Title:     "Corra",
-			Width:     1280,
-			Height:    820,
-			MinWidth:  960,
-			MinHeight: 560,
-			Content:   ui.View(buildView),
+			Title:                "Corra",
+			Width:                1280,
+			Height:               820,
+			MinWidth:             960,
+			MinHeight:            560,
+			Content:              ui.View(buildView),
+			TitleBarStyle:        mygo.TitleBarHiddenInset,
+			TrafficLightPosition: &mygo.Point{X: 20, Y: 22},
+			TitleBarHeight:       58,
 		})
+		mainWindow = win
+		if native := nativerich.New(win.NativeHandle(), view.NativeChanged, view.EditSource); native != nil {
+			view.AttachRichEditor(native)
+		}
 
 		fileOps = &app.FileOps{App: editorApp, Window: win}
-		view = views.New(editorApp, images)
+		fileOps.BeforeOpen = view.FlushAutosave
 		view.OnConflictResolve = func(reload bool) { fileOps.ResolveConflict(reload) }
 		view.OnNoteSaved = watchCurrent // our own autosave: re-arm the watcher
 		view.OnSaveHosting = func(cfg app.HostingConfig) {
@@ -58,21 +68,33 @@ func main() {
 		}
 		view.OnOpenRecent = func(path string) { fileOps.OpenPath(path) }
 		view.OnExportPDF = func() {
-			view.FlushAutosave()
-			fileOps.ExportPDF(exportPDF)
+			if view.SyncBuffer() {
+				fileOps.ExportPDF(exportPDF)
+			}
 		}
 		view.OnSave = func() bool {
-			view.FlushAutosave()
-			return fileOps.Save()
+			return view.FlushAutosave()
 		}
 		view.OnOpen = func() { fileOps.Open() }
 		view.OnInsertImage = func() { insertImageAndUpload(win) }
+		win.OnClose(func(e *mygo.CloseEvent) {
+			if !view.FlushAutosave() {
+				e.PreventDefault()
+			}
+		})
+		win.OnClosed(func() {
+			if watcher != nil {
+				watcher.Close()
+			}
+			view.Close()
+		})
 
 		editorApp.Hosting = app.LoadHosting(configDir)
 		editorApp.HasSysDark = true
 		editorApp.SysDark = mygo.Theme.IsDark()
+		mygo.Theme.OnUpdated(func() { win.Update(func() { editorApp.SysDark = mygo.Theme.IsDark(); editorApp.InvalidateUI() }) })
 		editorApp.NoteOpened = func(string) { watchCurrent() }
-		fileOps.OnOpened = func(string) { watchCurrent() }
+		fileOps.OnOpened = func(string) { view.SaveError = ""; watchCurrent() }
 
 		mygo.App.SetMenu(buildMenu())
 
@@ -100,6 +122,7 @@ func main() {
 				fileOps.OpenDropped(p)
 			}
 		})
+		win.Update(func() { editorApp.InvalidateUI() })
 	})
 
 	if err := mygo.App.Run(); err != nil {
@@ -115,7 +138,9 @@ func buildView(c *ui.Context) {
 }
 
 func setupDirs() {
-	if dir, err := mygo.App.Path("userConfig"); err == nil {
+	if dir := os.Getenv("CORRA_CONFIG_DIR"); dir != "" {
+		configDir = dir
+	} else if dir, err := mygo.App.Path("userConfig"); err == nil {
 		configDir = dir
 	} else {
 		configDir = filepath.Join(os.TempDir(), "corra-config")
@@ -130,11 +155,13 @@ func setupDirs() {
 // time the folder is empty.
 func setupLibrary() {
 	libraryRoot = filepath.Join(configDir, "备忘录")
+	_, statErr := os.Stat(libraryRoot)
+	firstLaunch := os.IsNotExist(statErr)
 	if err := os.MkdirAll(libraryRoot, 0o755); err != nil {
 		fmt.Fprintf(os.Stderr, "library dir: %v\n", err)
 	}
 	editorApp.LibraryRoot = libraryRoot
-	if lib := app.ScanLibrary(libraryRoot); len(lib.Notes) == 0 {
+	if firstLaunch {
 		path := filepath.Join(libraryRoot, "欢迎使用 Corra.md")
 		if err := os.WriteFile(path, []byte(app.Welcome), 0o644); err != nil {
 			fmt.Fprintf(os.Stderr, "seed note: %v\n", err)
@@ -148,6 +175,7 @@ func openMostRecent() {
 	editorApp.ScanLibrary()
 	notes := editorApp.VisibleNotes()
 	if len(notes) == 0 {
+		editorApp.NewDocument()
 		return
 	}
 	if err := editorApp.OpenNote(notes[0].Path); err != nil {
@@ -163,19 +191,35 @@ func watchCurrent() {
 	}
 	path := editorApp.CurrentPath()
 	if path != "" {
-		watcher = app.NewWatcher(editorApp, path)
+		watcher = app.NewWatcherOnUI(editorApp, path, mainWindow.Update)
 	}
 }
 
 // exportPDF renders the current document to PDF bytes. The source is
 // parsed fresh so edits made after the last preview are never lost.
 func exportPDF(title string) ([]byte, error) {
-	return render.ExportPDF(context.Background(), render.Parse(editorApp.CurrentSource()), title)
+	src := editorApp.CurrentSource()
+	baseDir := ""
+	if p := editorApp.CurrentPath(); p != "" {
+		baseDir = filepath.Dir(p)
+	}
+	loader := func(url string) ([]byte, error) {
+		return images.LoadImageBytes(url, baseDir)
+	}
+	return render.ExportPDFOpts(context.Background(), render.ParseOptions(src, editorApp.SmartPunct), title, loader)
+}
+
+// exportHTML renders the current document to a standalone HTML page.
+func exportHTML(title string) ([]byte, error) {
+	return render.ExportHTML(editorApp.CurrentSource(), title, editorApp.SmartPunct)
 }
 
 // insertImageAndUpload asks for an image file, uploads it when hosting is
 // configured, and inserts the markdown reference at the end.
 func insertImageAndUpload(win *mygo.Window) {
+	if !view.FlushAutosave() || editorApp.CurrentPath() == "" {
+		return
+	}
 	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
 		Parent: win, Title: "插入图片",
 		Filters: []mygo.FileFilter{{Name: "Images", Extensions: []string{"png", "jpg", "jpeg", "gif", "webp", "svg"}}},
@@ -210,6 +254,5 @@ func insertImageAndUpload(win *mygo.Window) {
 		}
 	}
 	alt := strings.TrimSuffix(filepath.Base(p), filepath.Ext(p))
-	editorApp.AppendBlock(fmt.Sprintf("![%s](%s)", alt, url))
-	watchCurrent()
+	view.InsertMarkdown(fmt.Sprintf("![%s](<%s>)", strings.ReplaceAll(alt, "]", "\\]"), strings.ReplaceAll(url, ">", "%3E")))
 }

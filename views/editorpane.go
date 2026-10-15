@@ -20,8 +20,25 @@ const autosaveDelay = 600 * time.Millisecond
 // document (preview mode).
 func (v *View) editorPane(c *ui.Context) {
 	t := c.Theme()
+	if v.App.Path == "" && v.App.Source == "" {
+		ui.Column(c).Fill().Center().Gap(12).Children(func() {
+			ui.Text(c, "未选择备忘录").FontSize(20).TextColor(t.TextMuted)
+			ui.Button(c, "新建备忘录").OnClick(v.newNote)
+		})
+		return
+	}
+	if v.App.Mode == app.ModeRich && v.rich != nil {
+		ui.Column(c).Fill().Gap(0).Children(func() {
+			ui.Box(c).Fill().Children(func() { v.richPane(c) })
+			v.statusBar(c)
+		})
+		return
+	}
 	if v.App.Mode == app.ModePreview {
-		v.previewPane(c)
+		ui.Column(c).Fill().Gap(0).Children(func() {
+			ui.Box(c).Fill().Children(func() { v.previewPane(c) })
+			v.statusBar(c)
+		})
 		return
 	}
 	ui.Column(c).Fill().Gap(0).Background(t.Surface).Children(func() {
@@ -34,9 +51,31 @@ func (v *View) editorPane(c *ui.Context) {
 		// Keep the editing surface the column's white as the theme
 		// changes; colors left zero follow the window theme.
 		v.edState.Theme = &editor.Theme{Background: t.Surface}
-		editor.View(c, v.edState).Fill()
+		v.edState.ReadOnly = !v.canEdit()
+		v.edState.Font = ui.Font{Family: fontMono, Size: 14 * v.App.Zoom}
+		ui.Box(c).Fill().Padding(2, 22, 12, 22).Children(func() {
+			e := editor.View(c, v.edState).Fill()
+			if v.focusEditor {
+				e.Focus()
+				v.focusEditor = false
+			}
+		})
+		v.statusBar(c)
 	})
 	v.syncEditor()
+}
+
+// statusBar is the word-count strip at the editor column's bottom edge
+// (Typora shows counts in its status bar; toggleable in the view menu).
+func (v *View) statusBar(c *ui.Context) {
+	if !v.App.WordCount {
+		return
+	}
+	t := c.Theme()
+	ui.Row(c).FillWidth().Padding(3, 22, 6, 22).Children(func() {
+		ui.Spacer(c)
+		ui.Text(c, countWords(v.App.CurrentSource()).String()).FontSize(11).TextColor(t.TextMuted).NoWrap()
+	})
 }
 
 // dateHeader shows the note's modification time centered on top, the way
@@ -51,9 +90,15 @@ func (v *View) dateHeader(c *ui.Context) {
 	} else if v.App.Path != "" {
 		label = "尚未保存"
 	}
-	ui.Box(c).FillWidth().Padding(10, 0).Center().Children(func() {
+	ui.Column(c).FillWidth().Padding(8, 0, 6, 0).Center().Children(func() {
 		if label != "" {
-			ui.Text(c, label).FontSize(12).TextColor(t.TextMuted)
+			ui.Text(c, label).FontSize(12).TextColor(t.TextMuted).NoWrap()
+		}
+		if v.SaveError != "" {
+			ui.Text(c, "未保存："+v.SaveError).FontSize(11).TextColor(t.Danger)
+		}
+		if v.App.SelFolder == app.TrashName {
+			ui.Text(c, "已删除的备忘录 · 恢复后可编辑").FontSize(11).TextColor(t.TextMuted)
 		}
 	})
 }
@@ -94,12 +139,15 @@ func (v *View) ensureEditor() {
 	}
 	buf.SetLanguage(editor.LanguageFor("note.md"))
 	v.edState = &editor.State{
-		Buffer:      buf,
-		SoftWrap:    true,
-		LineHeight:  1.65,
-		LineNumbers: editor.LineNumbersOff,
-		Placeholder: "开始输入 Markdown…",
-		Label:       "备忘录正文",
+		Buffer:          buf,
+		SoftWrap:        true,
+		LineHeight:      1.45,
+		NoActiveLine:    true,
+		NoIndentGuides:  true,
+		NoScrollPastEnd: true,
+		LineNumbers:     editor.LineNumbersOff,
+		Placeholder:     "开始输入 Markdown…",
+		Label:           "备忘录正文",
 	}
 	if caret > 0 {
 		v.edState.Select(caret, caret)
@@ -112,8 +160,8 @@ func (v *View) ensureEditor() {
 // syncEditor copies editor changes into App.Source and schedules the
 // autosave. The document itself re-parses when preview opens, so typing
 // never triggers a rebuild of the widget under the caret.
-func (v *View) syncEditor() {
-	if v.edState == nil {
+func (v *View) syncSourceEditor() {
+	if v.edState == nil || v.App.Mode != app.ModeEdit || v.edPath != v.App.Path || v.edBase != v.App.Source || !v.canEdit() {
 		return
 	}
 	ver := v.edState.Buffer.Version()
@@ -128,6 +176,7 @@ func (v *View) syncEditor() {
 	// scroll position and caret after every keystroke.
 	v.edBase = src
 	v.App.MarkSourceDirty(src)
+	v.SaveError = ""
 	v.scheduleAutosave()
 }
 
@@ -136,31 +185,66 @@ func (v *View) scheduleAutosave() {
 	if v.autosaveTimer != nil {
 		v.autosaveTimer.Stop()
 	}
-	v.autosaveTimer = time.AfterFunc(autosaveDelay, v.autosave)
+	v.autosaveDue = time.Now().Add(autosaveDelay)
+	v.autosaveSource = v.App.Source
+	// Timers only request a frame. Buffer access and disk writes stay on
+	// the UI thread, so an old timer cannot save a different note.
+	wake := v.invalidate
+	v.autosaveTimer = time.AfterFunc(autosaveDelay, func() {
+		if wake != nil {
+			wake()
+		}
+	})
+}
+
+func (v *View) processAutosave() {
+	if !v.App.Dirty {
+		return
+	}
+	if v.autosaveTimer == nil || v.autosaveSource != v.App.Source {
+		v.scheduleAutosave()
+	} else if !time.Now().Before(v.autosaveDue) && v.SaveError == "" && !v.App.Conflict {
+		v.autosave()
+	}
 }
 
 // flushAutosave writes any pending change immediately (note switches,
 // new/delete) so the list and disk never show stale content.
-func (v *View) flushAutosave() {
+func (v *View) flushAutosave() bool {
+	if !v.syncEditor() {
+		return false
+	}
 	if v.autosaveTimer != nil {
 		v.autosaveTimer.Stop()
 		v.autosaveTimer = nil
 	}
-	v.autosave()
+	return v.autosave()
 }
 
 // autosave writes the current note back to its file, updates the library
 // (title, snippet, order) and tells main to re-arm the file watcher.
-func (v *View) autosave() {
+func (v *View) autosave() bool {
+	if !v.App.Dirty {
+		return true
+	}
+	if v.App.Conflict {
+		v.SaveError = "请先处理外部修改冲突"
+		return false
+	}
 	path := v.App.CurrentPath()
-	if path == "" {
-		return
+	if path == "" || !v.canEdit() {
+		v.SaveError = "当前备忘录无法保存"
+		return false
 	}
 	src := v.App.CurrentSource()
-	if err := os.WriteFile(filepath.Clean(path), []byte(src), 0o644); err != nil {
-		return
+	err := app.SaveExistingNote(path, src)
+	if err != nil {
+		v.SaveError = err.Error()
+		v.App.InvalidateUI()
+		return false
 	}
-	if v.edState != nil {
+	v.SaveError = ""
+	if v.edState != nil && v.edPath == path && v.edBase == src {
 		v.edState.Buffer.MarkSaved()
 	}
 	v.App.MarkSaved()
@@ -168,6 +252,7 @@ func (v *View) autosave() {
 	if v.OnNoteSaved != nil {
 		v.OnNoteSaved()
 	}
+	return true
 }
 
 // previewPane renders the parsed document read-only, on the column's
@@ -176,8 +261,8 @@ func (v *View) previewPane(c *ui.Context) {
 	ui.Column(c).Fill().Gap(0).Background(c.Theme().Surface).Children(func() {
 		v.dateHeader(c)
 		ui.Scroll(c).Fill().Children(func() {
-			ui.Column(c).FillWidth().Center().Children(func() {
-				ui.Column(c).MaxWidth(760).Gap(12).Padding(20, 40, 48, 40).
+			ui.Column(c).FillWidth().Children(func() {
+				ui.Column(c).FillWidth().Gap(9).Padding(4, 26, 48, 26).
 					Children(func() {
 						for i := range v.App.Doc.Blocks {
 							v.block(c, i)

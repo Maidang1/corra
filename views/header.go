@@ -1,186 +1,184 @@
 package views
 
 import (
-	"github.com/egoist/mygo/ui"
+	"strconv"
+	"strings"
 
 	"github.com/Maidang1/corra/app"
+	"github.com/egoist/mygo/ui"
 )
 
-// Column widths, shared by the header sections and the columns below so
-// the header lines up with the panes.
 const (
-	sidebarW = 200.0
-	listW    = 300.0
+	sidebarW = 248.0
+	listW    = 224.0
+	toolbarH = 58.0
 )
 
-// header renders the window's single header row, the way Apple Notes
-// does it: a sidebar section, the list's title ("全部备忘录 / N 个备忘
-// 录" with a delete affordance), and the note column's action icons with
-// the search field on the far right.
 func (v *View) header(c *ui.Context) {
 	t := c.Theme()
-	ui.Box(c).FillWidth().Background(t.Surface).Children(func() {
-		ui.Row(c).FillWidth().Children(func() {
-			v.headerSidebar(c)
-			v.headerList(c)
-			v.headerEditor(c)
+	ui.Row(c).FillWidth().Height(toolbarH).Gap(0).Background(t.Surface).
+		Shadow(0, 5, 16, 0, ui.Hex("#00000008")).Children(func() {
+		if !v.App.Sidebar {
+			ui.Row(c).Padding(0, 8, 0, max(12, c.TitleBar().Left)).Children(func() {
+				iconButton(c, iconSidebar, "切换边栏", v.toggleSidebar)
+			})
+		}
+		ui.Row(c).Width(listW).FillHeight().Padding(6, 14, 6, 20).Gap(8).Children(func() {
+			ui.Column(c).Grow(1).Gap(0).DragWindow().Children(func() {
+				ui.Text(c, folderLabel(v.App.SelFolder)).FontSize(14).Bold().NoWrap().Clip()
+				ui.Text(c, itoa(len(v.App.VisibleNotes()))+" 个备忘录").FontSize(12).TextColor(t.TextMuted)
+			})
+			toolbarCapsule(c).Children(func() {
+				iconButton(c, iconEllipsis, "文件夹选项", nil).Menu(v.folderMenu)
+			})
+		})
+		ui.Row(c).Grow(1).FillHeight().Padding(6, max(10, c.TitleBar().Right), 6, 12).Gap(12).Children(func() {
+			toolbarCapsule(c).Children(func() { iconButton(c, iconCompose, "新建备忘录 (Cmd+N)", v.newNote) })
+			toolbarCapsule(c).Children(func() {
+				ui.ButtonBase(c).Key("format").Label("文本格式").Tooltip("文本格式").Size(36, 36).Radius(18).
+					Disabled(!v.canEdit()).Children(func() { ui.Text(c, "Aa").FontSize(18).TextColor(t.TextMuted) }).Menu(v.formatMenu)
+				iconButton(c, iconChecklist, "插入任务列表", func() { v.insertSnippet("- [ ] ") }).Disabled(!v.canEdit())
+				iconButton(c, iconTable, "插入表格", func() { v.insertSnippet("\n| 列 1 | 列 2 | 列 3 |\n| --- | --- | --- |\n|  |  |  |\n") }).Disabled(!v.canEdit())
+				iconButton(c, iconPaperclip, "插入图片（可上传图床）", func() {
+					if v.flushAutosave() && v.OnInsertImage != nil {
+						v.OnInsertImage()
+					}
+				}).Disabled(!v.canEdit() || v.OnInsertImage == nil)
+			})
+			toolbarCapsule(c).Children(func() {
+				iconButton(c, iconShare, "共享与导出", nil).Disabled(v.App.Path == "").Menu(func(m *ui.Menu) {
+					if m.Item("复制 Markdown").Chosen() {
+						if v.syncEditor() {
+							c.Services().WriteClipboard(v.App.Source)
+						}
+					}
+					if m.Item("导出 PDF…").Disabled(v.OnExportPDF == nil).Chosen() {
+						if v.syncEditor() {
+							v.OnExportPDF()
+						}
+					}
+				})
+				iconButton(c, iconEllipsis, "备忘录选项", nil).Menu(v.noteMenu)
+			})
+			v.searchBox(c)
 		})
 	})
 	ui.Divider(c).FillWidth()
 }
 
-// headerSidebar is the gray stub above the sidebar; its button would
-// toggle the sidebar (kept visible always for now).
-func (v *View) headerSidebar(c *ui.Context) {
+func toolbarCapsule(c *ui.Context) ui.Element {
 	t := c.Theme()
-	ui.Box(c).Width(sidebarW).FillHeight().Background(sidebarBackground(t)).
-		Padding(8, 10).Children(func() {
-		iconButton(c, iconSidebar, "切换边栏", func() {
-			// The sidebar is always visible in this version.
-		})
-	})
+	bg, rim := ui.Hex("#fafafa"), ui.Hex("#ffffff")
+	if t.Dark {
+		bg, rim = ui.Hex("#303032"), ui.Hex("#48484a")
+	}
+	return ui.Row(c).Gap(2).Padding(1, 3).Radius(24).Background(bg).Border(1, rim).
+		Shadow(0, 3, 12, 0, ui.Hex("#0000000a"))
 }
 
-// headerList shows the selected folder's name and note count, with the
-// delete button on the right — "All iCloud / 2 notes / …" in Apple Notes.
-func (v *View) headerList(c *ui.Context) {
-	t := c.Theme()
-	ui.Box(c).Width(listW).FillHeight().Padding(7, 12).Children(func() {
-		ui.Row(c).FillWidth().Center().Children(func() {
-			ui.Column(c).Gap(0).Children(func() {
-				ui.Text(c, folderLabel(v.App.SelFolder)).FontSize(15).Bold()
-				n := len(v.App.VisibleNotes())
-				word := "个备忘录"
-				if v.App.SelFolder == app.TrashName {
-					word = "个已删除"
-				}
-				ui.Text(c, itoa(n)+word).FontSize(11.5).TextColor(t.TextMuted)
-			})
-			ui.Spacer(c)
-			iconButton(c, iconTrash, "删除所选备忘录 (Backspace)", v.deleteNote)
-		})
-	})
-}
-
-// headerEditor holds the note actions — compose, edit/preview, task,
-// table, attachment, share, theme — and the search field on the right.
-func (v *View) headerEditor(c *ui.Context) {
-	t := c.Theme()
-	ui.Box(c).Grow(1).FillHeight().Padding(6, 12).Children(func() {
-		ui.Row(c).FillWidth().Center().Gap(2).Children(func() {
-			iconButton(c, iconCompose, "新建备忘录 (Cmd+N)", v.newNote)
-
-			// Aa switches between the rendered note and the Markdown
-			// source editor; it highlights while editing.
-			aa := ui.ButtonBase(c).Tooltip("切换 编辑 / 预览 (Cmd+E)").
-				Padding(4, 8).Radius(6).FontSize(13).Bold()
-			if v.App.Mode == app.ModeEdit {
-				aa = aa.Background(t.SurfacePressed)
-			}
-			aa.OnClick(func() { v.toggleMode() })
-
-			iconButton(c, iconChecklist, "插入任务列表", func() {
-				v.insertSnippet("- [ ] ")
-			})
-			iconButton(c, iconTable, "插入表格", func() {
-				v.insertSnippet("\n| 列 1 | 列 2 | 列 3 |\n| --- | --- | --- |\n|  |  |  |\n")
-			})
-			iconButton(c, iconPaperclip, "插入图片（可上传图床）", func() {
-				if v.OnInsertImage != nil {
-					v.OnInsertImage()
-				}
-			})
-			iconButton(c, iconShare, "导出 PDF", func() {
-				if v.OnExportPDF != nil {
-					v.OnExportPDF()
-				}
-			})
-
-			iconButton(c, v.themeIcon(), "切换 浅色 / 深色", v.toggleTheme)
-
-			ui.Spacer(c)
-
-			v.searchBox(c)
-		})
-	})
-}
-
-// searchBox is the rounded "Q 搜索" field of the header's right side.
 func (v *View) searchBox(c *ui.Context) {
 	t := c.Theme()
-	ui.Box(c).Width(190).Padding(1, 10).Radius(8).
-		Border(1, t.Border).Background(t.Background).Children(func() {
-		ui.Row(c).FillWidth().Gap(6).Center().Children(func() {
-			ui.Icon(c, iconSearch).Size(13, 13)
-			ui.TextInput(c, &v.App.Query).Placeholder("搜索").
-				FontSize(12)
-		})
+	ui.Row(c).Key("search").Grow(1).MinWidth(90).Height(40).Gap(7).Padding(0, 12).Radius(22).
+		Background(t.SurfaceHover).Border(1, t.Border).Children(func() {
+		ui.Icon(c, iconSearch).Size(17, 17).TextColor(t.TextMuted)
+		field := ui.TextInputBase(c, &v.App.Query).Label("搜索备忘录").Placeholder("搜索").FillWidth().FontSize(14).
+			OnChange(func() { v.reconcileSelection() })
+		if v.focusSearch {
+			field.Focus()
+			v.focusSearch = false
+		}
 	})
 }
 
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
+func itoa(n int) string { return strconv.Itoa(n) }
+
+func (v *View) toggleSidebar()       { v.App.Sidebar = !v.App.Sidebar; v.App.InvalidateUI() }
+func (v *View) ToggleSidebarAction() { v.toggleSidebar() }
+func (v *View) SearchAction() {
+	if v.rich != nil {
+		v.rich.Blur()
 	}
-	var b [8]byte
-	i := len(b)
-	for n > 0 {
-		i--
-		b[i] = byte('0' + n%10)
-		n /= 10
-	}
-	return string(b[i:])
+	v.focusSearch = true
+	v.App.InvalidateUI()
 }
 
-// themeIcon returns the sun or moon for the theme toggle.
-func (v *View) themeIcon() *ui.SVG {
-	if v.themeIsDark() {
-		return iconSun
-	}
-	return iconMoon
-}
+func (v *View) canEdit() bool { return v.App.Path != "" && v.App.SelFolder != app.TrashName }
 
-// toggleMode switches between the rendered note and the Markdown editor;
-// entering preview flushes edits and re-parses the source first.
 func (v *View) toggleMode() {
+	if !v.canEdit() {
+		return
+	}
+	if v.rich != nil {
+		if v.App.Mode != app.ModeEdit {
+			v.EditSource()
+			return
+		}
+		if !v.flushAutosave() {
+			return
+		}
+		v.App.Mode = app.ModeRich
+		v.focusEditor = true
+		v.App.InvalidateUI()
+		return
+	}
 	if v.App.Mode == app.ModeEdit {
-		v.flushAutosave()
+		if !v.flushAutosave() {
+			return
+		}
 		v.App.Mode = app.ModePreview
 		v.App.Refresh()
 	} else {
 		v.App.Mode = app.ModeEdit
+		v.focusEditor = true
 	}
 	v.App.InvalidateUI()
 }
 
-// insertSnippet inserts markdown at the caret in edit mode, or appends a
-// block in preview mode.
 func (v *View) insertSnippet(s string) {
-	if v.App.Mode == app.ModeEdit && v.edState != nil {
-		v.edState.Insert(s)
-		v.App.InvalidateUI()
+	if !v.canEdit() {
 		return
 	}
-	v.App.AppendBlock(s)
-}
-
-func (v *View) toggleTheme() {
-	switch v.App.ThemeMode {
-	case app.ThemeSystem:
-		if v.themeIsDark() {
-			v.App.ThemeMode = app.ThemeLight
-		} else {
-			v.App.ThemeMode = app.ThemeDark
-		}
-	case app.ThemeLight:
-		v.App.ThemeMode = app.ThemeDark
-	default:
-		v.App.ThemeMode = app.ThemeLight
+	if !v.syncEditor() {
+		return
 	}
+	if v.rich != nil && v.App.Mode != app.ModeEdit {
+		v.App.Mode = app.ModeRich
+		v.ensureRichEditor()
+		if strings.TrimSpace(s) == "- [ ]" {
+			v.rich.Format("checklist")
+		} else {
+			v.rich.InsertMarkdown(s)
+		}
+		v.rich.Focus()
+		v.NativeChanged()
+		return
+	}
+	wasPreview := v.App.Mode != app.ModeEdit
+	v.App.Mode = app.ModeEdit
+	v.ensureEditor()
+	if wasPreview {
+		end := v.edState.Buffer.Len()
+		v.edState.Select(end, end)
+		if end > 0 {
+			s = "\n" + s
+		}
+	}
+	v.edState.Insert(s)
+	v.syncEditor()
+	v.focusEditor = true
 	v.App.InvalidateUI()
 }
 
-// themeIsDark reports the effective appearance right now.
+func (v *View) InsertMarkdown(s string) { v.insertSnippet(s) }
+
+func (v *View) toggleTheme() {
+	if v.themeIsDark() {
+		v.App.ThemeMode = app.ThemeLight
+	} else {
+		v.App.ThemeMode = app.ThemeDark
+	}
+	v.App.InvalidateUI()
+}
 func (v *View) themeIsDark() bool {
 	if v.App.ThemeMode == app.ThemeDark {
 		return true
@@ -190,9 +188,5 @@ func (v *View) themeIsDark() bool {
 	}
 	return v.App.HasSysDark && v.App.SysDark
 }
-
-// ToggleThemeAction cycles the theme (exported for menus).
 func (v *View) ToggleThemeAction() { v.toggleTheme() }
-
-// ToggleModeAction switches edit/preview (exported for menus).
-func (v *View) ToggleModeAction() { v.toggleMode() }
+func (v *View) ToggleModeAction()  { v.toggleMode() }

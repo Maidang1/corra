@@ -22,14 +22,14 @@ const (
 	ThemeDark
 )
 
-// Mode is the pane mode of the editor column. The rendered preview is
-// the default, the way Apple Notes opens a note; Aa (Cmd+E) switches to
-// the Markdown source editor.
+// Mode is the pane mode. The native rich editor is the default when attached;
+// platforms without it retain the Markdown source and rendered preview.
 type Mode int
 
 const (
 	ModePreview Mode = iota // rendered, read-only document
 	ModeEdit                // full Markdown source editing
+	ModeRich                // native WYSIWYG editing
 )
 
 // App is the editor's root state. The view is a function of App; mutations
@@ -49,10 +49,20 @@ type App struct {
 	ThemeMode   ThemeMode
 	Zoom        float32 // 1 = 100%
 	Sidebar     bool
-	OutlineSel  int // selected outline row
+	Outline     bool // outline (TOC) panel visible
+	OutlineSel  int  // selected outline row
 	FindOpen    bool
 	FindQuery   string
 	FindCurrent int
+
+	// Typora-parity display options.
+	SmartPunct       bool // typographic quotes/dashes in preview & export
+	CodeLineNumbers  bool // line numbers in code fences
+	HeadingNumbering bool // 1.2.3-style numbers on headings
+	WordCount        bool // word-count status bar
+	Spellcheck       bool // continuous spell checking in the native editor
+	FocusMode        bool // dim all but the caret's paragraph
+	Typewriter       bool // keep the caret line vertically centered
 
 	// Editing.
 	Hist editor.Undo
@@ -105,9 +115,10 @@ type imageEntry struct {
 // New creates the app with defaults and a welcome document.
 func New() *App {
 	a := &App{
-		Doc:    &render.Document{},
-		Zoom:   1,
-		images: map[string]*imageEntry{},
+		Doc:     &render.Document{},
+		Zoom:    1,
+		Sidebar: true,
+		images:  map[string]*imageEntry{},
 	}
 	a.Source = Welcome
 	a.reparse()
@@ -119,43 +130,45 @@ func New() *App {
 // Welcome is the seeded first note of a fresh library.
 const Welcome = `# 欢迎使用 Corra
 
-一个用 Go 写的原生 Markdown 备忘录，布局像 Apple Notes，编辑像真正的代码编辑器。
+一个用 Go 写的原生 Markdown 备忘录，采用 Apple Notes 风格的布局，能力对照 Typora。
 
 ## 三栏布局
 
 - **左栏**：备忘录文件夹（库根目录的子文件夹）
 - **中栏**：按日期分组的备忘录列表，顶部可全文搜索
-- **右栏**：编辑区，顶部显示笔记日期
+- **右栏**：编辑区，顶部显示笔记日期；「视图」菜单可开启大纲面板与字数统计
 
 ## 编辑与预览
 
-右栏默认是**编辑模式**：完整的 Markdown 源码编辑，语法高亮、软换行、
-多光标、查找替换（Cmd+F）、撤销重做（Cmd+Z）都能用，输入即时自动保存。
-Cmd+E 或工具栏「预览」切换到渲染后的阅读视图；代码块、表格、公式、
-图表在预览中点击可回到源码编辑。
+macOS 默认使用**原生富文本编辑**，标题、正文和格式直接可见，修改自动保存。
+Cmd+E 切换 Markdown 源码，Cmd+Z 撤销；源码模式有语法高亮、多光标、自动配对与查找替换（Cmd+F）。
+代码块隐藏围栏后直接编辑，公式和图片就地渲染，表格可在编辑区直接编辑。
 
-## 功能一览
+## 格式一览
 
-- GFM 全要素：表格、任务列表（可点击勾选）、删除线、脚注
-- 数学公式：行内 $E=mc^2$ 与块级公式
+- 粗体 **重点**、斜体 *强调*、删除线 ~~划掉~~、下划线 <u>下划线</u>、高亮 ==荧光==
+- 上标 x^2^、下标 H~2~O、键盘 <kbd>⌘</kbd> <kbd>K</kbd>、emoji :smile: :rocket:
+- 数学公式：行内 $E=mc^2$ 与块级公式；图表：mermaid、d2、goat、数据图表
+- 脚注[^1]、目录标记 [TOC]、YAML 头部信息、任务列表、表格
+- 链接可点击：外部 [Typora](https://typora.io)、页内 #格式一览 锚点
+
+[^1]: 脚注显示在文末，导出 PDF / HTML 时保留。
 
 $$
 a^2 + b^2 = c^2
 $$
-
-- 图表：mermaid、d2、goat 与数据图表
 
 - [ ] 试试在预览里点击复选框
 - [x] 已完成
 
 ` + "```chart\ntype: bar\ntitle: 示例\nlabels: [一, 二, 三, 四]\nseries:\n  - name: 销量\n    data: [3, 7, 5, 9]\n```" + `
 
-> 文件菜单一键导出 PDF；插入图片可自动上传 GitHub 图床。
+> 文件菜单导出 PDF / HTML / Word（Word 需要 pandoc）；粘贴或拖入图片自动保存为附件（或上传 GitHub 图床）。
 `
 
 // reparse refreshes Doc from Source. Callers hold no lock; internal only.
 func (a *App) reparse() {
-	a.Doc = render.Parse(a.Source)
+	a.Doc = render.ParseOptions(a.Source, a.SmartPunct)
 }
 
 // SetSource replaces the document, records undo and reparses.
@@ -298,6 +311,13 @@ func (a *App) Redo() {
 	if src, caret, ok := a.Hist.Redo(a.Source, 0); ok {
 		a.SetSourceQuiet(src, caret)
 	}
+}
+
+// RecentPaths returns a copy of the recent-files list.
+func (a *App) RecentPaths() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]string(nil), a.Recent...)
 }
 
 func (a *App) pushRecent(path string) {
