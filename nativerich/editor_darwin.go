@@ -11,9 +11,11 @@ import "C"
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"image"
 	"image/color"
 	"image/png"
 	"runtime/cgo"
@@ -234,6 +236,56 @@ func cr_render_math(source *C.char, dark C.int, zoom C.double, inlineMath C.int)
 		return nil
 	}
 	return C.CString(base64.StdEncoding.EncodeToString(buf.Bytes()))
+}
+
+//export cr_render_block
+func cr_render_block(language, body *C.char, dark C.int, zoom C.double) *C.char {
+	lang := strings.ToLower(strings.TrimSpace(C.GoString(language)))
+	src := C.GoString(body)
+	scale := 2 * float64(zoom)
+	if scale <= 0 {
+		scale = 2
+	}
+	var img image.Image
+	switch lang {
+	case "chart":
+		spec, err := render.ParseChart(src)
+		if err != nil {
+			return nil
+		}
+		if img, err = render.RenderChartImage(spec, scale); err != nil {
+			return nil
+		}
+	case "mermaid", "d2", "goat":
+		kind := map[string]render.DiagramKind{"mermaid": render.DiagramMermaid, "d2": render.DiagramD2, "goat": render.DiagramGoAT}[lang]
+		svg, err := render.RenderDiagram(context.Background(), kind, src)
+		if err != nil {
+			return nil
+		}
+		if img, err = render.RasterizeSVG(svg, scale); err != nil {
+			return nil
+		}
+	default:
+		return nil
+	}
+	if img == nil {
+		return nil
+	}
+	var buf bytes.Buffer
+	if png.Encode(&buf, img) != nil {
+		return nil
+	}
+	return C.CString(base64.StdEncoding.EncodeToString(buf.Bytes()))
+}
+
+//export cr_highlight
+func cr_highlight(code, language *C.char) *C.char {
+	spans := render.Highlight(C.GoString(code), strings.ToLower(strings.TrimSpace(C.GoString(language))))
+	data, err := json.Marshal(spans)
+	if err != nil {
+		return nil
+	}
+	return C.CString(string(data))
 }
 
 //export cr_markdown_json

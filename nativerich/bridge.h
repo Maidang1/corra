@@ -12,6 +12,7 @@ void cr_visible(uintptr_t editor, int visible);
 void cr_style(uintptr_t editor, double zoom, int dark, int editable);
 void cr_base_dir(uintptr_t editor, const char *path);
 char *cr_render_math(char *source, int dark, double zoom, int inlineMath);
+char *cr_render_block(char *language, char *body, int dark, double zoom);
 void cr_focus(uintptr_t editor, int focus);
 void cr_callback(uintptr_t handle, int source);
 void cr_spellcheck(uintptr_t editor, int enabled);
@@ -38,3 +39,4 @@ int cr_test_layout(uintptr_t editor);
 
 char *cr_markdown_json(char *json);
 char *cr_parse_markdown(char *source);
+char *cr_highlight(char *code, char *language);

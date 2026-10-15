@@ -350,6 +350,15 @@ func codeLines(raw string) []Paragraph {
 	return out
 }
 
+// fenceLanguage returns the lowercased info string of a fenced code block.
+func fenceLanguage(n *ast.FencedCodeBlock, src []byte) string {
+	if n.Info == nil {
+		return ""
+	}
+	info := string(n.Info.Segment.Value(src))
+	return strings.ToLower(strings.TrimSpace(info))
+}
+
 // loneImage recognizes a paragraph holding nothing but one image.
 func loneImage(node ast.Node, raw string) *Paragraph {
 	if node.ChildCount() != 1 {
@@ -384,6 +393,11 @@ func convertBlock(node ast.Node, src []byte, raw string) []Paragraph {
 		}
 		p.Kind, node = "quote", n.FirstChild()
 	case *ast.FencedCodeBlock:
+		if lang := fenceLanguage(n, src); lang == "chart" || lang == "mermaid" || lang == "d2" || lang == "goat" {
+			// A diagram/chart fence renders as a figure (like math): the raw
+			// fence stays for click-to-edit and byte-exact round-trips.
+			return []Paragraph{{Kind: "diagram", Raw: raw, Runs: []Run{{Text: lang}}}}
+		}
 		return codeLines(raw)
 	case *ast.CodeBlock:
 		return sourceLines(raw)
