@@ -148,3 +148,10 @@ func (v *View) ToggleTypewriter() {
 	}
 	v.App.InvalidateUI()
 }
+
+func (v *View) RefreshMath() {
+	if v.rich != nil {
+		v.rich.Format("math-refresh")
+	}
+	v.App.InvalidateUI()
+}

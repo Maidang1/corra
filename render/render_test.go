@@ -409,7 +409,7 @@ func TestExportHTML(t *testing.T) {
 	s := string(out)
 	for _, want := range []string{"<title>T</title>", "<h1", "<em>there</em>", "<mark>mark</mark>", "<u>u</u>",
 		"<sup>s</sup>", "<sub>b</sub>", "<del>x</del>", `<pre class="mermaid">`, "A--&gt;B",
-		`class="toc"`, `href="#two"`, "katex", "$E=mc^2$"} {
+		`class="toc"`, `href="#two"`, "data:image/svg+xml;base64,", `alt="E=mc^2"`} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("export missing %q:\n%s", want, s)
 		}

@@ -27,7 +27,9 @@ no JavaScript. Go draws the shell on the GPU; macOS uses an AppKit
 - **Typora-grade inline styles** — underline `<u>`, highlight `==x==`,
   superscript `^x^`, subscript `~x~`, `<kbd>`, emoji `:codes:`, YAML front
   matter, `[TOC]` outline blocks, clickable links (web / #anchors / .md)
-- **Math** — inline `$...$` and `$$...$$` blocks, typeset by go-latex
+- **Math** — inline `$...$` and `$$...$$` blocks, typeset offline by embedded
+  MathJax; native editing supports chemistry, physics, shared macros, references
+  and equation numbering without a WebView or runtime Node dependency
 - **Diagrams** — ` ```mermaid ` (Rust/WASM renderer), ` ```d2 `,
   ` ```goat ` ASCII diagrams, rasterized in pure Go with an embedded
   font for labels
@@ -87,9 +89,10 @@ Windows and Linux in parallel and uploads them to a draft release
 
 ### Known limits (v0.2)
 
-- The native math renderer supports scripts and common symbols; unsupported
-  expressions remain editable as source. Full MathJax extensions (including
-  mhchem chemistry and equation auto-numbering) are not implemented
+- Math uses embedded MathJax 3.2.2 with mhchem and physics. Unsupported expressions
+  remain editable as source. Document-wide numbering, macros and references are
+  connected to native editing and HTML export, plus display equations in reading
+  preview and PDF. Inline equation images in reading preview and PDF remain pending
 - The mermaid WASM renderer is not pixel-identical to upstream mermaid;
   `%%{init}%%` directives are ignored
 - Diagrams render on a light card in both themes (by design, like GitHub)
@@ -121,7 +124,8 @@ JavaScript。Go 在 GPU 上绘制外壳，macOS 编辑区使用 AppKit 原生富
 - **Typora 级内联样式**：下划线 `<u>`、高亮 `==x==`、上标 `^x^`、下标 `~x~`、
   `<kbd>`、emoji `:code:`、YAML 头部信息、`[TOC]` 目录块、可点击链接
   （网址 / #标题锚点 / 相对 .md 文件）
-- **数学公式**：行内 `$...$` 与块级 `$$...$$`，go-latex 排版
+- **数学公式**：行内 `$...$` 与块级 `$$...$$`，离线 MathJax 排版；原生编辑区
+  支持化学式、物理宏、跨公式宏与引用、公式编号，无需 WebView 或运行时 Node
 - **图表**：` ```mermaid `（Rust/WASM 渲染）、` ```d2 `、` ```goat `
   ASCII 图，纯 Go 光栅化并内嵌字体绘制文字标签
 - **数据图表**：` ```chart ` YAML 数据块（折线/柱状/条形/饼图）
@@ -175,8 +179,9 @@ Linux 三平台安装包并上传到草稿 Release（见
 
 ### 已知限制（v0.2）
 
-- 原生数学渲染器支持上下标和常用符号；不支持的表达式保留为可编辑源码。
-  mhchem 化学式、公式自动编号等完整 MathJax 扩展尚未实现
+- 数学排版使用内嵌 MathJax 3.2.2，含 mhchem 与 physics；不支持的表达式保留
+  可编辑源码。文档级编号、宏和引用已接入原生编辑区、HTML 导出及阅读预览/
+  PDF 的块公式；阅读预览和 PDF 的行内公式图仍待接入
 - mermaid 的 WASM 渲染器与官方不完全像素一致，`%%{init}%%` 指令被忽略
 - 图表在两个主题下都渲染在浅色卡片上（刻意设计，与 GitHub 一致）
 - 自定义 CSS 主题与 iframe/视频嵌入需要 webview，Corra 刻意不含
@@ -237,18 +242,22 @@ a grid. Code block selections indent/outdent without replacing their contents.
 Typing highlight, superscript, subscript and common inline HTML updates the rich
 format immediately. Click an image to edit its Markdown in place.
 
-Multi-paragraph list items, nested quotes, footnotes, HTML/media and other complex
-constructs can still require source editing. Advanced mathematical extensions and
-visual table/image drag handles do not yet match Typora. Unedited blocks preserve
+Multi-paragraph list items and paragraph-only nested quotes are editable natively.
+Option+Return adds a paragraph inside a list item. Lists/quotes containing other
+block types, footnotes and HTML/media can still require source editing. Math
+preferences/export consistency and visual table/image drag handles do not yet
+match Typora. Unedited blocks preserve
 their original bytes; edited paragraphs may normalize Markdown spelling, including
 resolved references becoming inline links while retaining their destinations and
 titles. These changes do not add iCloud collaboration.
 
 原生编辑器支持普通段落、标题、粗体/斜体/删除线/行内代码、链接、引用、
-单层列表和清单。表格、图片、代码块、公式、图表、嵌套列表等复杂内容以
-代码块隐藏围栏后直接编辑（输入 ``` 回车创建），公式和图片就地渲染为
-图片，表格在编辑区内直接编辑；图表等复杂内容以源码行编辑，通过「阅读
-预览」查看完整渲染。暂不支持图片的可视化编辑，也不包含 iCloud 协作。
+嵌套列表、多段落列表项和段落型嵌套引用。代码块隐藏围栏后直接编辑
+（输入 ``` 回车创建），表格在编辑区内直接编辑并提供行列结构菜单。
+公式、图片和支持的图表就地渲染，点击展开源码；公式修改后离开源码
+或按 Cmd+Return 收起。“视图 → 公式编号”控制原生文稿的编号规则。
+复杂混合容器、脚注、HTML/媒体和表格/图片拖拽交互仍待完善，不包含
+iCloud 协作。
 未编辑的块按原样保存，编辑过的普通段落可能规范化 Markdown 标记。
 
 Use `make dev` / `make build`, or explicitly run

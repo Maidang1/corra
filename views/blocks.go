@@ -258,15 +258,23 @@ func (v *View) mathBlock(c *ui.Context, i int) {
 	b := &v.App.Doc.Blocks[i]
 	t := c.Theme()
 	fg := color.RGBA{R: t.Text.R, G: t.Text.G, B: t.Text.B, A: t.Text.A}
-	key := app.ImageKey("math", b, v.App.Zoom, t.Dark)
-	img, ok := v.App.BlockImage(key, func() (image.Image, error) {
-		return render.RenderMath(b.Math, true, 15, fg)
-	})
+	results, ready, batchErr := v.App.MathImages(v.App.Doc.MathExpressions, render.MathOptions{Numbering: v.App.MathNumbering}, 15*float64(v.App.Zoom), fg)
+	index, exists := v.App.Doc.MathIndex(i)
+	var img image.Image
+	var mathErr error
+	if batchErr != nil {
+		mathErr = batchErr
+	} else if ready && exists && index < len(results) {
+		img, mathErr = results[index].Image, results[index].Error
+	}
 	ui.Box(c).FillWidth().Padding(10, 12).Center().Children(func() {
-		if ok && img != nil {
-			ui.Image(c, ui.NewBitmap(img))
+		if img != nil {
+			ui.Image(c, ui.NewBitmap(img)).Size(float32(img.Bounds().Dx())/2, float32(img.Bounds().Dy())/2)
 		} else {
-			ui.Text(c, b.Math).FontSize(t.FontSize).TextColor(t.TextMuted)
+			element := ui.Text(c, b.Math).FontSize(t.FontSize).TextColor(t.TextMuted)
+			if mathErr != nil {
+				element.Tooltip(mathErr.Error())
+			}
 		}
 	}).OnClick(func() {
 		v.openBlockEditor(i, "$$\n"+b.Math+"\n$$", false)

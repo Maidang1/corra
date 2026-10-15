@@ -206,12 +206,14 @@ func exportPDF(title string) ([]byte, error) {
 	loader := func(url string) ([]byte, error) {
 		return images.LoadImageBytes(url, baseDir)
 	}
-	return render.ExportPDFOpts(context.Background(), render.ParseOptions(src, editorApp.SmartPunct), title, loader)
+	doc := render.ParseOptions(src, editorApp.SmartPunct)
+	doc.MathOptions = render.MathOptions{Numbering: editorApp.MathNumbering}
+	return render.ExportPDFOpts(context.Background(), doc, title, loader)
 }
 
 // exportHTML renders the current document to a standalone HTML page.
 func exportHTML(title string) ([]byte, error) {
-	return render.ExportHTML(editorApp.CurrentSource(), title, editorApp.SmartPunct)
+	return render.ExportHTMLOpts(context.Background(), editorApp.CurrentSource(), title, editorApp.SmartPunct, render.MathOptions{Numbering: editorApp.MathNumbering})
 }
 
 // insertImageAndUpload asks for an image file, uploads it when hosting is

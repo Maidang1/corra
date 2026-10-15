@@ -40,4 +40,5 @@ int cr_test_layout(uintptr_t editor);
 
 char *cr_markdown_json(char *json);
 char *cr_parse_markdown(char *source);
+char *cr_parse_inline(char *source, int table);
 char *cr_highlight(char *code, char *language);

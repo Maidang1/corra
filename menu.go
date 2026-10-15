@@ -166,6 +166,12 @@ func buildMenu() *mygo.Menu {
 			checked("代码块显示行号", editorApp.CodeLineNumbers, func() { editorApp.CodeLineNumbers = !editorApp.CodeLineNumbers; editorApp.InvalidateUI() }),
 			checked("智能标点", editorApp.SmartPunct, func() { editorApp.SmartPunct = !editorApp.SmartPunct; editorApp.Refresh() }),
 			checked("标题自动编号", editorApp.HeadingNumbering, func() { editorApp.HeadingNumbering = !editorApp.HeadingNumbering; editorApp.InvalidateUI() }),
+			{Label: "公式编号", Submenu: []*mygo.MenuItem{
+				checked("不自动编号", editorApp.MathNumbering == "" || editorApp.MathNumbering == "none", func() { editorApp.MathNumbering = "none"; editorApp.InvalidateUI() }),
+				checked("按 AMS 规则编号", editorApp.MathNumbering == "ams", func() { editorApp.MathNumbering = "ams"; editorApp.InvalidateUI() }),
+				checked("全部块公式编号", editorApp.MathNumbering == "all", func() { editorApp.MathNumbering = "all"; editorApp.InvalidateUI() }),
+			}},
+			item("重新排版公式", "CmdOrCtrl+Alt+Shift+M", func() { view.RefreshMath() }),
 			mygo.Separator(),
 			item("放大", "CmdOrCtrl+=", func() { zoomBy(0.1) }),
 			item("缩小", "CmdOrCtrl+-", func() { zoomBy(-0.1) }),

@@ -50,7 +50,7 @@
 - (void)replaceTable:(NSRange)tableRange paragraph:(NSDictionary *)p row:(NSInteger)r column:(NSInteger)c {
     [self beginStructuralCommand];
     NSDictionary *ending = _emptyParagraph;
-    NSAttributedString *value = [self attributedDocument:@{@"paragraphs":@[p]}];
+    NSAttributedString *value = [self attributedDocument:@{@"paragraphs":@[p]} replacingRange:tableRange];
     _emptyParagraph=ending;
     // Measure actual attributed cells: formulas may fall back to literal source.
     __block NSUInteger target=0;

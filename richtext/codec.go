@@ -62,7 +62,10 @@ type Cell struct {
 }
 
 type Run struct {
-	Text      string `json:"text"`
+	Text string `json:"text"`
+	// Source is an expanded inline fragment being edited in the native view.
+	// Its live text is Markdown source, rather than text to escape.
+	Source    bool   `json:"source,omitempty"`
 	Bold      bool   `json:"bold,omitempty"`
 	Italic    bool   `json:"italic,omitempty"`
 	Strike    bool   `json:"strike,omitempty"`
@@ -114,6 +117,7 @@ func Parse(source string) Document {
 	src := []byte(source)
 	md := goldmark.New(goldmark.WithExtensions(extension.GFM, mdext.InlineExtender))
 	md.Parser().AddOptions(parser.WithBlockParsers(util.Prioritized(mathBlockParser{}, 50)))
+	md.Parser().AddOptions(parser.WithInlineParsers(util.Prioritized(inlineMathParser{}, 50)))
 	root := md.Parser().Parse(text.NewReader(src))
 	mdext.TransformHTML(root, src)
 	type block struct {
@@ -468,65 +472,9 @@ func convertBlock(node ast.Node, src []byte, raw string) []Paragraph {
 	return []Paragraph{p}
 }
 
-// appendMathRuns splits text on inline math ($...$), keeping the exact source
-// bytes in Run.Text. Guards follow pandoc's rule: the opening $ is followed
-// by a non-space, the closing $ is preceded by a non-space and not followed
-// by a digit, and \$ escapes.
-func appendMathRuns(p *Paragraph, style Run, text string) {
-	for {
-		start := mathDollar(text, 0)
-		if start < 0 || start+1 == len(text) || text[start+1] == ' ' {
-			appendRun(p, styleWithText(style, text))
-			return
-		}
-		if start > 0 {
-			appendRun(p, styleWithText(style, text[:start]))
-		}
-		rest := text[start+1:]
-		end, from := -1, 0
-		for {
-			c := mathDollar(rest, from)
-			if c < 0 {
-				break
-			}
-			if c > 0 && rest[c-1] != ' ' && (c+1 == len(rest) || rest[c+1] < '0' || rest[c+1] > '9') {
-				end = c
-				break
-			}
-			from = c + 1
-		}
-		if end <= 0 {
-			appendRun(p, styleWithText(style, text[start:]))
-			return
-		}
-		run := style
-		run.Text = "$" + rest[:end] + "$"
-		run.Math = rest[:end]
-		appendRun(p, run)
-		text = rest[end+1:]
-	}
-}
-
 func styleWithText(style Run, text string) Run {
 	style.Text = text
 	return style
-}
-
-// mathDollar finds the next unescaped $ at or after from.
-func mathDollar(text string, from int) int {
-	for i := from; i < len(text); i++ {
-		if text[i] != '$' {
-			continue
-		}
-		slashes := 0
-		for j := i - 1; j >= 0 && text[j] == '\\'; j-- {
-			slashes++
-		}
-		if slashes%2 == 0 {
-			return i
-		}
-	}
-	return -1
 }
 
 func containsMath(raw string) bool {
@@ -548,19 +496,21 @@ func containsMath(raw string) bool {
 }
 
 func collectRuns(parent ast.Node, src []byte, style Run, p *Paragraph) bool {
-	// pending accumulates adjacent plain text so inline math ($...$) is
-	// detected across node boundaries (delimiter scanners split Text nodes
-	// at ~ ^ == even when nothing matches).
+	// Coalesce plain text split by unmatched Markdown delimiter scanners.
 	var pending strings.Builder
 	flush := func() {
 		if pending.Len() > 0 {
-			appendMathRuns(p, style, pending.String())
+			appendRun(p, styleWithText(style, pending.String()))
 			pending.Reset()
 		}
 	}
 	for node := parent.FirstChild(); node != nil; node = node.NextSibling() {
 		run := style
 		switch n := node.(type) {
+		case *inlineMath:
+			flush()
+			run.Text, run.Math = n.source, n.tex
+			appendRun(p, run)
 		case *ast.Text:
 			content := n.Segment.Value(src)
 			if !n.IsRaw() {
@@ -946,16 +896,55 @@ func serializeParagraph(p Paragraph) string {
 func serializeCell(runs []Run) string {
 	normalized := Paragraph{}
 	for _, run := range runs {
+		if run.Math != "" {
+			delimiter := "$"
+			if strings.HasPrefix(run.Text, "$$") {
+				delimiter = "$$"
+			}
+			run.Text = delimiter + strings.ReplaceAll(run.Math, "|", `\|`) + delimiter
+		}
 		appendRun(&normalized, run)
+	}
+	encoded := append([]Run(nil), normalized.Runs...)
+	for i := range encoded {
+		if encoded[i].Code && encoded[i].Math == "" && !encoded[i].Source {
+			// GFM consumes one slash before every code-span pipe, even
+			// when the code already contains a literal slash before it.
+			encoded[i].Text = strings.ReplaceAll(encoded[i].Text, "|", `\|`)
+		}
 	}
 	var value string
 	for _, level := range []escapeLevel{escapeInline, escapeAll, escapeEntities} {
-		value = serializeRuns(normalized.Runs, level)
+		value = serializeRuns(encoded, level)
 		if sameInlineSemantics(value, normalized.Runs) {
 			break
 		}
 	}
-	return value
+	return escapeCellPipes(value)
+}
+
+// ParseInline interprets a native source fragment in its actual cell context.
+// The artificial table keeps structural pipe escaping separate from TeX.
+func ParseInline(source string, table bool) Document {
+	if !table {
+		return Parse(source)
+	}
+	doc := Parse("| " + escapeCellPipes(source) + " |\n| --- |")
+	if len(doc.Paragraphs) != 1 || doc.Paragraphs[0].Kind != "table" || len(doc.Paragraphs[0].Rows) == 0 || len(doc.Paragraphs[0].Rows[0]) != 1 {
+		return Document{}
+	}
+	return Document{Paragraphs: []Paragraph{{Kind: "body", Runs: doc.Paragraphs[0].Rows[0][0].Runs}}}
+}
+
+func escapeCellPipes(value string) string {
+	var out strings.Builder
+	for i := 0; i < len(value); i++ {
+		if value[i] == '|' && (i == 0 || value[i-1] != '\\') {
+			out.WriteByte('\\')
+		}
+		out.WriteByte(value[i])
+	}
+	return out.String()
 }
 
 // escapeLevel orders the escaping strategies from cleanest to safest.
@@ -1032,17 +1021,40 @@ func sameParagraphSemantics(source string, p Paragraph, runs []Run) bool {
 }
 
 func sameInlineSemantics(value string, runs []Run) bool {
-	doc := Parse(value)
+	doc := ParseInline(value, true)
 	if len(doc.Paragraphs) != 1 || doc.Paragraphs[0].Kind != "body" {
 		return false
 	}
-	return sameRuns(runs, doc.Paragraphs[0].Runs)
+	var expected []Run
+	for _, run := range runs {
+		if run.Source {
+			for _, p := range ParseInline(run.Text, true).Paragraphs {
+				expected = append(expected, p.Runs...)
+			}
+		} else {
+			expected = append(expected, run)
+		}
+	}
+	return sameRuns(expected, doc.Paragraphs[0].Runs)
 }
 
 func sameRuns(runs, parsed []Run) bool {
 	styles := func(rs []Run) []Run {
-		var out []Run
+		var expanded []Run
 		for _, run := range rs {
+			if run.Source {
+				for _, p := range Parse(run.Text).Paragraphs {
+					expanded = append(expanded, p.Runs...)
+				}
+			} else {
+				expanded = append(expanded, run)
+			}
+		}
+		var out []Run
+		for _, run := range expanded {
+			if run.Math != "" {
+				run.Text = run.Math
+			}
 			if run.Break {
 				out = append(out, Run{Break: true})
 				continue
@@ -1073,7 +1085,7 @@ func serializeRun(run Run, italic string, level escapeLevel) string {
 	if run.Break {
 		return "  \n"
 	}
-	if run.Math != "" {
+	if run.Math != "" || run.Source {
 		return run.Text // the exact $...$ source
 	}
 	if level == escapeNone && run.Link != "" && run.LinkTitle == "" && !run.Code && (run.Link == run.Text || run.Link == "http://"+run.Text || run.Link == "mailto:"+run.Text) {
