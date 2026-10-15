@@ -1118,31 +1118,36 @@ static NSArray *CRSelectedParagraphs(CREditor *e) {
     return [super becomeFirstResponder];
 }
 - (void)insertText:(id)value replacementRange:(NSRange)range {
-    if (range.location==NSNotFound) range=self.selectedRange;
-    if (![self.owner allowRange:range]) return;
+    // NSNotFound is the IME commit contract: super resolves it to the marked
+    // range. Substituting the caret here would strand the pinyin as plain
+    // text and append the composed characters after it.
+    NSRange effective = range;
+    if (effective.location==NSNotFound) effective = self.markedRange;
+    if (effective.location==NSNotFound) effective = self.selectedRange;
+    if (![self.owner allowRange:effective]) return;
     BOOL opaque=NO;
-    for (NSValue *v in CRRanges(self.string)) if (NSIntersectionRange(v.rangeValue,range).length && CRKind(CRParagraphAt(self.owner,v.rangeValue.location),@"opaque")) opaque=YES;
-    NSTextTableBlock *targetCell=CRCellAt(self.owner,range.location);
-    if (targetCell && range.length) {
+    for (NSValue *v in CRRanges(self.string)) if (NSIntersectionRange(v.rangeValue,effective).length && CRKind(CRParagraphAt(self.owner,v.rangeValue.location),@"opaque")) opaque=YES;
+    NSTextTableBlock *targetCell=CRCellAt(self.owner,effective.location);
+    if (targetCell && effective.length) {
         NSRange tableRange=CRTableRange(self.owner,targetCell.table);
-        if (range.location <= tableRange.location && NSMaxRange(range) >= NSMaxRange(tableRange)) opaque=YES;
+        if (effective.location <= tableRange.location && NSMaxRange(effective) >= NSMaxRange(tableRange)) opaque=YES;
     }
     if (opaque) {
-        if (![self.owner allowRange:range]) return;
+        if (![self.owner allowRange:effective]) return;
         NSString *string=[value isKindOfClass:NSAttributedString.class] ? [value string] : value;
         NSDictionary *attrs=[self.owner visual:@{CRParagraph:CRBody()} paragraph:CRBody()];
         self.owner.suppress=YES;
-        [self.owner replace:range with:[[NSAttributedString alloc] initWithString:string attributes:attrs] selection:NSMakeRange(range.location+string.length,0)];
+        [self.owner replace:effective with:[[NSAttributedString alloc] initWithString:string attributes:attrs] selection:NSMakeRange(effective.location+string.length,0)];
         self.typingAttributes=attrs; self.owner.emptyParagraph=CRBody(); self.owner.suppress=NO; [self.owner notify];
         return;
     }
-    if ([self.owner autoPair:value range:range]) return;
+    if ([self.owner autoPair:value range:effective]) return;
     BOOL wasSuppress=self.owner.suppress;
     if (targetCell) {
         NSString *string=[value isKindOfClass:NSAttributedString.class] ? [value string] : value;
         value=[[string componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet] componentsJoinedByString:@" "];
         NSMutableDictionary *typing=[self.typingAttributes mutableCopy];
-        typing[CRTableCell]=targetCell; typing[CRParagraph]=CRParagraphAt(self.owner,range.location);
+        typing[CRTableCell]=targetCell; typing[CRParagraph]=CRParagraphAt(self.owner,effective.location);
         self.typingAttributes=[self.owner visual:typing paragraph:typing[CRParagraph]];
     }
     self.owner.suppress=YES;
@@ -1552,6 +1557,8 @@ void cr_test_action(uintptr_t ptr,const char *action,const char *text) {
     else if ([a isEqual:@"filePaste"]) { [NSPasteboard.generalPasteboard clearContents]; [NSPasteboard.generalPasteboard setPropertyList:[s componentsSeparatedByString:@"|"] forType:NSFilenamesPboardType]; [e.text paste:nil]; }
     else if ([a isEqual:@"mark"]) [e.text setMarkedText:s selectedRange:NSMakeRange(s.length,0) replacementRange:e.text.selectedRange];
     else if ([a isEqual:@"commit"]) [e.text insertText:s replacementRange:e.text.markedRange];
+    // Real IMEs commit with NSNotFound, letting the view replace marked text.
+    else if ([a isEqual:@"commitIME"]) [e.text insertText:s replacementRange:NSMakeRange(NSNotFound,0)];
     else [e.text insertText:s replacementRange:e.text.selectedRange];
 }
 int cr_test_traits(uintptr_t ptr,const char *trait) { CREditor *e=CRE(ptr); NSString *key=[NSString stringWithUTF8String:trait]; __block BOOL found=NO; [e.text.textStorage enumerateAttributesInRange:NSMakeRange(0,e.text.string.length) options:0 usingBlock:^(NSDictionary *attrs, NSRange r, BOOL *stop) { if ([key isEqual:@"bold"]) found |= ([[NSFontManager sharedFontManager] traitsOfFont:attrs[NSFontAttributeName]] & NSBoldFontMask)!=0; else if ([key isEqual:@"underline"]) found |= [attrs[NSUnderlineStyleAttributeName] integerValue]!=0; else if ([key isEqual:@"highlight"]) found |= attrs[CRHighlight]!=nil && attrs[NSBackgroundColorAttributeName]!=nil; else if ([key isEqual:@"sup"]) found |= [attrs[NSSuperscriptAttributeName] integerValue]>0; else if ([key isEqual:@"sub"]) found |= [attrs[NSSuperscriptAttributeName] integerValue]<0; else if ([key hasPrefix:@"hl:"]) found |= [attrs[CRHl] isEqual:[key substringFromIndex:3]]; else found |= CRKind(attrs[CRParagraph],key); }];
