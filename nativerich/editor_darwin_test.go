@@ -155,6 +155,25 @@ func TestNativeTypingListsAndComposition(t *testing.T) {
 		if err != nil || !dirty || !strings.Contains(got, "hello中文😀") {
 			t.Errorf("IME commit: %q %v %v", got, dirty, err)
 		}
+		// Real IMEs commit with replacementRange=NSNotFound: the marked
+		// pinyin must be replaced, not left beside the composed text.
+		e.Load("hello")
+		nativeTestSelect(e, 5, 0)
+		nativeTestAction(e, "mark", "ni shi")
+		nativeTestAction(e, "commitIME", "你是")
+		got, _, err = e.Snapshot()
+		if err != nil || got != "hello你是" {
+			t.Errorf("IME NSNotFound commit: %q %v", got, err)
+		}
+		e.Load("1. 2\n2. 3\n3. 4")
+		nativeTestSelect(e, 1, 0)
+		nativeTestAction(e, "mark", "he")
+		nativeTestAction(e, "commitIME", "和")
+		got, _, err = e.Snapshot()
+		if err != nil || !strings.Contains(got, "1. 2和") || strings.Contains(got, "he") ||
+			!strings.Contains(got, "2. 3") || !strings.Contains(got, "3. 4") {
+			t.Errorf("IME commit in list: %q %v", got, err)
+		}
 		e.Load("")
 		nativeTestAction(e, "type", "blank is editable")
 		got, _, _ = e.Snapshot()
