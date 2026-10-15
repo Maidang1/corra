@@ -169,6 +169,14 @@ func (e *Editor) SetMathNumbering(mode string) {
 	}
 	e.Format("math-numbering:" + mode)
 }
+
+func (e *Editor) SetCodeLineNumbers(enabled bool) {
+	if enabled {
+		e.Format("code-line-numbers:1")
+	} else {
+		e.Format("code-line-numbers:0")
+	}
+}
 func (e *Editor) Focus() {
 	if e != nil && e.native != 0 {
 		C.cr_focus(e.native, 1)
@@ -342,6 +350,40 @@ func cr_parse_markdown(value *C.char) *C.char {
 //export cr_parse_inline
 func cr_parse_inline(value *C.char, table C.int) *C.char {
 	data, err := json.Marshal(richtext.ParseInline(C.GoString(value), table != 0))
+	if err != nil {
+		return nil
+	}
+	return C.CString(string(data))
+}
+
+//export cr_reveal_inline
+func cr_reveal_inline(value *C.char, table C.int) *C.char {
+	var runs []richtext.Run
+	if json.Unmarshal([]byte(C.GoString(value)), &runs) != nil {
+		return nil
+	}
+	fragment, err := richtext.RevealInline(runs, table != 0)
+	if err != nil {
+		return nil
+	}
+	data, err := json.Marshal(fragment)
+	if err != nil {
+		return nil
+	}
+	return C.CString(string(data))
+}
+
+//export cr_fold_inline
+func cr_fold_inline(value *C.char, table C.int) *C.char {
+	source := C.GoString(value)
+	positions, err := richtext.InlineCaretMap(source, table != 0)
+	if err != nil {
+		return nil
+	}
+	data, err := json.Marshal(struct {
+		richtext.Document
+		Positions []int `json:"positions"`
+	}{richtext.ParseInline(source, table != 0), positions})
 	if err != nil {
 		return nil
 	}

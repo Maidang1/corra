@@ -37,8 +37,12 @@ int cr_test_checkbox(uintptr_t editor);
 void cr_test_opaque(uintptr_t editor, int whole);
 int cr_test_screenshot(uintptr_t editor, const char *path);
 int cr_test_layout(uintptr_t editor);
+char *cr_test_text(uintptr_t editor);
+char *cr_test_code_controls(uintptr_t editor);
 
 char *cr_markdown_json(char *json);
 char *cr_parse_markdown(char *source);
 char *cr_parse_inline(char *source, int table);
+char *cr_reveal_inline(char *runs, int table);
+char *cr_fold_inline(char *source, int table);
 char *cr_highlight(char *code, char *language);

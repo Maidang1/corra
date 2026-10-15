@@ -44,8 +44,8 @@
     _text.typingAttributes=typing;
     return YES;
 }
-- (void)finishInlineMath:(BOOL)force {
-    if (_suppress || _text.hasMarkedText) return;
+- (void)finishInlineSource:(BOOL)force {
+    if (_suppress || _text.hasMarkedText || _undo.isUndoing || _undo.isRedoing) return;
     NSMutableArray *pending=[NSMutableArray array];
     NSRange selection=_text.selectedRange;
     [_text.textStorage enumerateAttribute:CRInlineSource inRange:NSMakeRange(0,_text.textStorage.length) options:0 usingBlock:^(id source, NSRange range, BOOL *stop) {
@@ -56,13 +56,14 @@
         NSRange range=value.rangeValue;
         NSString *source=[_text.string substringWithRange:range];
         NSTextTableBlock *cell=CRCellAt(self,range.location);
-        char *json=cr_parse_inline((char *)source.UTF8String,cell?1:0);
+        char *json=cr_fold_inline((char *)source.UTF8String,cell?1:0);
         if (!json) continue;
         NSDictionary *document=[NSJSONSerialization JSONObjectWithData:[[NSString stringWithUTF8String:json] dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL]; free(json);
         NSArray *paragraphs=document[@"paragraphs"];
         if (paragraphs.count!=1 || !CRKind(paragraphs[0],@"body")) continue;
+        NSArray *positions=document[@"positions"];
+        if (positions.count!=source.length+1) continue;
         NSArray *prepared=[self mathForFragment:document replacingRange:range];
-        if (!prepared.count) continue;
         BOOL failed=NO;
         for (NSDictionary *result in prepared) if (![result[@"image"] length]) failed=YES;
         if (failed) continue;
@@ -75,7 +76,7 @@
         NSUInteger (^mapPosition)(NSUInteger)=^NSUInteger(NSUInteger position) {
             if (position<=range.location) return position;
             if (position>=NSMaxRange(range)) return position-range.length+content.length;
-            return range.location+MIN(position-range.location,content.length);
+            return range.location+MIN([positions[position-range.location] unsignedIntegerValue],content.length);
         };
         NSUInteger end=mapPosition(NSMaxRange(caret));
         caret.location=mapPosition(caret.location); caret.length=end-caret.location;
@@ -83,7 +84,7 @@
         [self updateTypingParagraph];
     }
 }
-- (BOOL)finishMathEditing {
+- (BOOL)finishSourceEditing {
     if (_suppress || !_text.editable || _text.hasMarkedText) return NO;
     NSUInteger location=_text.selectedRange.location;
     NSRange selection=_text.selectedRange;
@@ -92,7 +93,7 @@
         if (source && (selection.length ? NSIntersectionRange(selection,range).length>0 : location>=range.location && location<=NSMaxRange(range))) inlineSource=YES;
     }];
     if (inlineSource) {
-        [self finishInlineMath:YES]; return YES;
+        [self finishInlineSource:YES]; return YES;
     }
     NSRange group=[self draftGroupAt:location];
     if (group.location==NSNotFound) return NO;
@@ -102,7 +103,7 @@
 }
 - (void)refreshAllMath {
     if (_suppress || _text.hasMarkedText) return;
-    [self finishInlineMath:YES];
+    [self finishInlineSource:YES];
     NSMutableArray *groups=[NSMutableArray array];
     for (NSValue *value in CRRanges(_text.string)) {
         if (!CRKind(CRParagraphAt(self,value.rangeValue.location),@"source")) continue;

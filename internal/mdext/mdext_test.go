@@ -123,6 +123,30 @@ func TestUnderlineHTML(t *testing.T) {
 	}
 }
 
+func TestHTMLInsideInlineContainers(t *testing.T) {
+	for _, src := range []string{
+		"**<u>bold</u>**",
+		"[***<u>label</u>***](https://example.test)",
+		"~~<mark>strike</mark>~~",
+		"| <u>cell</u> |\n| --- |",
+	} {
+		root := parse(t, src)
+		if find(root, KindUnderline) == nil && find(root, KindMark) == nil {
+			t.Errorf("HTML inside inline container was not transformed: %q", src)
+		}
+		ast.Walk(root, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+			if entering && n.Kind() == ast.KindRawHTML {
+				t.Errorf("supported raw HTML left behind: %q", src)
+			}
+			return ast.WalkContinue, nil
+		})
+	}
+	code := "`<u>literal</u>`"
+	if root := parse(t, code); find(root, KindUnderline) != nil || textOf(root, code) != "<u>literal</u>" {
+		t.Fatalf("HTML in code must remain literal: %s", code)
+	}
+}
+
 func TestKbdMarkSubSupHTML(t *testing.T) {
 	for src, kind := range map[string]ast.NodeKind{
 		"<kbd>Ctrl</kbd>":  KindKbd,

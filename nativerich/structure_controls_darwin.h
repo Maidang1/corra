@@ -9,10 +9,10 @@
     if (modifiers==NSEventModifierFlagOption && [key isEqual:@"\r"] && CRList(CRParagraphAt(self.owner,self.selectedRange.location))) {
         [self.owner continueListParagraph]; return YES;
     }
+    if (modifiers==NSEventModifierFlagCommand && [key isEqual:@"\r"] && [self.owner finishSourceEditing]) return YES;
     if (table && modifiers==NSEventModifierFlagCommand && [key isEqual:@"\r"]) {
         [self.owner tableCommand:@"table:row-below"]; return YES;
     }
-    if (modifiers==NSEventModifierFlagCommand && [key isEqual:@"\r"] && [self.owner finishMathEditing]) return YES;
     if (table && modifiers==(NSEventModifierFlagCommand|NSEventModifierFlagShift) && [key isEqual:@"\x7f"]) {
         [self.owner tableCommand:@"table:delete-row"]; return YES;
     }
@@ -29,7 +29,47 @@
 - (void)keyDown:(NSEvent *)event {
     if (![self handleStructureKey:event]) [super keyDown:event];
 }
+- (void)moveRight:(id)sender {
+    NSRange previous=self.selectedRange;
+    BOOL source=previous.location<self.string.length && [self.textStorage attribute:CRInlineSource atIndex:previous.location effectiveRange:NULL]!=nil;
+    if (!source && previous.location) source=[self.textStorage attribute:CRInlineSource atIndex:previous.location-1 effectiveRange:NULL]!=nil;
+    NSUInteger oldLength=self.string.length;
+    [super moveRight:sender];
+    if (!self.selectedRange.length && !source && ![self.owner revealInlineAt:self.selectedRange.location] && self.string.length==oldLength && previous.location<self.string.length && self.selectedRange.location>previous.location) [self.owner revealInlineAt:previous.location];
+}
+- (void)moveLeft:(id)sender { [super moveLeft:sender]; if (!self.selectedRange.length) [self.owner revealInlineAt:self.selectedRange.location]; }
+- (void)moveUp:(id)sender { [super moveUp:sender]; if (!self.selectedRange.length) [self.owner revealInlineAt:self.selectedRange.location]; }
+- (void)moveDown:(id)sender { [super moveDown:sender]; if (!self.selectedRange.length) [self.owner revealInlineAt:self.selectedRange.location]; }
 - (void)structuralAction:(NSMenuItem *)item { [self.owner format:item.representedObject]; }
+- (void)codeLanguageAction:(NSMenuItem *)item {
+    NSDictionary *target=item.representedObject;
+    if (![target isKindOfClass:NSDictionary.class] || [target[@"revision"] unsignedIntegerValue]!=self.owner.documentRevision) return;
+    NSString *command=target[@"command"];
+    if ([command hasPrefix:@"code-language:"]) [self.owner setCodeLanguage:[command substringFromIndex:14] atLocation:[target[@"location"] unsignedIntegerValue]];
+}
+- (void)chooseCodeLanguage:(NSMenuItem *)sender {
+    NSDictionary *target=sender.representedObject;
+    NSUInteger location=[target[@"location"] unsignedIntegerValue];
+    if (!self.editable || self.hasMarkedText || location>self.string.length || [target[@"revision"] unsignedIntegerValue]!=self.owner.documentRevision || !CRKind(CRParagraphAt(self.owner,location),@"code")) return;
+    NSAlert *alert=[NSAlert new];
+    alert.messageText=@"代码语言";
+    alert.informativeText=@"输入语言名称，例如 go、python、rust；纯文本使用 text。";
+    [alert addButtonWithTitle:@"应用"]; [alert addButtonWithTitle:@"取消"];
+    NSTextField *field=[[NSTextField alloc] initWithFrame:NSMakeRect(0,0,280,24)];
+    field.accessibilityLabel=@"代码语言";
+    for (NSDictionary *block in [self.owner codeBlocks]) {
+        NSRange range=[block[@"range"] rangeValue];
+        if (NSLocationInRange(location,range) || (range.length==0 && location==range.location)) field.stringValue=block[@"language"];
+    }
+    alert.accessoryView=field; alert.window.initialFirstResponder=field;
+    NSString *snapshot=[self.string copy];
+    NSUInteger revision=self.owner.documentRevision;
+    [alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse response) {
+        NSString *language=[field.stringValue stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        if (!language.length) language=@"text";
+        if (response==NSAlertFirstButtonReturn && self.window && self.owner.documentRevision==revision && [self.string isEqual:snapshot] && !self.hasMarkedText) [self.owner setCodeLanguage:language atLocation:location];
+    }];
+}
 - (NSMenu *)menuForEvent:(NSEvent *)event {
     NSMenu *menu=[[super menuForEvent:event] copy] ?: [NSMenu new];
     NSPoint point=[self convertPoint:event.locationInWindow fromView:nil];
@@ -37,6 +77,17 @@
     if (!NSLocationInRange(location,self.selectedRange)) self.selectedRange=NSMakeRange(location,0);
     BOOL table=CRCellAt(self.owner,location)!=nil;
     BOOL list=CRList(CRParagraphAt(self.owner,location));
+    if (CRKind(CRParagraphAt(self.owner,location),@"code")) {
+        [menu addItem:NSMenuItem.separatorItem];
+        NSMenuItem *language=[[NSMenuItem alloc] initWithTitle:@"代码语言…" action:@selector(chooseCodeLanguage:) keyEquivalent:@""];
+        language.target=self; language.representedObject=@{@"location":@(location),@"revision":@(self.owner.documentRevision)}; [menu addItem:language];
+        for (NSArray *entry in @[@[@"纯文本",@"text"],@[@"Go",@"go"],@[@"Python",@"python"],@[@"JavaScript",@"javascript"],@[@"TypeScript",@"typescript"],@[@"Swift",@"swift"],@[@"Rust",@"rust"],@[@"JSON",@"json"],@[@"Shell",@"bash"]]) {
+            NSMenuItem *item=[[NSMenuItem alloc] initWithTitle:entry[0] action:@selector(codeLanguageAction:) keyEquivalent:@""];
+            item.target=self; item.representedObject=@{@"command":[@"code-language:" stringByAppendingString:entry[1]],@"location":@(location),@"revision":@(self.owner.documentRevision)};
+            [menu addItem:item];
+        }
+        return menu;
+    }
     if (!table && !list) return menu;
     [menu addItem:NSMenuItem.separatorItem];
     NSArray *entries=table ? @[
@@ -54,6 +105,6 @@
     return menu;
 }
 - (BOOL)validateMenuItem:(NSMenuItem *)item {
-    if (item.action==@selector(structuralAction:)) return self.editable && !self.hasMarkedText;
+    if (item.action==@selector(structuralAction:) || item.action==@selector(chooseCodeLanguage:) || item.action==@selector(codeLanguageAction:)) return self.editable && !self.hasMarkedText;
     return [super validateMenuItem:item];
 }

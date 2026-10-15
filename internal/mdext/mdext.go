@@ -243,8 +243,14 @@ func TransformHTML(root ast.Node, src []byte) {
 			return ast.WalkContinue, nil
 		}
 		switch n.(type) {
-		case *ast.Paragraph, *ast.Heading, *ast.TextBlock:
+		case *ast.CodeSpan, *ast.Image:
+			return ast.WalkSkipChildren, nil
+		case *ast.Paragraph, *ast.Heading, *ast.TextBlock, *east.TableCell:
 			transformInlineList(n, src)
+		default:
+			if n.Type() == ast.TypeInline && n.HasChildren() {
+				transformInlineList(n, src)
+			}
 		}
 		return ast.WalkContinue, nil
 	})
@@ -263,11 +269,9 @@ func transformInlineList(parent ast.Node, src []byte) {
 			child = next
 			continue
 		}
-		if !ok {
-			continue
-		}
 		if tag == "<br>" {
-			br := ast.NewTextSegment(text.NewSegment(0, 0))
+			start := child.(*ast.RawHTML).Segments.At(0).Start
+			br := ast.NewTextSegment(text.NewSegment(start, start))
 			br.SetHardLineBreak(true)
 			parent.ReplaceChild(parent, child, br)
 			child = next

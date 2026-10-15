@@ -53,8 +53,11 @@ type Paragraph struct {
 	Alignments       []string `json:"alignments,omitempty"`
 	// Open and Close hold a code block's fences so the lines between them can
 	// be edited without the fences on screen (Typora-style).
-	Open  string `json:"open,omitempty"`
-	Close string `json:"close,omitempty"`
+	Open          string `json:"open,omitempty"`
+	Close         string `json:"close,omitempty"`
+	CodeNewline   string `json:"codeNewline,omitempty"`
+	CodeClose     string `json:"codeClose,omitempty"`
+	CodeSeparator string `json:"codeSeparator,omitempty"`
 }
 
 type Cell struct {
@@ -274,6 +277,24 @@ func expandBlankParagraphs(doc Document) Document {
 		}
 		out.Paragraphs[len(out.Paragraphs)-1].Separator += lines[len(lines)-1]
 	}
+	// Each line keeps the hidden ending metadata so native paragraph joins and
+	// IME replacement can remove the last line without losing the fence.
+	for start := 0; start < len(out.Paragraphs); {
+		if out.Paragraphs[start].Kind != "code" {
+			start++
+			continue
+		}
+		end := start + 1
+		for end < len(out.Paragraphs) && out.Paragraphs[end].Kind == "code" && out.Paragraphs[end].Open == "" {
+			end++
+		}
+		last := out.Paragraphs[end-1]
+		for i := start; i < end; i++ {
+			out.Paragraphs[i].CodeClose = last.Close
+			out.Paragraphs[i].CodeSeparator = last.Separator
+		}
+		start = end
+	}
 	return identifyParagraphs(out)
 }
 
@@ -400,7 +421,7 @@ func codeLines(raw string) []Paragraph {
 	}
 	out := make([]Paragraph, len(body))
 	for i, line := range body {
-		out[i] = Paragraph{Kind: "code", Runs: []Run{{Text: line}}, Raw: line, Separator: nl}
+		out[i] = Paragraph{Kind: "code", Runs: []Run{{Text: line}}, Raw: line, Separator: nl, CodeNewline: nl}
 	}
 	out[0].Open = open
 	out[len(out)-1].Close = close
@@ -733,6 +754,9 @@ func Serialize(doc Document) string {
 			out.WriteString(serializeParagraph(p))
 		}
 		separator := p.Separator
+		if p.Kind == "code" && p.CodeClose != "" && (i+1 == len(doc.Paragraphs) || doc.Paragraphs[i+1].Kind != "code" || doc.Paragraphs[i+1].Open != "") {
+			separator = p.CodeSeparator
+		}
 		if emptyParagraph(p) && p.Baseline != fingerprint(p) && i+1 < len(doc.Paragraphs) {
 			separator = newlineStyle(separator)
 		}
@@ -806,8 +830,11 @@ func Serialize(doc Document) string {
 func codeLineSource(doc Document, i int) string {
 	p := doc.Paragraphs[i]
 	nl := newlineStyle(p.Separator)
-	start := i == 0 || doc.Paragraphs[i-1].Kind != "code"
-	end := i+1 == len(doc.Paragraphs) || doc.Paragraphs[i+1].Kind != "code"
+	if p.CodeNewline != "" {
+		nl = p.CodeNewline
+	}
+	start := p.Open != "" || i == 0 || doc.Paragraphs[i-1].Kind != "code"
+	end := i+1 == len(doc.Paragraphs) || doc.Paragraphs[i+1].Kind != "code" || doc.Paragraphs[i+1].Open != ""
 	line := p.Raw
 	if p.Baseline == "" || p.Baseline != fingerprint(p) {
 		line = PlainText(p)
@@ -829,6 +856,15 @@ func codeLineSource(doc Document, i int) string {
 	b.WriteString(line)
 	if end {
 		close := p.Close
+		if close == "" {
+			close = p.CodeClose
+		}
+		for previous := i - 1; close == "" && previous >= 0 && doc.Paragraphs[previous].Kind == "code" && p.Open == ""; previous-- {
+			close = doc.Paragraphs[previous].Close
+			if doc.Paragraphs[previous].Open != "" {
+				break
+			}
+		}
 		if close == "" {
 			close = "```"
 		}
@@ -882,7 +918,7 @@ func serializeParagraph(p Paragraph) string {
 	// spelling first and fall back to stricter escaping (then entities)
 	// only when a re-parse would change the paragraph's semantics.
 	var value string
-	for _, level := range []escapeLevel{escapeNone, escapeInline, escapeAll, escapeEntities} {
+	for _, level := range []escapeLevel{escapeNone, escapeInline, escapeAll, escapeEntities, escapeReveal} {
 		value = protectIndentation(serializeRuns(normalized.Runs, level))
 		if sameParagraphSemantics(blockPrefix(p, value), p, normalized.Runs) {
 			break
@@ -914,7 +950,7 @@ func serializeCell(runs []Run) string {
 		}
 	}
 	var value string
-	for _, level := range []escapeLevel{escapeInline, escapeAll, escapeEntities} {
+	for _, level := range []escapeLevel{escapeInline, escapeAll, escapeEntities, escapeReveal} {
 		value = serializeRuns(encoded, level)
 		if sameInlineSemantics(value, normalized.Runs) {
 			break
@@ -955,6 +991,7 @@ const (
 	escapeInline                      // inline delimiters only
 	escapeAll                         // every Markdown punctuation character
 	escapeEntities                    // numeric entities for boundary characters
+	escapeReveal                      // entities keep styled boundary whitespace inside delimiters
 )
 
 func serializeRuns(runs []Run, level escapeLevel) string {
@@ -1017,7 +1054,17 @@ func sameParagraphSemantics(source string, p Paragraph, runs []Run) bool {
 	if got.Kind != p.Kind || (p.Kind == "heading" && got.Level != min(6, max(1, p.Level))) || (p.Kind == "checklist" && got.Checked != p.Checked) {
 		return false
 	}
-	return sameRuns(runs, got.Runs)
+	var expected []Run
+	for _, run := range runs {
+		if run.Source {
+			for _, paragraph := range ParseInline(run.Text, false).Paragraphs {
+				expected = append(expected, paragraph.Runs...)
+			}
+		} else {
+			expected = append(expected, run)
+		}
+	}
+	return sameStorageRuns(expected, got.Runs)
 }
 
 func sameInlineSemantics(value string, runs []Run) bool {
@@ -1035,7 +1082,31 @@ func sameInlineSemantics(value string, runs []Run) bool {
 			expected = append(expected, run)
 		}
 	}
-	return sameRuns(expected, doc.Paragraphs[0].Runs)
+	return sameStorageRuns(expected, doc.Paragraphs[0].Runs)
+}
+
+// Plain boundary whitespace follows Markdown's existing normalization policy.
+// Whitespace carrying inline formatting must retain those attributes on save.
+func sameStorageRuns(expected, actual []Run) bool {
+	meaningful := func(runs []Run) []Run {
+		var out []Run
+		for _, run := range runs {
+			styled := run.Bold || run.Italic || run.Strike || run.Code || run.Link != "" || run.Underline || run.Highlight || run.Sup || run.Sub
+			if !styled && !run.Break && run.Math == "" {
+				run.Text = strings.Map(func(r rune) rune {
+					if unicode.IsSpace(r) {
+						return -1
+					}
+					return r
+				}, run.Text)
+			}
+			if run.Text != "" || run.Break {
+				out = append(out, run)
+			}
+		}
+		return out
+	}
+	return sameRevealRuns(meaningful(expected), meaningful(actual))
 }
 
 func sameRuns(runs, parsed []Run) bool {
@@ -1095,10 +1166,10 @@ func serializeRun(run Run, italic string, level escapeLevel) string {
 		return serializeRun(plain, italic, level)
 	}
 	value := escapeText(run.Text, level)
-	if level == escapeEntities && !run.Code {
+	if (level == escapeEntities || level == escapeReveal) && !run.Code {
 		var encoded strings.Builder
 		for _, r := range run.Text {
-			if unicode.IsSpace(r) {
+			if level != escapeReveal && unicode.IsSpace(r) {
 				encoded.WriteRune(r)
 			} else {
 				fmt.Fprintf(&encoded, "&#%d;", r)
