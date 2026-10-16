@@ -185,7 +185,11 @@ func TestTypingLatency(t *testing.T) {
 	for _, sections := range sizes {
 		var b strings.Builder
 		for i := 0; i < sections; i++ {
-			b.WriteString("## 第 " + strconv.Itoa(i) + " 节\n\n这是一段比较长的正文，混合 English words 与 **粗体**、`code` 和 [链接](https://a.com)，用来模拟真实笔记。\n\n- 列表项一\n- 列表项二\n  - 嵌套项\n\n1. 有序\n2. 有序\n\n> 引用一行\n> 引用第二行\n\n```go\nfunc f() {}\n```\n\n")
+			formula := ""
+			if os.Getenv("CORRA_PERF_MATH") != "" {
+				formula = "行内公式 $x^2+y_" + strconv.Itoa(i) + "$ 与 "
+			}
+			b.WriteString("## 第 " + strconv.Itoa(i) + " 节\n\n这是一段比较长的正文，" + formula + "混合 English words 与 **粗体**、`code` 和 [链接](https://a.com)，用来模拟真实笔记。\n\n- 列表项一\n- 列表项二\n  - 嵌套项\n\n1. 有序\n2. 有序\n\n> 引用一行\n> 引用第二行\n\n```go\nfunc f() {}\n```\n\n")
 		}
 		doc := b.String()
 		nativeTestMain(func() {
@@ -210,6 +214,12 @@ func TestTypingLatency(t *testing.T) {
 			}
 			typing := time.Since(start) / time.Duration(n)
 			start = time.Now()
+			for i := 0; i < n; i++ {
+				nativeTestAction(e, "type", "字")
+				nativeTestAction(e, "display", "")
+			}
+			drawn := time.Since(start) / time.Duration(n)
+			start = time.Now()
 			for i := 0; i < 5; i++ {
 				nativeTestAction(e, "newline", "")
 			}
@@ -225,7 +235,37 @@ func TestTypingLatency(t *testing.T) {
 			start = time.Now()
 			e.Snapshot()
 			snap := time.Since(start)
-			t.Logf("paragraphs≈%d chars=%d load=%v type=%v/key enter=%v backspace=%v undo=%v snapshot=%v", sections*13, len(doc), load, typing, enter, bs, undo, snap)
+			t.Logf("paragraphs≈%d chars=%d load=%v type=%v/key type+draw=%v/key enter=%v backspace=%v undo=%v snapshot=%v", sections*13, len(doc), load, typing, drawn, enter, bs, undo, snap)
 		})
 	}
+}
+
+// Run: CORRA_TYPO_SHOT=/tmp/x.png go test ./nativerich -run TestScrolledShot
+func TestScrolledShot(t *testing.T) {
+	path := os.Getenv("CORRA_TYPO_SHOT")
+	if path == "" {
+		t.Skip("set CORRA_TYPO_SHOT=path.png")
+	}
+	var b strings.Builder
+	for i := 0; i < 40; i++ {
+		b.WriteString("## 第 " + strconv.Itoa(i) + " 节\n\n正文段落。\n\n- 列表项\n\n> 引用一行\n> 引用第二行\n\n> [!TIP]\n> 提示内容\n\n---\n\n```go\nfunc a() {}\nfunc b() {}\nfunc c() {}\nfunc d() {}\n```\n\n")
+	}
+	nativeTestMain(func() {
+		window := nativeTestWindow()
+		defer nativeTestCloseWindow(window)
+		e := New(window, func() {}, func() {})
+		defer e.Close()
+		e.SetFrame(0, 0, 900, 700)
+		e.SetVisible(true)
+		e.Load(b.String())
+		e.SetStyle(1, false, true)
+		text := []rune(nativeTestText(e))
+		// Land the viewport inside a code block so its chip starts above.
+		target := strings.LastIndex(string(text), "func c")
+		nativeTestSelect(e, len([]rune(string(text)[:target])), 0)
+		nativeTestAction(e, "display", "")
+		if !nativeTestScreenshot(e, path) {
+			t.Errorf("screenshot failed: %s", path)
+		}
+	})
 }

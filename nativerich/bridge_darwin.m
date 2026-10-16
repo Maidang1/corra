@@ -54,6 +54,7 @@ extern char *cr_render_math_document(uintptr_t handle, const char *document, int
 @property NSString *mathNumbering;
 @property NSString *mathJSON;
 @property NSArray *mathResults;
+@property NSString *mathSignature; // math inputs at the last refresh; nil forces one
 @property NSArray *preparedMath;
 @property NSUInteger mathIndex;
 @property NSMutableDictionary *imageCache;
@@ -96,7 +97,7 @@ extern char *cr_render_math_document(uintptr_t handle, const char *document, int
 - (void)setCodeLanguage:(NSString *)language;
 - (void)setCodeLanguage:(NSString *)language atLocation:(NSUInteger)location;
 - (CGFloat)codeGutterWidth;
-- (void)drawCodeLineNumbers:(NSRect)dirty;
+- (void)drawCodeLineNumbers:(NSRect)dirty range:(NSRange)within;
 - (NSDictionary *)codeControlState;
 - (NSArray *)codeBlocks;
 - (BOOL)indentQuote:(BOOL)outdent;
@@ -210,6 +211,21 @@ static NSArray<NSValue *> *CRRanges(NSString *string) {
         position = NSMaxRange(r);
     }
     if (string.length == 0 || [string hasSuffix:@"\n"]) [result addObject:[NSValue valueWithRange:NSMakeRange(string.length,0)]];
+    return result;
+}
+// CRRangesIn lists the paragraph ranges that intersect range (plus the
+// trailing empty paragraph when range reaches the end), so drawing can walk
+// just the visible part of a long note.
+static NSArray<NSValue *> *CRRangesIn(NSString *string, NSRange range) {
+    NSMutableArray *result=[NSMutableArray array];
+    NSUInteger end=MIN(NSMaxRange(range),string.length);
+    NSUInteger position=[string paragraphRangeForRange:NSMakeRange(MIN(range.location,string.length),0)].location;
+    while (position<string.length && position<=end) {
+        NSRange r=[string paragraphRangeForRange:NSMakeRange(position,0)];
+        [result addObject:[NSValue valueWithRange:r]];
+        position=NSMaxRange(r);
+    }
+    if (end>=string.length && (string.length==0 || [string hasSuffix:@"\n"])) [result addObject:[NSValue valueWithRange:NSMakeRange(string.length,0)]];
     return result;
 }
 static NSRange CRContent(NSString *string, NSRange range) {
@@ -375,7 +391,7 @@ static BOOL CRHasFootnote(NSDictionary *paragraph) {
         style.paragraphSpacing = (CRBlockEnding(p) ? 16 : 3) * _zoom;
         style.lineSpacing = 3 * _zoom;
     }
-    if (CRKind(p,@"code") && [p[@"open"] length]) style.paragraphSpacingBefore=20*_zoom;
+    if (CRKind(p,@"code") && [p[@"open"] length]) style.paragraphSpacingBefore=12*_zoom;
     if (CRKind(p,@"code") && [p[@"close"] length]) style.paragraphSpacing=20*_zoom;
     if (cell) {
         style.textBlocks = @[cell];
@@ -401,6 +417,10 @@ static BOOL CRHasFootnote(NSDictionary *paragraph) {
     if (list || CRKind(p,@"quote")) {
         style.firstLineHeadIndent = (30 + MAX(0,[p[@"depth"] integerValue])*26 + (CRKind(p,@"checklist") && CROrdered(p) ? 24 : 0)) * _zoom;
         style.headIndent = style.firstLineHeadIndent;
+    }
+    if (source) {
+        // Code sits inside its chip with breathing room on both sides.
+        style.firstLineHeadIndent=14*_zoom; style.headIndent=14*_zoom; style.tailIndent=-14*_zoom;
     }
     if (CRKind(p,@"code") && _codeLineNumbers) {
         style.firstLineHeadIndent=[self codeGutterWidth];
@@ -1255,7 +1275,6 @@ static BOOL CRHasFootnote(NSDictionary *paragraph) {
     }
 }
 - (NSRect)markerLineRect:(NSRange)range {
-    [_text.layoutManager ensureLayoutForTextContainer:_text.textContainer];
     NSRange glyph=[_text.layoutManager glyphRangeForCharacterRange:CRContent(_text.string,range) actualCharacterRange:NULL];
     if (!glyph.length) return NSOffsetRect(_text.layoutManager.extraLineFragmentRect,_text.textContainerOrigin.x,_text.textContainerOrigin.y);
     // Tight glyph bounds of the first line: the fragment rect includes
@@ -1719,8 +1738,29 @@ static BOOL CRHasFootnote(NSDictionary *paragraph) {
     [self.owner notify];
 }
 - (void)unmarkText { [super unmarkText]; if (!self.owner.suppress) { [self.owner normalize]; [self.owner notify]; } }
+// drawRange is the text a dirty rect can show, widened to whole paragraphs
+// and back to the start of any code block or quote it cuts into, so chips
+// and bars still begin where their block does.
+- (NSRange)drawRange:(NSRect)dirty {
+    NSLayoutManager *layout=self.layoutManager;
+    NSString *string=self.string;
+    NSRange glyphs=[layout glyphRangeForBoundingRect:NSOffsetRect(dirty,-self.textContainerOrigin.x,-self.textContainerOrigin.y) inTextContainer:self.textContainer];
+    NSRange chars=[layout characterRangeForGlyphRange:glyphs actualGlyphRange:NULL];
+    NSUInteger start=[string paragraphRangeForRange:NSMakeRange(MIN(chars.location,string.length),0)].location;
+    for (int i=0;i<2 && start>0;i++) start=[string paragraphRangeForRange:NSMakeRange(start-1,0)].location;
+    while (start>0) {
+        NSUInteger previous=[string paragraphRangeForRange:NSMakeRange(start-1,0)].location;
+        NSDictionary *p=CRParagraphAt(self.owner,previous);
+        if (!CRKind(p,@"code") && !CRKind(p,@"source") && !CRKind(p,@"opaque") && !CRKind(p,@"quote")) break;
+        start=previous;
+    }
+    NSUInteger end=MIN(NSMaxRange(chars),string.length);
+    for (int i=0;i<2 && end<string.length;i++) end=NSMaxRange([string paragraphRangeForRange:NSMakeRange(end,0)]);
+    return NSMakeRange(start,end-start);
+}
 - (void)drawRect:(NSRect)dirty {
     CREditor *e=self.owner;
+    NSRange visible=[self drawRange:dirty];
     // drawsBackground is off: paint the canvas, then one rounded slab per
     // protected block, so the chips sit under the text and stay separated by
     // the real paragraph gap.
@@ -1729,8 +1769,10 @@ static BOOL CRHasFootnote(NSDictionary *paragraph) {
     __block NSRect group=NSZeroRect;
     __block BOOL groupCode=NO;
     NSRect (^chipBounds)(void)=^NSRect {
-        CGFloat header=groupCode ? 20*e.zoom : 0;
-        return NSMakeRect(self.textContainerOrigin.x,group.origin.y-7*e.zoom-header,self.textContainer.size.width,group.size.height+14*e.zoom+header);
+        // Code gets even padding all round; its language tag sits in the
+        // top-right corner instead of an empty header row.
+        CGFloat pad=groupCode ? 12*e.zoom : 7*e.zoom;
+        return NSMakeRect(self.textContainerOrigin.x,group.origin.y-pad,self.textContainer.size.width,group.size.height+2*pad);
     };
     void (^flush)(void)=^{
         if (NSIsEmptyRect(group)) return;
@@ -1749,19 +1791,18 @@ static BOOL CRHasFootnote(NSDictionary *paragraph) {
         if (groupLang.length) {
             NSDictionary *attrs=@{NSFontAttributeName:[NSFont systemFontOfSize:10.5*e.zoom],NSForegroundColorAttributeName:e.dark ? [NSColor colorWithWhite:0.55 alpha:1] : [NSColor colorWithWhite:0.6 alpha:1]};
             NSSize size=[groupLang sizeWithAttributes:attrs];
-            [groupLang drawAtPoint:NSMakePoint(NSMaxX(chip)-size.width-10*e.zoom,chip.origin.y+5*e.zoom) withAttributes:attrs];
+            [groupLang drawAtPoint:NSMakePoint(NSMaxX(chip)-size.width-10*e.zoom,chip.origin.y+6*e.zoom) withAttributes:attrs];
         }
         groupLang=nil;
     };
-    [e drawAlertPanels:dirty];
-    NSArray *rules=[e ruleRanges];
-    for (NSValue *v in CRRanges(self.string)) {
+    [e drawAlertPanels:dirty range:visible];
+    NSArray *rules=[e ruleRangesIn:visible];
+    for (NSValue *v in CRRangesIn(self.string,visible)) {
         NSDictionary *p=CRParagraphAt(e,v.rangeValue.location);
         if ([rules containsObject:v]) { flushWithLabel(); continue; } // a rule draws as a line, not a chip
         // A blank or rich paragraph closes the block's chip.
         if (!CRKind(p,@"source") && !CRKind(p,@"code") && !CRKind(p,@"opaque")) { flushWithLabel(); continue; }
         if (CRKind(p,@"code") && [p[@"open"] length]) flushWithLabel();
-        [self.layoutManager ensureLayoutForTextContainer:self.textContainer];
         NSRange content=CRContent(self.string,v.rangeValue);
         if (!content.length && NSMaxRange(v.rangeValue)>content.location) content=NSMakeRange(content.location,1); // empty source line: the newline's own line
         NSRange glyph=[self.layoutManager glyphRangeForCharacterRange:content actualCharacterRange:NULL];
@@ -1795,16 +1836,14 @@ static BOOL CRHasFootnote(NSDictionary *paragraph) {
         NSRectFillUsingOperation(NSMakeRect(self.textContainerOrigin.x,y-0.5,self.textContainer.size.width,1),NSCompositingOperationSourceOver);
     }
     [super drawRect:dirty];
-    [e drawAlertTitles];
-    [e drawCodeLineNumbers:dirty];
-    NSMutableSet *footnoteMarkers=[NSMutableSet set];
-    NSArray *markerRanges=CRRanges(self.string);
+    [e drawAlertTitlesIn:visible];
+    [e drawCodeLineNumbers:dirty range:visible];
+    NSArray *markerRanges=CRRangesIn(self.string,visible);
     for (NSUInteger markerI=0; markerI<markerRanges.count; markerI++) {
         NSValue *v=markerRanges[markerI];
         NSDictionary *p=CRParagraphAt(e,v.rangeValue.location);
-        NSString *noteGroup=p[@"footnoteGroup"];
-        if ([p[@"footnoteId"] length] && ![footnoteMarkers containsObject:noteGroup]) {
-            if (noteGroup) [footnoteMarkers addObject:noteGroup];
+        // The first paragraph of a definition carries its number.
+        if ([p[@"footnoteId"] length] && ![p[@"footnoteContinuation"] boolValue]) {
             NSRect line=[e markerLineRect:v.rangeValue];
             NSString *number=e.footnotes[p[@"footnoteId"]][@"number"] ?: @"·";
             NSDictionary *attrs=@{NSFontAttributeName:[NSFont systemFontOfSize:11.5*e.zoom weight:NSFontWeightMedium],NSForegroundColorAttributeName:NSColor.linkColor};
@@ -2149,7 +2188,7 @@ uintptr_t cr_new(uintptr_t window, uintptr_t callback) {
     return (uintptr_t)(__bridge_retained void *)e;
 }
 void cr_close(uintptr_t ptr) { CREditor *e=(__bridge_transfer CREditor *)(void *)ptr; e.callback=0; e.text.delegate=nil; [e.scroll removeFromSuperview]; [e.undo removeAllActions]; }
-void cr_load(uintptr_t ptr,const char *json) { CREditor *e=CRE(ptr); e.documentRevision++; e.suppress=YES; e.tocSignature=nil; NSAttributedString *value=[e attributedDocument:CRJSON(json)]; [e.text.textStorage setAttributedString:value]; e.text.selectedRange=NSMakeRange(0,0); e.text.typingAttributes=@{CRParagraph: value.length ? [value attribute:CRParagraph atIndex:0 effectiveRange:NULL] : e.emptyParagraph ?: CRBody()}; [e.undo removeAllActions]; e.suppress=NO; [e restyle]; [e refreshMath]; [e refreshTOC]; }
+void cr_load(uintptr_t ptr,const char *json) { CREditor *e=CRE(ptr); e.documentRevision++; e.suppress=YES; e.tocSignature=nil; e.mathSignature=nil; NSAttributedString *value=[e attributedDocument:CRJSON(json)]; [e.text.textStorage setAttributedString:value]; e.text.selectedRange=NSMakeRange(0,0); e.text.typingAttributes=@{CRParagraph: value.length ? [value attribute:CRParagraph atIndex:0 effectiveRange:NULL] : e.emptyParagraph ?: CRBody()}; [e.undo removeAllActions]; e.suppress=NO; [e restyle]; [e refreshMath]; [e refreshTOC]; }
 char *cr_snapshot(uintptr_t ptr,int *marked) { CREditor *e=CRE(ptr); *marked=e.text.hasMarkedText; if (*marked) return NULL; NSData *data=[NSJSONSerialization dataWithJSONObject:[e document] options:0 error:NULL]; if (!data) return NULL; return strdup([[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding].UTF8String); }
 void cr_format(uintptr_t ptr,const char *command) { [CRE(ptr) format:[NSString stringWithUTF8String:command]]; }
 void cr_insert(uintptr_t ptr,const char *json) {
@@ -2362,6 +2401,13 @@ void cr_test_action(uintptr_t ptr,const char *action,const char *text) {
     else if ([a isEqual:@"reveal"]) { if (![e revealInlineAt:e.text.selectedRange.location]) [e revealSourceAt:e.text.selectedRange.location]; }
     else if ([a isEqual:@"move-right"]) [e.text moveRight:nil];
     else if ([a isEqual:@"move-left"]) [e.text moveLeft:nil];
+    else if ([a isEqual:@"display"]) {
+        // Render the visible page the way a frame would, without layout help.
+        [e.text scrollRangeToVisible:e.text.selectedRange];
+        NSRect visible=e.text.visibleRect;
+        NSBitmapImageRep *rep=[e.text bitmapImageRepForCachingDisplayInRect:visible];
+        [e.text cacheDisplayInRect:visible toBitmapImageRep:rep];
+    }
     else if ([a isEqual:@"move-down"]) [e.text moveDown:nil];
     else if ([a isEqual:@"move-up"]) [e.text moveUp:nil];
     else if ([a isEqual:@"blur"]) [e textDidEndEditing:[NSNotification notificationWithName:NSTextDidEndEditingNotification object:e.text]];
