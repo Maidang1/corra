@@ -66,10 +66,16 @@
 - (NSArray *)codeLineNumberEntries {
     if (!_codeLineNumbers) return @[];
     [_text.layoutManager ensureLayoutForTextContainer:_text.textContainer];
+    return [self codeLineNumberEntriesIn:NSMakeRange(0,_text.string.length)];
+}
+- (NSArray *)codeLineNumberEntriesIn:(NSRange)within {
+    if (!_codeLineNumbers) return @[];
     NSMutableArray *entries=[NSMutableArray array];
     CGFloat gutter=[self codeGutterWidth];
     NSDictionary *attributes=@{NSFontAttributeName:[NSFont monospacedDigitSystemFontOfSize:11.5*_zoom weight:NSFontWeightRegular]};
     for (NSDictionary *block in [self codeBlocks]) {
+        NSRange whole=[block[@"range"] rangeValue];
+        if (NSMaxRange(whole)<within.location || whole.location>NSMaxRange(within)) continue;
         NSUInteger number=1;
         for (NSValue *value in block[@"lines"]) {
             NSRange range=value.rangeValue;
@@ -93,9 +99,9 @@
     }
     return entries;
 }
-- (void)drawCodeLineNumbers:(NSRect)dirty {
+- (void)drawCodeLineNumbers:(NSRect)dirty range:(NSRange)within {
     NSDictionary *attributes=@{NSFontAttributeName:[NSFont monospacedDigitSystemFontOfSize:11.5*_zoom weight:NSFontWeightRegular],NSForegroundColorAttributeName:_dark ? [NSColor colorWithWhite:0.57 alpha:1] : [NSColor colorWithWhite:0.48 alpha:1]};
-    for (NSDictionary *entry in [self codeLineNumberEntries]) {
+    for (NSDictionary *entry in [self codeLineNumberEntriesIn:within]) {
         NSRect rect=NSMakeRect([entry[@"x"] doubleValue],[entry[@"y"] doubleValue],[entry[@"width"] doubleValue],[entry[@"height"] doubleValue]);
         if (NSIntersectsRect(rect,dirty)) [[entry[@"number"] description] drawInRect:rect withAttributes:attributes];
     }

@@ -116,6 +116,7 @@
         NSString *source=[[_text.string substringWithRange:CRContent(_text.string,value.rangeValue)] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
         if ([source hasPrefix:@"$$"]) [self renderDraftGroup:value.rangeValue];
     }
+    _mathSignature=nil;
     [self refreshMath];
 }
 // hasMath: any inline or display formula is present.
@@ -126,11 +127,33 @@
     if (!found) [_text.textStorage enumerateAttribute:CRParagraph inRange:all options:0 usingBlock:^(NSDictionary *p, NSRange r, BOOL *stop) { if (CRKind(p,@"math")) found=*stop=YES; }];
     return found;
 }
+// currentMathSignature captures everything document math depends on: each
+// formula's source, source text that may hold formulas, and presentation.
+// A formula still waiting for its image makes the signature unique.
+- (NSString *)currentMathSignature {
+    NSMutableString *signature=[NSMutableString stringWithFormat:@"%d|%.4f|%@",_dark,_zoom,_mathNumbering ?: @"none"];
+    __block BOOL pending=NO;
+    NSString *string=_text.string;
+    [_text.textStorage enumerateAttributesInRange:NSMakeRange(0,string.length) options:0 usingBlock:^(NSDictionary *attrs, NSRange range, BOOL *stop) {
+        NSDictionary *p=attrs[CRParagraph];
+        if (attrs[CRMathExpr] || CRKind(p,@"math")) {
+            [signature appendFormat:@"\n$%@",attrs[CRMathExpr] ?: p[@"raw"] ?: @""];
+            if (!attrs[CRMathRendered]) pending=YES;
+        } else if (attrs[CRInlineSource] || CRKind(p,@"source")) {
+            [signature appendFormat:@"\n#%@",[string substringWithRange:range]];
+        }
+    }];
+    return pending ? nil : signature;
+}
 - (void)refreshMath {
     if (_suppress || _text.hasMarkedText) return;
     // Numbering is document-wide, so a formula needs a full pass, but a note
     // without any must not serialize itself on every keystroke.
     if (!_mathResults.count && ![self hasMath]) return;
+    // Edits that touch no formula leave every result as it was.
+    NSString *signature=[self currentMathSignature];
+    if (signature && [signature isEqual:_mathSignature]) return;
+    _mathSignature=signature;
     NSArray *results=[self mathForDocument:[self document]];
     NSMutableArray *ranges=[NSMutableArray array];
     for (NSValue *value in CRRanges(_text.string)) {
@@ -143,7 +166,7 @@
             }];
         }
     }
-    if (ranges.count!=results.count) return;
+    if (ranges.count!=results.count) { _mathSignature=nil; return; }
     BOOL previous=_suppress; _suppress=YES;
     BOOL changed=NO;
     for (NSUInteger i=0;i<ranges.count;i++) {

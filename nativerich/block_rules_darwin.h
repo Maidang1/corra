@@ -88,15 +88,16 @@ static BOOL CRRuleActive(CREditor *e, NSRange paragraph) {
     NSString *string=_text.string;
     if (!string.length) return;
     [layout removeTemporaryAttribute:NSForegroundColorAttributeName forCharacterRange:NSMakeRange(0,string.length)];
-    for (NSValue *v in [self ruleRanges]) [layout addTemporaryAttribute:NSForegroundColorAttributeName value:NSColor.clearColor forCharacterRange:CRContent(string,v.rangeValue)];
-    for (NSDictionary *marker in [self alertMarkers]) [layout addTemporaryAttribute:NSForegroundColorAttributeName value:NSColor.clearColor forCharacterRange:[marker[@"range"] rangeValue]];
+    NSRange all=NSMakeRange(0,string.length);
+    for (NSValue *v in [self ruleRangesIn:all]) [layout addTemporaryAttribute:NSForegroundColorAttributeName value:NSColor.clearColor forCharacterRange:CRContent(string,v.rangeValue)];
+    for (NSDictionary *marker in [self alertMarkersIn:all]) [layout addTemporaryAttribute:NSForegroundColorAttributeName value:NSColor.clearColor forCharacterRange:[marker[@"range"] rangeValue]];
 }
 
-// alertMarkers lists the "[!LABEL]" markers of callouts the caret is not in;
+// alertMarkersIn: lists the "[!LABEL]" markers of callouts the caret is not in;
 // drawRect paints an icon and title over each, GitHub style.
-- (NSArray<NSDictionary *> *)alertMarkers {
+- (NSArray<NSDictionary *> *)alertMarkersIn:(NSRange)within {
     NSMutableArray *result=[NSMutableArray array];
-    for (NSValue *v in CRRanges(_text.string)) {
+    for (NSValue *v in CRRangesIn(_text.string,within)) {
         NSRange r=v.rangeValue, content=CRContent(_text.string,r);
         NSDictionary *p=CRParagraphAt(self,r.location);
         if (!content.length || !CRKind(p,@"quote") || CRRuleActive(self,r)) continue;
@@ -107,9 +108,9 @@ static BOOL CRRuleActive(CREditor *e, NSRange paragraph) {
     }
     return result;
 }
-- (void)drawAlertTitles {
+- (void)drawAlertTitlesIn:(NSRange)within {
     NSDictionary *symbols=@{@"NOTE":@"info.circle",@"TIP":@"lightbulb",@"IMPORTANT":@"exclamationmark.bubble",@"WARNING":@"exclamationmark.triangle",@"CAUTION":@"exclamationmark.octagon"};
-    for (NSDictionary *marker in [self alertMarkers]) {
+    for (NSDictionary *marker in [self alertMarkersIn:within]) {
         NSRange range=[marker[@"range"] rangeValue];
         NSRange glyph=[_text.layoutManager glyphRangeForCharacterRange:range actualCharacterRange:NULL];
         if (!glyph.length) continue;
@@ -132,20 +133,20 @@ static BOOL CRRuleActive(CREditor *e, NSRange paragraph) {
         [title drawAtPoint:NSMakePoint(x,NSMidY(box)-size.height/2) withAttributes:attrs];
     }
 }
-- (NSArray<NSValue *> *)ruleRanges {
+- (NSArray<NSValue *> *)ruleRangesIn:(NSRange)within {
     // Only a source line standing alone is a rule; "---" inside a larger
     // source block (front matter, a revealed figure) stays text.
     NSMutableArray *result=[NSMutableArray array];
-    NSArray *ranges=CRRanges(_text.string);
-    for (NSUInteger i=0;i<ranges.count;i++) {
-        NSRange r=[ranges[i] rangeValue], content=CRContent(_text.string,r);
+    NSString *string=_text.string;
+    for (NSValue *v in CRRangesIn(string,within)) {
+        NSRange r=v.rangeValue, content=CRContent(string,r);
         NSDictionary *p=CRParagraphAt(self,r.location);
         if (!content.length || !CRKind(p,@"source")) continue;
-        NSDictionary *previous=i ? CRParagraphAt(self,[ranges[i-1] rangeValue].location) : nil;
-        NSDictionary *next=i+1<ranges.count && [ranges[i+1] rangeValue].length ? CRParagraphAt(self,[ranges[i+1] rangeValue].location) : nil;
+        NSDictionary *previous=r.location ? CRParagraphAt(self,[string paragraphRangeForRange:NSMakeRange(r.location-1,0)].location) : nil;
+        NSDictionary *next=NSMaxRange(r)<string.length ? CRParagraphAt(self,NSMaxRange(r)) : nil;
         if (CRKind(previous,@"source") && !CRBlockEnding(previous)) continue;
         if (CRKind(next,@"source") && !CRBlockEnding(p)) continue;
-        if (CRRuleText([_text.string substringWithRange:content]) && !CRRuleActive(self,r)) [result addObject:ranges[i]];
+        if (CRRuleText([string substringWithRange:content]) && !CRRuleActive(self,r)) [result addObject:v];
     }
     return result;
 }
@@ -213,7 +214,7 @@ static BOOL CRFigure(NSDictionary *p) {
 
 // drawAlertPanels paints one tinted card behind each callout, spanning all
 // of its lines and paragraphs, so wrapped and broken lines share one edge.
-- (void)drawAlertPanels:(NSRect)dirty {
+- (void)drawAlertPanels:(NSRect)dirty range:(NSRange)within {
     NSLayoutManager *layout=_text.layoutManager;
     __block NSRect panel=NSZeroRect;
     __block NSString *label=nil;
@@ -224,12 +225,11 @@ static BOOL CRFigure(NSDictionary *p) {
         }
         panel=NSZeroRect; label=nil;
     };
-    for (NSValue *v in CRRanges(_text.string)) {
+    for (NSValue *v in CRRangesIn(_text.string,within)) {
         NSDictionary *p=CRParagraphAt(self,v.rangeValue.location);
         NSString *alert=[p[@"alert"] isKindOfClass:NSString.class] ? p[@"alert"] : nil;
         NSRange content=CRContent(_text.string,v.rangeValue);
         if (!CRKind(p,@"quote") || !alert.length || !content.length) { flush(); continue; }
-        [layout ensureLayoutForTextContainer:_text.textContainer];
         NSRange glyph=[layout glyphRangeForCharacterRange:content actualCharacterRange:NULL];
         NSRect last=[layout lineFragmentUsedRectForGlyphAtIndex:NSMaxRange(glyph)-1 effectiveRange:NULL];
         CGFloat top=NSMinY([layout lineFragmentUsedRectForGlyphAtIndex:glyph.location effectiveRange:NULL]);

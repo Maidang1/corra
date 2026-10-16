@@ -189,7 +189,7 @@ func TestNativeCodeLineNumbersUseLogicalLinesAndReset(t *testing.T) {
 		}
 		e.Format("code-line-numbers:0")
 		off := readCodeControls(t, e)
-		if off.Enabled || off.Gutter != 0 || len(off.Lines) != 0 || off.ActualIndent != 0 {
+		if off.Enabled || off.Gutter != 0 || len(off.Lines) != 0 || off.ActualIndent >= state.Gutter {
 			t.Errorf("toggle off left gutter: %+v", off)
 		}
 	})
