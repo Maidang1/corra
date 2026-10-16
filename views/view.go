@@ -48,10 +48,6 @@ type View struct {
 	HostOpen  bool
 	HostDraft app.HostingConfig
 
-	// scrollToBlock asks the preview to scroll a block into view (TOC and
-	// #anchor links); -1 when idle.
-	scrollToBlock int
-
 	// invalidate triggers a window redraw (bound at startup).
 	invalidate func()
 
@@ -74,7 +70,7 @@ func (v *View) Bind(svc ui.Services) { v.invalidate = svc.Invalidate }
 
 // New creates the view.
 func New(a *app.App, images *app.ImageLoader) *View {
-	return &View{App: a, Images: images, scrollToBlock: -1}
+	return &View{App: a, Images: images}
 }
 
 func (v *View) Close() {
@@ -97,8 +93,10 @@ func (v *View) Serve(c *ui.Context) {
 	v.Build(c)
 }
 
-// Build is the MyGo view function: the unified header, the three Notes
-// columns (folders, notes list, editor) and the modal dialogs.
+// Build is the MyGo view function: two floating cards over the window's
+// gray — the navigation sidebar and the writing area — each reaching the
+// top edge, their top rows forming the toolbar the traffic lights land
+// on, plus the modal dialogs.
 func (v *View) Build(c *ui.Context) {
 	c.SetTheme(v.theme(c))
 	if v.rich != nil && v.richPath != v.App.Path {
@@ -112,29 +110,39 @@ func (v *View) Build(c *ui.Context) {
 	}
 	conflict := v.App.Conflict
 
-	ui.Row(c).Fill().Gap(0).Background(c.Theme().Surface).Children(func() {
+	t := c.Theme()
+
+	ui.Row(c).Fill().Gap(0).Background(windowBackground(t)).Children(func() {
 		if v.App.Sidebar {
 			v.foldersSidebar(c)
 		}
-		ui.Column(c).Key("workspace").Fill().Gap(0).Children(func() {
-			v.header(c)
-			ui.Row(c).Fill().Gap(0).Children(func() {
-				v.notesList(c)
-				ui.Divider(c).FillHeight()
-				v.editorPane(c)
-				if v.App.Outline {
-					ui.Divider(c).FillHeight()
-					v.outlinePanel(c)
-				}
+		// The workspace floats next to the sidebar as its own card:
+		// rounded corners, a hairline rim and a soft Apple-style drop
+		// shadow.
+		left := float32(4)
+		if !v.App.Sidebar {
+			left = 8
+		}
+		ui.Box(c).Fill().Padding(8, 8, 8, left).Children(func() {
+			ui.Column(c).Key("workspace").Fill().Gap(0).Radius(20).Clip().
+				Background(t.Surface).
+				Border(1, cardBorder(t)).
+				Shadow(0, 10, 30, 0, cardShadow(t)).Children(func() {
+				v.header(c)
+				ui.Divider(c).FillWidth()
+				ui.Row(c).Fill().Gap(0).Children(func() {
+					v.editorPane(c)
+					if v.App.Outline {
+						ui.Divider(c).FillHeight()
+						v.outlinePanel(c)
+					}
+				})
 			})
 		})
 	})
 
 	if conflict {
 		v.conflictDialog(c)
-	}
-	if v.App.EditOpen {
-		v.blockEditorModal(c)
 	}
 	if v.HostOpen {
 		v.hostingDialog(c)

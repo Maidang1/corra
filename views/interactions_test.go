@@ -53,6 +53,42 @@ func TestSidebarButtonChangesVisibility(t *testing.T) {
 	}
 }
 
+// TestCollapsedSidebar verifies the macOS collapse pattern: the toggle
+// hides folders and search (editor gets the full width), the header keeps
+// its controls within bounds, and the header's leading button expands the
+// sidebar again.
+func TestCollapsedSidebar(t *testing.T) {
+	v, tt := notesFixture(t)
+	tt.SetSize(960, 560)
+	click(t, tt, "切换边栏")
+	if v.App.Sidebar {
+		t.Fatal("sidebar did not collapse")
+	}
+	if tt.HasText("全部备忘录") || tt.HasText("搜索备忘录") {
+		t.Fatal("collapsed sidebar still renders navigation or search")
+	}
+	for _, label := range []string{"新建备忘录 (Cmd+N)", "文本格式", "插入表格", "共享与导出"} {
+		r, ok := tt.Find(label)
+		if !ok || r.X+r.W > 961 || r.W < 25 {
+			t.Fatalf("collapsed toolbar %s out of bounds %+v", label, r)
+		}
+	}
+	if dir := os.Getenv("CORRA_SCREENSHOTS"); dir != "" {
+		f, err := os.Create(filepath.Join(dir, "collapsed.png"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := png.Encode(f, tt.Image()); err != nil {
+			t.Fatal(err)
+		}
+		f.Close()
+	}
+	click(t, tt, "切换边栏")
+	if !v.App.Sidebar || !tt.HasText("全部备忘录") {
+		t.Fatal("sidebar did not expand back")
+	}
+}
+
 func TestFormatControlHasVisibleText(t *testing.T) {
 	_, tt := notesFixture(t)
 	if !tt.HasText("Aa") {
@@ -89,23 +125,6 @@ func TestFlushDoesNotTouchCleanNote(t *testing.T) {
 	}
 	if !st.ModTime().Equal(old) {
 		t.Fatal("opening/exporting a clean note changes its date and ordering")
-	}
-}
-
-func TestPreviewMutationSchedulesSave(t *testing.T) {
-	v, tt := notesFixture(t)
-	v.App.AppendBlock("- [ ] persisted task")
-	tt.Frame()
-	if v.autosaveTimer == nil {
-		t.Fatal("preview mutations never schedule autosave")
-	}
-	v.flushAutosave()
-	got, err := os.ReadFile(v.App.Path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(got), "persisted task") {
-		t.Fatal("preview change not persisted")
 	}
 }
 
@@ -277,18 +296,6 @@ func TestFolderDialogAndFullTextSearch(t *testing.T) {
 	}
 }
 
-func TestPreviewTaskPreservesNestedSource(t *testing.T) {
-	v, tt := notesFixture(t)
-	src := "- [ ] parent\n  - [ ] child\n    continuation\n- [x] done\n"
-	v.App.SetSource(src, 0)
-	tt.Frame()
-	click(t, tt, "任务：parent")
-	want := strings.Replace(src, "[ ]", "[x]", 1)
-	if v.App.Source != want {
-		t.Fatalf("checkbox rewrote unrelated list source: %q", v.App.Source)
-	}
-}
-
 func TestDeleteConfirmationAndRestoreClicks(t *testing.T) {
 	v, tt := notesFixture(t)
 	path := v.App.Path
@@ -334,38 +341,5 @@ func TestAttachmentAndExportCallbacks(t *testing.T) {
 	}
 	if exported != v.App.Source {
 		t.Fatal("export did not receive current source")
-	}
-}
-
-func TestTrashCannotOpenBlockEditor(t *testing.T) {
-	v, _ := notesFixture(t)
-	v.App.SelFolder = app.TrashName
-	v.openBlockEditor(0, "text", false)
-	if v.App.EditOpen {
-		t.Fatal("trash opened editable modal")
-	}
-}
-
-func TestStructuredBlockOpensFullSourceWithoutRewriting(t *testing.T) {
-	v, tt := notesFixture(t)
-	src := "# Title\n\n```go\nfmt.Println(1)\n```\n"
-	v.App.SetSource(src, 0)
-	tt.Frame()
-	v.openBlockEditor(1, "```go\nfmt.Println(1)\n```", false)
-	tt.Frame()
-	if v.App.Mode != app.ModeEdit || v.App.EditOpen || v.App.Source != src {
-		t.Fatal("structured preview did not navigate to full source editor")
-	}
-}
-
-func TestCollapsedSidebarAtMinimumWidth(t *testing.T) {
-	_, tt := notesFixture(t)
-	tt.SetSize(960, 560)
-	click(t, tt, "切换边栏")
-	for _, label := range []string{"新建备忘录 (Cmd+N)", "文本格式", "插入表格", "共享与导出", "搜索备忘录"} {
-		r, ok := tt.Find(label)
-		if !ok || r.X+r.W > 961 || r.W < 25 {
-			t.Fatalf("collapsed toolbar %s out of bounds %+v", label, r)
-		}
 	}
 }

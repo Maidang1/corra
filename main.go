@@ -48,7 +48,7 @@ func main() {
 			MinHeight:            560,
 			Content:              ui.View(buildView),
 			TitleBarStyle:        mygo.TitleBarHiddenInset,
-			TrafficLightPosition: &mygo.Point{X: 20, Y: 22},
+			TrafficLightPosition: &mygo.Point{X: 20, Y: 26},
 			TitleBarHeight:       58,
 		})
 		mainWindow = win

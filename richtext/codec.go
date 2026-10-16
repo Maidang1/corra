@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -1308,7 +1309,7 @@ func formatInlineRun(run Run, value, italic string) string {
 	}
 	value = before + value + after
 	if run.Link != "" {
-		destination := strings.NewReplacer("\\", "\\\\", "<", "\\<", ">", "\\>", "&", "\\&", "\n", "%0A", "\r", "%0D").Replace(run.Link)
+		destination := linkDestination(run.Link)
 		title := ""
 		if run.LinkTitle != "" {
 			escaped := strings.NewReplacer("\\", "\\\\", "\"", "\\\"", "&", "\\&", "\n", "&#10;", "\r", "&#13;").Replace(run.LinkTitle)
@@ -1316,9 +1317,31 @@ func formatInlineRun(run Run, value, italic string) string {
 		}
 		// Edited reference links use resolved inline destinations and titles;
 		// untouched paragraphs and definition blocks retain their exact Raw.
-		value = "[" + value + "](<" + destination + ">" + title + ")"
+		value = "[" + value + "](" + destination + title + ")"
 	}
 	return value
+}
+
+var entityLike = regexp.MustCompile(`&[A-Za-z0-9#]+;`)
+
+// linkDestination writes plain URLs bare, as people type them, and falls
+// back to the <...> form when the bare one would not parse back exactly.
+func linkDestination(link string) string {
+	bare := link != "" && !strings.ContainsAny(link, " \t\n\r<>\\") && !entityLike.MatchString(link)
+	depth := 0
+	for _, r := range link {
+		if r == '(' {
+			depth++
+		} else if r == ')' {
+			if depth--; depth < 0 {
+				break
+			}
+		}
+	}
+	if bare && depth == 0 {
+		return link
+	}
+	return "<" + strings.NewReplacer("\\", "\\\\", "<", "\\<", ">", "\\>", "&", "\\&", "\n", "%0A", "\r", "%0D").Replace(link) + ">"
 }
 
 func escapeText(value string, level escapeLevel) string {

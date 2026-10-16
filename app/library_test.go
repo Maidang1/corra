@@ -122,7 +122,7 @@ func TestAppNewNote(t *testing.T) {
 	a.LibraryRoot = t.TempDir()
 	a.SelFolder = TrashName
 	a.Query = "unmatched search"
-	a.Mode = ModePreview
+	a.Mode = ModeRich
 	if err := a.NewNote(); err != nil {
 		t.Fatal(err)
 	}

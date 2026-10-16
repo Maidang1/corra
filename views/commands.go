@@ -74,17 +74,6 @@ func (v *View) folderMenu(m *ui.Menu) {
 }
 
 func (v *View) noteMenu(m *ui.Menu) {
-	if m.Item(v.modeLabel()).Disabled(!v.canEdit()).Chosen() {
-		v.toggleMode()
-	}
-	if v.rich != nil {
-		if m.Item("所见即所得文稿").Checked(v.App.Mode == app.ModeRich).Disabled(!v.canEdit()).Chosen() {
-			v.RichAction()
-		}
-		if m.Item("阅读预览（含复杂内容）").Checked(v.App.Mode == app.ModePreview).Chosen() {
-			v.PreviewAction()
-		}
-	}
 	if m.Item("恢复备忘录").Disabled(v.App.SelFolder != app.TrashName || v.App.SelNote == "").Chosen() {
 		if err := v.App.RestoreSelectedNote(); err != nil {
 			v.SaveError = err.Error()
@@ -130,10 +119,6 @@ func (v *View) moveNote(folder string) {
 }
 
 func (v *View) formatMenu(m *ui.Menu) {
-	if m.Item(v.modeLabel()).Chosen() {
-		v.toggleMode()
-	}
-	m.Separator()
 	m.Submenu("标题级别", func(sub *ui.Menu) {
 		for level, label := range []string{"一级标题", "二级标题", "三级标题", "四级标题", "五级标题", "六级标题"} {
 			lv := level + 1

@@ -69,19 +69,8 @@ $$
 	}
 }
 
-// TestViewPreviewMode renders the preview pane.
-func TestViewPreviewMode(t *testing.T) {
-	a := app.New()
-	a.Mode = app.ModePreview
-	v := New(a, app.NewImageLoader(""))
-	img := ui.Render(v.Build, 800, 600, 1)
-	if img == nil {
-		t.Fatal("nil render")
-	}
-}
-
-// TestViewNotesLibrary renders the full three-column Notes UI with a
-// real library on disk: folders sidebar, dated note list, editor column.
+// TestViewNotesLibrary renders the full two-column Notes UI with a
+// real library on disk: folders-and-notes sidebar, editor column.
 func TestViewNotesLibrary(t *testing.T) {
 	root := t.TempDir()
 	write := func(name, src string, age time.Duration) string {

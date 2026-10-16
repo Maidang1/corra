@@ -29,34 +29,53 @@ func sidebarBackground(t *ui.Theme) ui.Color {
 	return ui.Hex("#f6f7f8")
 }
 
-// foldersSidebar renders the leftmost column: the smart "all notes" and
-// "recently deleted" rows and one row per folder, with note counts, over
-// the sidebar's translucent gray.
+// foldersSidebar renders the left floating card below the toolbar: the
+// smart "all notes" and "recently deleted" rows plus one row per folder at
+// the top, the search field, and the selected folder's notes (grouped by
+// date, filtered by the search query) in the scroll below, over the
+// sidebar's translucent gray.
 func (v *View) foldersSidebar(c *ui.Context) {
 	t := c.Theme()
-	ui.Box(c).Width(sidebarW).FillHeight().Padding(8, 0, 8, 8).Children(func() {
-		ui.Column(c).Fill().Gap(0).Radius(24).
+	ui.Box(c).Width(sidebarW).FillHeight().Padding(8, 4, 8, 8).Children(func() {
+		ui.Column(c).Fill().Gap(0).Radius(20).Clip().
 			LinearGradient(ui.LinearGradient{From: sidebarBackground(t), To: sidebarBottom(t), Angle: 170}).
-			Border(1, t.Surface).Shadow(4, 4, 24, 0, ui.Hex("#0000000c")).Children(func() {
-			ui.Row(c).FillWidth().Height(toolbarH-8).Padding(0, 8, 0, max(100, c.TitleBar().Left-8)).DragWindow().Children(func() {
+			Border(1, cardBorder(t)).Shadow(0, 10, 30, 0, cardShadow(t)).Children(func() {
+			// The card's top row is the sidebar's toolbar: the traffic
+			// lights land on it, the toggle right of them, on the same
+			// center line as the workspace card's header.
+			ui.Row(c).FillWidth().Height(topRowH).AlignItems(ui.Center).DragWindow().
+				Padding(0, 8, 0, max(12, c.TitleBar().Left-8)).Children(func() {
 				iconButton(c, iconSidebar, "切换边栏", v.toggleSidebar)
 			})
-			ui.Scroll(c).Fill().Children(func() {
-				ui.Column(c).FillWidth().Gap(1).Padding(8, 10).Children(func() {
-					ui.Text(c, "在我的 Mac 上").FontSize(12).Bold().TextColor(t.TextMuted).Padding(0, 7, 5, 7)
-					if v.App.Lib == nil {
-						return
-					}
+			ui.Column(c).FillWidth().Gap(1).Padding(2, 4, 8, 6).Children(func() {
+				ui.Text(c, "在我的 Mac 上").FontSize(12).Bold().TextColor(t.TextMuted).Padding(0, 7, 5, 7)
+				if v.App.Lib != nil {
 					v.folderRow(c, "全部备忘录", iconFolder, "", len(v.App.Lib.Notes))
 					for _, f := range v.App.Lib.Folders() {
 						v.folderRow(c, f, iconFolder, f, len(v.App.Lib.Filter(f, "")))
 					}
 					v.folderRow(c, "最近删除", iconTrash, app.TrashName, len(v.App.Lib.Filter(app.TrashName, "")))
-				})
+				}
 			})
-			ui.ButtonBase(c).Label("新建文件夹").FillWidth().Padding(12, 16).Children(func() {
-				ui.Row(c).Gap(8).Children(func() { ui.Icon(c, iconFolder).Size(17, 17); ui.Text(c, "新建文件夹").FontSize(12) })
-			}).OnClick(func() { v.openFolderDialog("新建文件夹", "") })
+			ui.Divider(c).FillWidth().Padding(10, 8, 10, 8)
+			v.searchBox(c)
+			v.sidebarNotes(c)
+			// The new-folder row floats inside the card's bottom corners;
+			// its hover wash stays a rounded rect clear of the rim.
+			ui.Box(c).FillWidth().Padding(0, 8, 8, 8).Children(func() {
+				btn := ui.ButtonBase(c).Label("新建文件夹").FillWidth().Padding(9, 10).Radius(10)
+				if btn.Pressed() {
+					btn.Background(sidebarPressed(t))
+				} else if btn.Hovered() {
+					btn.Background(sidebarHover(t))
+				}
+				btn.Children(func() {
+					ui.Row(c).Gap(8).Center().Children(func() {
+						ui.Icon(c, iconFolder).Size(17, 17).TextColor(t.TextMuted)
+						ui.Text(c, "新建文件夹").FontSize(12).TextColor(t.TextMuted)
+					})
+				}).OnClick(func() { v.openFolderDialog("新建文件夹", "") })
+			})
 		})
 	})
 }
@@ -68,6 +87,23 @@ func sidebarBottom(t *ui.Theme) ui.Color {
 	return ui.Hex("#edf5f1")
 }
 
+// sidebarHover and sidebarPressed darken rows over the sidebar's light
+// gradient, the way Finder's sidebar washes rows on hover; the theme's own
+// hover gray is lighter than the gradient and would read as a highlight.
+func sidebarHover(t *ui.Theme) ui.Color {
+	if t.Dark {
+		return ui.Hex("#ffffff0a")
+	}
+	return ui.Hex("#00000006")
+}
+
+func sidebarPressed(t *ui.Theme) ui.Color {
+	if t.Dark {
+		return ui.Hex("#ffffff12")
+	}
+	return ui.Hex("#0000000a")
+}
+
 // folderRow renders one sidebar row: icon, label and a right-aligned
 // count. The selected row is a gray pill with accent-colored text, the
 // way Apple Notes marks the current folder.
@@ -77,6 +113,10 @@ func (v *View) folderRow(c *ui.Context, label string, icon *ui.SVG, folder strin
 	row := ui.ButtonBase(c).Key(folder).Label("文件夹："+label).FillWidth().Padding(7, 7).Radius(9)
 	if selected {
 		row = row.Background(t.SurfacePressed)
+	} else if row.Pressed() {
+		row = row.Background(sidebarPressed(t))
+	} else if row.Hovered() {
+		row = row.Background(sidebarHover(t))
 	}
 	row.Children(func() {
 		ui.Row(c).FillWidth().Gap(7).Center().Children(func() {
@@ -106,44 +146,58 @@ func (v *View) folderRow(c *ui.Context, label string, icon *ui.SVG, folder strin
 	})
 }
 
-// notesList renders the middle column: the notes of the selected folder
-// (filtered by the header's search query) grouped into date sections.
-func (v *View) notesList(c *ui.Context) {
+// sidebarNotes renders the notes of the selected folder (filtered by the
+// header's search query) in the sidebar's scroll area, grouped into date
+// sections.
+func (v *View) searchBox(c *ui.Context) {
 	t := c.Theme()
-	ui.Box(c).Width(listW).FillHeight().Background(t.Surface).Children(func() {
-		ui.Column(c).Fill().Gap(0).Children(func() {
-			notes := v.App.VisibleNotes()
-			if len(notes) == 0 {
-				ui.Box(c).FillWidth().Padding(24, 14).Children(func() {
-					hint := "无备忘录"
-					if v.App.SelFolder == app.TrashName {
-						hint = "最近删除为空"
-					} else if v.App.Query != "" {
-						hint = "无匹配的备忘录"
-					}
-					ui.Text(c, hint).FontSize(12.5).TextColor(t.TextMuted)
-				})
-				return
+	// The filter field lives inside the sidebar, directly above the notes
+	// list it filters — the way Apple Notes scopes search to its list.
+	ui.Box(c).FillWidth().Padding(4, 8, 6, 8).Children(func() {
+		ui.Row(c).Key("search").FillWidth().Height(32).Gap(7).Padding(0, 10).Radius(16).
+			Background(t.SurfaceHover).Border(1, t.Border).Children(func() {
+			ui.Icon(c, iconSearch).Size(15, 15).TextColor(t.TextMuted)
+			field := ui.TextInputBase(c, &v.App.Query).Label("搜索备忘录").Placeholder("搜索").FillWidth().FontSize(13).
+				OnChange(func() { v.reconcileSelection() })
+			if v.focusSearch {
+				field.Focus()
+				v.focusSearch = false
 			}
-
-			ui.Scroll(c).Fill().Children(func() {
-				ui.Column(c).FillWidth().Gap(2).Padding(0, 10).Children(func() {
-					for _, g := range v.App.NoteGroups() {
-						ui.Text(c, g.Label).FontSize(16).Bold().Padding(13, 7, 10, 7)
-						for _, n := range g.Notes {
-							v.noteCard(c, n)
-						}
-					}
-				})
-			})
 		})
 	})
 }
 
-// noteCard renders one note of the list. The selected note is a filled
-// accent-colored rounded card with white text, exactly like Apple Notes;
-// the rest are quiet rows with title, time and snippet.
-func (v *View) noteCard(c *ui.Context, n app.Note) {
+func (v *View) sidebarNotes(c *ui.Context) {
+	t := c.Theme()
+	notes := v.App.VisibleNotes()
+	if len(notes) == 0 {
+		ui.Box(c).FillWidth().Padding(18, 14).Children(func() {
+			hint := "无备忘录"
+			if v.App.SelFolder == app.TrashName {
+				hint = "最近删除为空"
+			} else if v.App.Query != "" {
+				hint = "无匹配的备忘录"
+			}
+			ui.Text(c, hint).FontSize(12.5).TextColor(t.TextMuted)
+		})
+		return
+	}
+	ui.Scroll(c).Fill().Children(func() {
+		ui.Column(c).FillWidth().Gap(1).Padding(0, 4, 0, 8).Children(func() {
+			for _, g := range v.App.NoteGroups() {
+				ui.Text(c, g.Label).FontSize(12).Bold().TextColor(t.TextMuted).Padding(10, 8, 3, 8)
+				for _, n := range g.Notes {
+					v.noteRow(c, n)
+				}
+			}
+		})
+	})
+}
+
+// noteRow renders one note of the sidebar list as a compact row: title and
+// modification time. The selected note is a filled accent-colored rounded
+// pill with white text, the way Apple Notes marks the current note.
+func (v *View) noteRow(c *ui.Context, n app.Note) {
 	t := c.Theme()
 	selected := n.Path == v.App.SelNote
 	fg := t.Text
@@ -151,32 +205,18 @@ func (v *View) noteCard(c *ui.Context, n app.Note) {
 	if selected {
 		fg, sub = t.AccentText, t.AccentText
 	}
-	card := ui.ButtonBase(c).Key(n.Path).Label("备忘录："+n.Title).FillWidth().Padding(10, 18).Radius(9)
+	row := ui.ButtonBase(c).Key(n.Path).Label("备忘录："+n.Title).FillWidth().Padding(6, 9).Radius(8)
 	if selected {
-		card = card.Background(t.Accent)
+		row = row.Background(t.Accent)
+	} else if row.Pressed() {
+		row = row.Background(sidebarPressed(t))
+	} else if row.Hovered() {
+		row = row.Background(sidebarHover(t))
 	}
-	card.Children(func() {
-		ui.Column(c).FillWidth().Gap(1).Children(func() {
-			ui.Text(c, n.Title).FontSize(14).TextColor(fg).Bold().NoWrap().Clip()
-			ui.Row(c).FillWidth().Gap(6).Children(func() {
-				ui.Text(c, noteTime(n.ModTime)).FontSize(12).TextColor(sub).
-					NoWrap()
-				ui.Text(c, ellipsize(n.Snippet, 11)).FontSize(12).
-					TextColor(sub).Grow(1).NoWrap().Clip()
-			})
-			folder := n.Folder
-			if folder == app.TrashName {
-				folder = "最近删除"
-			}
-			if folder == "" {
-				folder = "备忘录"
-			}
-			if folder != "" {
-				ui.Row(c).FillWidth().Gap(4).Children(func() {
-					ui.Icon(c, iconFolder).Size(11, 11)
-					ui.Text(c, folder).FontSize(11).TextColor(sub)
-				})
-			}
+	row.Children(func() {
+		ui.Row(c).FillWidth().Gap(8).Center().Children(func() {
+			ui.Text(c, n.Title).FontSize(13).TextColor(fg).Bold().NoWrap().Clip().Grow(1)
+			ui.Text(c, noteTime(n.ModTime)).FontSize(11).TextColor(sub).NoWrap()
 		})
 	}).OnClick(func() { v.openNote(n.Path) }).ContextMenu(func(m *ui.Menu) {
 		if n.Path != v.App.SelNote {
@@ -201,15 +241,6 @@ func noteTime(tm time.Time) string {
 		return fmt.Sprintf("%d月%d日", tm.Month(), tm.Day())
 	}
 	return fmt.Sprintf("%d年%d月%d日", tm.Year(), tm.Month(), tm.Day())
-}
-
-// ellipsize shortens s to max runes with an ellipsis.
-func ellipsize(s string, max int) string {
-	r := []rune(s)
-	if len(r) <= max {
-		return s
-	}
-	return string(r[:max-1]) + "…"
 }
 
 // newNote creates a note in the selected folder and opens it.
