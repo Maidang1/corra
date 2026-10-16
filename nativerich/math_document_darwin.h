@@ -118,8 +118,19 @@
     }
     [self refreshMath];
 }
+// hasMath: any inline or display formula is present.
+- (BOOL)hasMath {
+    __block BOOL found=NO;
+    NSRange all=NSMakeRange(0,_text.string.length);
+    [_text.textStorage enumerateAttribute:CRMathExpr inRange:all options:0 usingBlock:^(id value, NSRange r, BOOL *stop) { if (value) found=*stop=YES; }];
+    if (!found) [_text.textStorage enumerateAttribute:CRParagraph inRange:all options:0 usingBlock:^(NSDictionary *p, NSRange r, BOOL *stop) { if (CRKind(p,@"math")) found=*stop=YES; }];
+    return found;
+}
 - (void)refreshMath {
     if (_suppress || _text.hasMarkedText) return;
+    // Numbering is document-wide, so a formula needs a full pass, but a note
+    // without any must not serialize itself on every keystroke.
+    if (!_mathResults.count && ![self hasMath]) return;
     NSArray *results=[self mathForDocument:[self document]];
     NSMutableArray *ranges=[NSMutableArray array];
     for (NSValue *value in CRRanges(_text.string)) {

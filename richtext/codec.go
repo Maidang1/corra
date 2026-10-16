@@ -90,6 +90,7 @@ type Run struct {
 	Link      string `json:"link,omitempty"`
 	LinkTitle string `json:"linkTitle,omitempty"`
 	Underline bool   `json:"underline,omitempty"` // <u>x</u>
+	Kbd       bool   `json:"kbd,omitempty"`       // <kbd>x</kbd>
 	Highlight bool   `json:"highlight,omitempty"` // ==x== or <mark>
 	Sup       bool   `json:"sup,omitempty"`       // ^x^ or <sup>
 	Sub       bool   `json:"sub,omitempty"`       // ~x~ or <sub>
@@ -101,6 +102,9 @@ type Run struct {
 	// trailing backslash, or <br>). It carries no text and renders as a soft
 	// visual line that keeps the paragraph's block identity.
 	Break bool `json:"break,omitempty"`
+	// Soft marks a Break that was a plain source newline: it shows as its own
+	// line and saves back as a bare newline instead of a hard break.
+	Soft bool `json:"soft,omitempty"`
 }
 
 // Parse retains each block's exact source and boundary whitespace. Baseline is
@@ -589,7 +593,8 @@ func collectRuns(parent ast.Node, src []byte, style Run, p *Paragraph) bool {
 				flush()
 				p.Runs = append(p.Runs, Run{Break: true})
 			} else if n.SoftLineBreak() {
-				pending.WriteByte(' ')
+				flush()
+				p.Runs = append(p.Runs, Run{Break: true, Soft: true})
 			}
 		case *ast.String:
 			pending.Write(n.Value)
@@ -657,7 +662,7 @@ func collectRuns(parent ast.Node, src []byte, style Run, p *Paragraph) bool {
 			}
 		case *mdext.Kbd:
 			flush()
-			run.Code = true
+			run.Kbd = true
 			if !collectRuns(node, src, run, p) {
 				return false
 			}
@@ -728,7 +733,7 @@ func decodeText(source []byte) []byte {
 
 func appendRun(p *Paragraph, run Run) {
 	if run.Break {
-		p.Runs = append(p.Runs, Run{Break: true})
+		p.Runs = append(p.Runs, Run{Break: true, Soft: run.Soft})
 		return
 	}
 	if run.Text == "" {
@@ -1077,7 +1082,7 @@ func serializeRunsObserved(runs []Run, level escapeLevel, emitted func(int, int,
 		if hasFootnote && end > i+1 {
 			var value strings.Builder
 			for _, part := range runs[i:end] {
-				part.Bold, part.Italic, part.Strike, part.Underline, part.Highlight, part.Sup, part.Sub = false, false, false, false, false, false, false
+				part.Bold, part.Italic, part.Strike, part.Underline, part.Highlight, part.Sup, part.Sub, part.Kbd = false, false, false, false, false, false, false, false
 				part.Link, part.LinkTitle = "", ""
 				value.WriteString(serializeRun(part, italic, level))
 			}
@@ -1168,7 +1173,7 @@ func sameStorageRuns(expected, actual []Run) bool {
 	meaningful := func(runs []Run) []Run {
 		var out []Run
 		for _, run := range runs {
-			styled := run.Bold || run.Italic || run.Strike || run.Code || run.Link != "" || run.Underline || run.Highlight || run.Sup || run.Sub
+			styled := run.Bold || run.Italic || run.Strike || run.Code || run.Link != "" || run.Underline || run.Highlight || run.Sup || run.Sub || run.Kbd
 			if !styled && !run.Break && run.Math == "" {
 				run.Text = strings.Map(func(r rune) rune {
 					if unicode.IsSpace(r) {
@@ -1230,6 +1235,9 @@ func sameRuns(runs, parsed []Run) bool {
 }
 
 func serializeRun(run Run, italic string, level escapeLevel) string {
+	if run.Break && run.Soft {
+		return "\n"
+	}
 	if run.Break {
 		return "  \n"
 	}
@@ -1286,6 +1294,9 @@ func formatInlineRun(run Run, value, italic string) string {
 	}
 	before, after := value[:left], value[right:]
 	value = value[left:right]
+	if run.Kbd {
+		value = "<kbd>" + value + "</kbd>"
+	}
 	if run.Sup {
 		value = "^" + value + "^"
 	}
@@ -1397,6 +1408,9 @@ func PlainText(p Paragraph) string {
 	}
 	var out strings.Builder
 	for _, run := range p.Runs {
+		if run.Soft {
+			out.WriteByte(' ') // a source line wrap reads as a space
+		}
 		out.WriteString(run.Text)
 	}
 	return out.String()

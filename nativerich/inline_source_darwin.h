@@ -26,7 +26,7 @@
     if (!NSLocationInRange(location,limit)) return NO;
     NSDictionary *attrs=[_text.textStorage attributesAtIndex:location effectiveRange:NULL];
     if (attrs[CRInlineSource]) return NO;
-    NSArray *keys=@[CRBold,CRItalic,CRCode,NSStrikethroughStyleAttributeName,CRUnderline,CRHighlight,CRSup,CRSub,NSLinkAttributeName,CRFootnote];
+    NSArray *keys=@[CRBold,CRItalic,CRCode,NSStrikethroughStyleAttributeName,CRUnderline,CRKbd,CRHighlight,CRSup,CRSub,NSLinkAttributeName,CRFootnote];
     BOOL styled=NO;
     for (NSString *key in keys) if (attrs[key] && ![attrs[key] isEqual:@NO]) styled=YES;
     if (!styled) return NO;

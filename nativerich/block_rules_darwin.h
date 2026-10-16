@@ -39,7 +39,7 @@ static BOOL CRRuleActive(CREditor *e, NSRange paragraph) {
         [self replace:paragraph with:value selection:NSMakeRange(paragraph.location+text.length+1,0)];
         _text.typingAttributes=bodyAttrs;
         if (!trailing) _emptyParagraph=body;
-        [self restyle];
+        [self restyleDirty];
         return YES;
     }
     if ([text isEqual:@"$$"]) {
@@ -148,4 +148,126 @@ static BOOL CRRuleActive(CREditor *e, NSRange paragraph) {
         if (CRRuleText([_text.string substringWithRange:content]) && !CRRuleActive(self,r)) [result addObject:ranges[i]];
     }
     return result;
+}
+
+static BOOL CRFigure(NSDictionary *p) {
+    return CRKind(p,@"math") || CRKind(p,@"image") || CRKind(p,@"diagram") || CRKind(p,@"toc");
+}
+
+// openParagraphBesideFigure: a figure is a block, so text typed at its edge
+// starts an empty body line before or after it. Returns YES if it did.
+- (BOOL)openParagraphBesideFigure {
+    NSRange selection=_text.selectedRange;
+    if (selection.length || _text.hasMarkedText || !_text.string.length) return NO;
+    NSRange paragraph=[_text.string paragraphRangeForRange:NSMakeRange(selection.location,0)];
+    NSDictionary *p=paragraph.length ? CRParagraphAt(self,paragraph.location) : nil;
+    if (!CRFigure(p)) return NO;
+    NSRange content=CRContent(_text.string,paragraph);
+    NSDictionary *body=CRInFootnote(CRBody(),p), *bodyAttrs=[self visual:@{CRParagraph:body} paragraph:body];
+    if (selection.location==NSMaxRange(content)) {
+        BOOL eof=NSMaxRange(paragraph)==_text.string.length && NSMaxRange(content)==NSMaxRange(paragraph);
+        NSDictionary *figureAttrs=[_text.textStorage attributesAtIndex:content.location effectiveRange:NULL];
+        NSMutableDictionary *ending=[figureAttrs mutableCopy]; [ending removeObjectForKey:NSAttachmentAttributeName];
+        [self replace:selection with:[[NSAttributedString alloc] initWithString:@"\n" attributes:ending] selection:NSMakeRange(selection.location+1,0)];
+        // The figure's old terminator now ends the new line.
+        if (!eof && selection.location+1<_text.string.length) [_text.textStorage addAttributes:bodyAttrs range:NSMakeRange(selection.location+1,1)];
+        else _emptyParagraph=body;
+    } else if (selection.location==content.location) {
+        [self replace:selection with:[[NSAttributedString alloc] initWithString:@"\n" attributes:bodyAttrs] selection:NSMakeRange(selection.location,0)];
+    } else return NO;
+    _text.typingAttributes=bodyAttrs;
+    return YES;
+}
+
+// escapeBlock: arrowing past the last line of a trailing block, or the first
+// line of a leading one, opens a body line there (Typora). Without it there
+// is no way to write after a code block or formula that ends the note.
+- (BOOL)escapeBlock:(BOOL)down {
+    NSRange selection=_text.selectedRange;
+    NSString *string=_text.string;
+    if (!_text.editable || _text.hasMarkedText || selection.length || !string.length) return NO;
+    NSRange paragraph=[string paragraphRangeForRange:NSMakeRange(selection.location,0)];
+    if (down ? (NSMaxRange(paragraph)!=string.length || [string hasSuffix:@"\n"]) : paragraph.location!=0) return NO;
+    NSDictionary *p=CRParagraphAt(self,paragraph.location);
+    BOOL cell=CRCellAt(self,paragraph.location)!=nil;
+    if (!(CRKind(p,@"code") || CRKind(p,@"source") || CRKind(p,@"opaque") || CRFigure(p) || (cell && !down))) return NO;
+    NSLayoutManager *layout=_text.layoutManager;
+    [layout ensureLayoutForTextContainer:_text.textContainer];
+    NSUInteger caretGlyph=[layout glyphIndexForCharacterAtIndex:MIN(selection.location,string.length-1)];
+    NSRange content=CRContent(string,paragraph);
+    NSUInteger edge=down ? (content.length ? NSMaxRange(content)-1 : content.location) : content.location;
+    NSUInteger edgeGlyph=[layout glyphIndexForCharacterAtIndex:MIN(edge,string.length-1)];
+    if (NSMinY([layout lineFragmentRectForGlyphAtIndex:caretGlyph effectiveRange:NULL])!=NSMinY([layout lineFragmentRectForGlyphAtIndex:edgeGlyph effectiveRange:NULL])) return NO;
+    NSDictionary *body=CRBody(), *bodyAttrs=[self visual:@{CRParagraph:body} paragraph:body];
+    if (down) {
+        NSMutableDictionary *ending=[[_text.textStorage attributesAtIndex:string.length-1 effectiveRange:NULL] mutableCopy];
+        [ending removeObjectForKey:NSAttachmentAttributeName];
+        [self replace:NSMakeRange(string.length,0) with:[[NSAttributedString alloc] initWithString:@"\n" attributes:ending] selection:NSMakeRange(string.length+1,0)];
+        _emptyParagraph=body;
+    } else {
+        [self replace:NSMakeRange(0,0) with:[[NSAttributedString alloc] initWithString:@"\n" attributes:bodyAttrs] selection:NSMakeRange(0,0)];
+    }
+    _text.typingAttributes=bodyAttrs;
+    return YES;
+}
+
+// drawAlertPanels paints one tinted card behind each callout, spanning all
+// of its lines and paragraphs, so wrapped and broken lines share one edge.
+- (void)drawAlertPanels:(NSRect)dirty {
+    NSLayoutManager *layout=_text.layoutManager;
+    __block NSRect panel=NSZeroRect;
+    __block NSString *label=nil;
+    void (^flush)(void)=^{
+        if (!NSIsEmptyRect(panel) && NSIntersectsRect(panel,dirty)) {
+            [CRAlertTint(label,self.dark) setFill];
+            [[NSBezierPath bezierPathWithRoundedRect:panel xRadius:6*self.zoom yRadius:6*self.zoom] fill];
+        }
+        panel=NSZeroRect; label=nil;
+    };
+    for (NSValue *v in CRRanges(_text.string)) {
+        NSDictionary *p=CRParagraphAt(self,v.rangeValue.location);
+        NSString *alert=[p[@"alert"] isKindOfClass:NSString.class] ? p[@"alert"] : nil;
+        NSRange content=CRContent(_text.string,v.rangeValue);
+        if (!CRKind(p,@"quote") || !alert.length || !content.length) { flush(); continue; }
+        [layout ensureLayoutForTextContainer:_text.textContainer];
+        NSRange glyph=[layout glyphRangeForCharacterRange:content actualCharacterRange:NULL];
+        NSRect last=[layout lineFragmentUsedRectForGlyphAtIndex:NSMaxRange(glyph)-1 effectiveRange:NULL];
+        CGFloat top=NSMinY([layout lineFragmentUsedRectForGlyphAtIndex:glyph.location effectiveRange:NULL]);
+        NSRect r=NSMakeRect(_text.textContainerOrigin.x,top+_text.textContainerOrigin.y-6*_zoom,_text.textContainer.size.width,NSMaxY(last)-top+12*_zoom);
+        if (!NSIsEmptyRect(panel) && [label isEqual:alert] && NSMinY(r)-NSMaxY(panel)<24*_zoom) panel=NSUnionRect(panel,r);
+        else { flush(); panel=r; label=alert; }
+    }
+    flush();
+}
+
+// autolinkRule links a bare URL once a space ends it, and turns a typed
+// <https://...> into a link, the way Typora does. prefix is the paragraph
+// text before the caret, starting at start.
+- (BOOL)autolinkRule:(NSString *)prefix start:(NSUInteger)start {
+    static NSRegularExpression *bare, *angle;
+    if (!bare) {
+        bare=[NSRegularExpression regularExpressionWithPattern:@"(?:^|[\\s(（])((?:https?://|www\\.)[^\\s<>]*[^\\s<>.,;:!?)\\]'\"，。；：！？）])\\s$" options:NSRegularExpressionCaseInsensitive error:NULL];
+        angle=[NSRegularExpression regularExpressionWithPattern:@"<(https?://[^\\s<>]+)>$" options:NSRegularExpressionCaseInsensitive error:NULL];
+    }
+    NSTextCheckingResult *match=[bare firstMatchInString:prefix options:0 range:NSMakeRange(0,prefix.length)];
+    BOOL bracketed=NO;
+    if (!match) { match=[angle firstMatchInString:prefix options:0 range:NSMakeRange(0,prefix.length)]; bracketed=match!=nil; }
+    if (!match) return NO;
+    NSRange url=[match rangeAtIndex:1], whole=bracketed ? match.range : url;
+    NSRange target=NSMakeRange(start+whole.location,whole.length);
+    __block BOOL linked=NO;
+    [_text.textStorage enumerateAttributesInRange:NSMakeRange(start+url.location,url.length) options:0 usingBlock:^(NSDictionary *attrs, NSRange r, BOOL *stop) {
+        if (attrs[NSLinkAttributeName] || attrs[CRCode] || attrs[CRInlineSource]) linked=YES;
+    }];
+    if (linked) return NO;
+    NSString *text=[prefix substringWithRange:url];
+    NSString *destination=[text.lowercaseString hasPrefix:@"www."] ? [@"http://" stringByAppendingString:text] : text;
+    NSMutableDictionary *attrs=[[_text.textStorage attributesAtIndex:start+url.location effectiveRange:NULL] mutableCopy];
+    attrs[NSLinkAttributeName]=destination;
+    NSDictionary *typing=_text.typingAttributes;
+    NSAttributedString *value=[[NSAttributedString alloc] initWithString:text attributes:[self visual:attrs paragraph:attrs[CRParagraph] ?: CRBody()]];
+    NSUInteger caret=_text.selectedRange.location-(bracketed ? 2 : 0);
+    [self replace:target with:value selection:NSMakeRange(caret,0)];
+    _text.typingAttributes=typing;
+    return YES;
 }
