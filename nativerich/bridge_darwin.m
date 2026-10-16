@@ -22,6 +22,9 @@ static NSString *const CRHighlight = @"CorraHighlight";
 static NSString *const CRSup = @"CorraSup";
 static NSString *const CRSub = @"CorraSub";
 static NSString *const CRHl = @"CorraHl"; // syntax-highlight token class on code
+static NSString *const CRFootnote = @"CorraFootnote";
+static NSString *const CRFootnoteNumber = @"CorraFootnoteNumber";
+static NSString *const CRFootnoteFigureSource = @"CorraFootnoteFigureSource";
 static NSString *const CROwnPaste = @"app.corra.rich-document";
 // Go-side handlers for parity features (cgo exports, main thread only).
 extern char *cr_emoji(const char *word);
@@ -54,6 +57,8 @@ extern char *cr_render_math_document(uintptr_t handle, const char *document, int
 @property NSMutableDictionary *imageCache;
 @property NSMutableDictionary *imagePending;
 @property NSMutableDictionary *imageAttachments;
+@property NSMutableDictionary *imageSpecForURL; // the size suffix a URL was fetched for
+@property NSString *tocSignature; // the heading list the [TOC] figure was drawn from
 @property NSRange draftGroup; // contiguous source/body paragraphs the caret is in
 @property BOOL focusMode;
 @property BOOL typewriter;
@@ -61,6 +66,16 @@ extern char *cr_render_math_document(uintptr_t handle, const char *document, int
 @property CGFloat codeGutter;
 @property NSUInteger documentRevision;
 @property NSUInteger lastCaret;
+@property NSDictionary *footnotes;
+- (NSArray *)footnoteRuns:(NSArray *)runs;
+- (void)prepareFootnotes:(NSDictionary *)document;
+- (NSAttributedString *)footnote:(NSDictionary *)run attributes:(NSDictionary *)attrs;
+- (void)refreshFootnotes;
+- (void)navigateFootnote:(BOOL)definition atLocation:(NSUInteger)location;
+- (void)insertFootnote;
+- (NSString *)footnoteLabelAt:(NSUInteger)location;
+- (BOOL)allowFootnoteRange:(NSRange)range;
+- (NSArray *)footnoteFragment:(NSArray *)paragraphs container:(NSDictionary *)container;
 - (void)restyle;
 - (void)normalize;
 - (void)notify;
@@ -117,7 +132,19 @@ extern char *cr_render_math_document(uintptr_t handle, const char *document, int
 - (NSRange)draftGroupAt:(NSUInteger)location;
 - (void)renderDraftGroup:(NSRange)group;
 - (void)finishDraftGroup;
-- (NSRect)imageBounds:(NSImage *)img;
+- (NSRect)imageBounds:(NSImage *)img spec:(NSString *)spec;
+- (void)refreshAlerts;
+- (void)setQuoteAlert:(NSString *)label;
+- (NSArray *)imageFigureRanges;
+- (NSDictionary *)imageFigureAt:(NSUInteger)caret;
+- (NSString *)imageSpecAt:(NSUInteger)caret;
+- (void)setImageSize:(NSString *)spec;
+- (void)setImageSize:(NSString *)spec atLocation:(NSUInteger)location;
+- (NSArray *)tocFigureRanges;
+- (NSArray *)tocEntriesFromText;
+- (void)refreshTOC;
+- (NSInteger)tocEntryAtPoint:(NSPoint)point range:(NSRange)range;
+- (void)jumpToTOCEntry:(NSInteger)entry;
 @end
 @interface CREditor (Parity)
 - (void)setFocusMode:(BOOL)enabled;
@@ -146,13 +173,28 @@ static NSDictionary *CRFresh(NSDictionary *p) {
     NSMutableDictionary *fresh = [@{@"kind": p[@"kind"] ?: @"body", @"runs": @[]} mutableCopy];
     if (p[@"level"]) fresh[@"level"] = p[@"level"];
     if (p[@"depth"]) fresh[@"depth"] = p[@"depth"];
+    if ([p[@"alert"] length]) fresh[@"alert"] = p[@"alert"];
     if (p[@"listId"]) fresh[@"listId"] = p[@"listId"];
     if (p[@"listContainer"]) fresh[@"listContainer"] = p[@"listContainer"];
     if (p[@"listMarker"]) fresh[@"listMarker"] = p[@"listMarker"];
     if (CRKind(p,@"code")) for (NSString *key in @[@"codeNewline",@"codeClose",@"codeSeparator"]) if (p[key]) fresh[key]=p[key];
+    if ([p[@"footnoteId"] length]) {
+        for (NSString *key in @[@"footnoteId",@"footnoteGroup",@"footnoteMarker",@"footnoteIndent"]) if (p[key]) fresh[key]=p[key];
+        fresh[@"footnoteContinuation"]=@YES;
+        if (p[@"separator"]) fresh[@"separator"]=p[@"separator"];
+    }
     if (CRList(p)) fresh[@"listItem"]=NSUUID.UUID.UUIDString;
     if (CROrdered(p)) fresh[@"ordinal"] = @([p[@"ordinal"] integerValue] + 1);
     return fresh;
+}
+static NSDictionary *CRInFootnote(NSDictionary *paragraph, NSDictionary *container) {
+    if (![container[@"footnoteId"] length]) return paragraph;
+    NSMutableDictionary *p=[paragraph mutableCopy];
+    for (NSString *key in @[@"footnoteId",@"footnoteGroup",@"footnoteMarker",@"footnoteIndent"]) if (container[key]) p[key]=container[key];
+    [p removeObjectForKey:@"footnoteRaw"]; [p removeObjectForKey:@"footnoteBaseline"];
+    p[@"footnoteContinuation"]=@YES;
+    if (![p[@"separator"] length] && container[@"separator"]) p[@"separator"]=container[@"separator"];
+    return p;
 }
 static NSArray<NSValue *> *CRRanges(NSString *string) {
     NSMutableArray *result = [NSMutableArray array];
@@ -237,6 +279,11 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
     for (NSDictionary *original in paragraphs) {
         NSMutableDictionary *p=[original mutableCopy];
         [p removeObjectForKey:@"id"]; [p removeObjectForKey:@"nextId"];
+        if ([p[@"footnoteGroup"] length]) {
+            NSString *key=[@"footnote:" stringByAppendingString:p[@"footnoteGroup"]];
+            if (!identifiers[key]) identifiers[key]=NSUUID.UUID.UUIDString;
+            p[@"footnoteGroup"]=identifiers[key];
+        }
         if (CRList(p)) {
             NSString *owner=p[@"listItem"] ?: @"";
             if ([p[@"listContinuation"] boolValue] && ![items containsObject:owner]) [p removeObjectForKey:@"listContinuation"];
@@ -257,9 +304,15 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
     }
     return result;
 }
+static BOOL CRHasFootnote(NSDictionary *paragraph) {
+    if ([paragraph[@"footnoteId"] length]) return YES;
+    for (NSDictionary *run in paragraph[@"runs"]) if ([run[@"footnote"] length]) return YES;
+    for (NSArray *row in paragraph[@"rows"]) for (NSDictionary *cell in row) for (NSDictionary *run in cell[@"runs"]) if ([run[@"footnote"] length]) return YES;
+    return NO;
+}
 
 @implementation CREditor
-- (void)notify { if (!_suppress && _callback) { if (!_text.hasMarkedText) [self refreshMath]; cr_callback(_callback,0); } }
+- (void)notify { if (!_suppress && _callback) { if (!_text.hasMarkedText) { [self refreshMath]; [self refreshTOC]; } cr_callback(_callback,0); } }
 - (void)beginStructuralCommand {
     [_text breakUndoCoalescing];
     // AppKit owns automatic event groups, including the IME's pending edits.
@@ -348,6 +401,9 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
         style.firstLineHeadIndent=[self codeGutterWidth];
         style.headIndent=style.firstLineHeadIndent;
     }
+    if ([p[@"footnoteId"] length]) {
+        style.firstLineHeadIndent+=30*_zoom; style.headIndent+=30*_zoom;
+    }
     out[NSParagraphStyleAttributeName] = style;
     [out removeObjectForKey:NSBackgroundColorAttributeName];
     [out removeObjectForKey:NSUnderlineStyleAttributeName];
@@ -360,6 +416,9 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
     if ([attrs[CRHighlight] boolValue]) {
         out[NSBackgroundColorAttributeName] = _dark ? [NSColor colorWithRed:0.75 green:0.55 blue:0.10 alpha:0.45] : [NSColor colorWithRed:1 green:0.87 blue:0.42 alpha:1];
     }
+    // A callout is a quote with a wash of its accent colour behind it.
+    NSString *alert = [p[@"alert"] isKindOfClass:NSString.class] ? p[@"alert"] : nil;
+    if (CRKind(p,@"quote") && alert.length) out[NSBackgroundColorAttributeName] = CRAlertTint(alert,_dark);
     if (CRKind(p,@"opaque")) {
         out[NSFontAttributeName] = [NSFont monospacedSystemFontOfSize:12.5*_zoom weight:NSFontWeightRegular];
         out[NSForegroundColorAttributeName] = _dark ? [NSColor colorWithWhite:0.65 alpha:1] : [NSColor colorWithWhite:0.43 alpha:1];
@@ -386,11 +445,14 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
     _text.insertionPointColor = _dark ? NSColor.whiteColor : NSColor.blackColor;
     _scroll.appearance = [NSAppearance appearanceNamed:_dark ? NSAppearanceNameDarkAqua : NSAppearanceNameAqua];
     if (_focusMode) [self applyFocusMode];
+    [self refreshFootnotes];
     [_text setNeedsDisplay:YES];
     _suppress = wasSuppress;
 }
 - (NSAttributedString *)attributedRuns:(NSArray *)runs paragraph:(NSDictionary *)paragraph extra:(NSDictionary *)extra {
     NSMutableAttributedString *result = [NSMutableAttributedString new];
+    NSString *alert = [paragraph[@"alert"] isKindOfClass:NSString.class] ? paragraph[@"alert"] : nil;
+    BOOL alertPending = alert.length > 0;
     for (NSDictionary *run in runs) {
         NSMutableDictionary *attrs = [@{CRParagraph:paragraph} mutableCopy];
         [attrs addEntriesFromDictionary:extra];
@@ -415,7 +477,26 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
         if ([run[@"sub"] boolValue]) attrs[CRSub] = @YES;
         if ([run[@"link"] length]) attrs[NSLinkAttributeName] = run[@"link"];
         if ([run[@"linkTitle"] length]) attrs[CRLinkTitle] = run[@"linkTitle"];
-        [result appendAttributedString:[[NSAttributedString alloc] initWithString:run[@"text"] ?: @"" attributes:[self visual:attrs paragraph:paragraph]]];
+        if ([run[@"footnote"] length]) {
+            [result appendAttributedString:[self footnote:run attributes:[self visual:attrs paragraph:paragraph]]];
+            continue;
+        }
+        NSString *text = run[@"text"] ?: @"";
+        if (alertPending && text.length) {
+            // The marker is printed as the callout's title, not as "[!NOTE]"
+            // text the reader has to decode.
+            NSString *marker = [NSString stringWithFormat:@"[!%@]", alert];
+            if ([text hasPrefix:marker]) {
+                NSMutableDictionary *title = [attrs mutableCopy];
+                title[NSFontAttributeName] = [NSFont systemFontOfSize:[attrs[NSFontAttributeName] pointSize] weight:NSFontWeightSemibold];
+                title[NSForegroundColorAttributeName] = CRAlertAccent(alert,_dark);
+                [result appendAttributedString:[[NSAttributedString alloc] initWithString:marker attributes:[self visual:title paragraph:paragraph]]];
+                text = [text substringFromIndex:marker.length];
+            }
+            alertPending = NO;
+            if (!text.length) continue;
+        }
+        [result appendAttributedString:[[NSAttributedString alloc] initWithString:text attributes:[self visual:attrs paragraph:paragraph]]];
     }
     return result;
 }
@@ -423,11 +504,15 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
     return [self attributedDocument:document replacingRange:NSMakeRange(NSNotFound,0)];
 }
 - (NSAttributedString *)attributedDocument:(NSDictionary *)document replacingRange:(NSRange)range {
+    if (range.location==NSNotFound) [self prepareFootnotes:document];
     NSArray *previousMath=_preparedMath;
     NSUInteger previousIndex=_mathIndex;
     _preparedMath=[self mathForFragment:document replacingRange:range]; _mathIndex=0;
     NSMutableAttributedString *result = [NSMutableAttributedString new];
     NSArray *paragraphs = document[@"paragraphs"];
+    if (range.location!=NSNotFound && [CRParagraphAt(self,range.location)[@"footnoteId"] length]) {
+        paragraphs=[self footnoteFragment:paragraphs container:CRParagraphAt(self,range.location)];
+    }
     for (NSUInteger i=0; i<paragraphs.count; i++) {
         NSDictionary *p = paragraphs[i];
         if (CRKind(p,@"table")) {
@@ -451,8 +536,8 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
             _emptyParagraph = CRBody();
             continue;
         }
-        if (CRKind(p,@"math") || CRKind(p,@"image") || CRKind(p,@"diagram")) {
-            [result appendAttributedString:[self figure:p]];
+        if (CRKind(p,@"math") || CRKind(p,@"image") || CRKind(p,@"diagram") || CRKind(p,@"toc")) {
+            [result appendAttributedString:CRKind(p,@"toc") ? [self tocFigure:p] : [self figure:p]];
             if (i+1 < paragraphs.count) {
                 NSMutableDictionary *ending=[[self visual:@{CRParagraph:p} paragraph:p] mutableCopy];
                 [ending removeObjectForKey:NSBackgroundColorAttributeName];
@@ -477,13 +562,21 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
 - (void)normalize {
     // NSTextView inherits attributes when a paragraph splits. Keep source
     // metadata once, then give newly created paragraphs fresh semantic identity.
+    [self refreshAlerts];
     NSMutableSet *seen = [NSMutableSet set];
+    NSString *previousFootnote=nil;
     for (NSValue *v in CRRanges(_text.string)) {
         NSRange range = v.rangeValue;
         NSDictionary *p = CRParagraphAt(self,range.location);
-        if (CRKind(p,@"table")) continue;
+        if (CRKind(p,@"table")) { previousFootnote=p[@"footnoteGroup"]; continue; }
         NSString *identifier = p[@"id"];
         if (identifier && [seen containsObject:identifier]) p = CRFresh(p);
+        NSString *group=p[@"footnoteGroup"];
+        if (group.length) {
+            BOOL continuation=[previousFootnote isEqual:group];
+            if ([p[@"footnoteContinuation"] boolValue]!=continuation) { NSMutableDictionary *updated=[p mutableCopy]; updated[@"footnoteContinuation"]=@(continuation); p=updated; }
+        }
+        previousFootnote=group;
         if (identifier) [seen addObject:identifier];
         if (range.length) [_text.textStorage addAttribute:CRParagraph value:p range:range];
         else { NSMutableDictionary *typing = [_text.typingAttributes mutableCopy]; typing[CRParagraph]=p; _text.typingAttributes=typing; _emptyParagraph=p; }
@@ -493,6 +586,7 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
 - (NSDictionary *)document { return [self documentForRange:NSMakeRange(NSNotFound,0)]; }
 - (NSDictionary *)documentForRange:(NSRange)selection {
     NSMutableArray *paragraphs = [NSMutableArray array];
+    NSMutableSet *sourceFigures=[NSMutableSet set];
     NSTextTable *currentTable = nil;
     NSMutableDictionary *tableParagraph = nil;
     for (NSValue *v in CRRanges(_text.string)) {
@@ -508,8 +602,17 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
             range=NSIntersectionRange(range,selection);
             if (!range.length && !selectedEmptyCell) continue;
         }
+        NSDictionary *sourceFigure=range.location<_text.string.length ? [_text.textStorage attribute:CRFootnoteFigureSource atIndex:range.location effectiveRange:NULL] : nil;
+        if (sourceFigure) {
+            NSRange expanded;
+            [_text.textStorage attribute:CRFootnoteFigureSource atIndex:range.location longestEffectiveRange:&expanded inRange:NSMakeRange(0,_text.string.length)];
+            if ((selection.location==NSNotFound || NSIntersectionRange(selection,expanded).length==expanded.length) && [[_text.string substringWithRange:expanded] isEqual:sourceFigure[@"source"]]) {
+                if (![sourceFigures containsObject:sourceFigure[@"id"]]) { [paragraphs addObject:sourceFigure[@"paragraph"]]; [sourceFigures addObject:sourceFigure[@"id"]]; }
+                continue;
+            }
+        }
         NSMutableDictionary *p = [CRParagraphAt(self,range.location) mutableCopy];
-        BOOL figure=CRKind(p,@"math") || CRKind(p,@"image") || CRKind(p,@"diagram");
+        BOOL figure=CRKind(p,@"math") || CRKind(p,@"image") || CRKind(p,@"diagram") || CRKind(p,@"toc");
         if (figure && ![[_text.string substringWithRange:range] isEqual:@"\uFFFC"]) {
             // The user typed into the figure: it is source text now.
             p[@"kind"]=@"source";
@@ -541,9 +644,11 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
                     [runs addObject:@{@"text":attrs[CRMathText],@"math":attrs[CRMathExpr]}];
                     return;
                 }
-                NSString *chunk=[[self.text.string substringWithRange:r] stringByReplacingOccurrencesOfString:@"\uFFFC" withString:@""];
+                NSDictionary *footnote=attrs[CRFootnote];
+                NSString *chunk=footnote ? footnote[@"text"] : [[self.text.string substringWithRange:r] stringByReplacingOccurrencesOfString:@"\uFFFC" withString:@""];
                 if (!chunk.length) return;
                 NSMutableDictionary *base = [NSMutableDictionary dictionary];
+                if (footnote) base[@"footnote"]=footnote[@"footnote"];
                 if ([attrs[CRBold] boolValue]) base[@"bold"]=@YES;
                 if ([attrs[CRItalic] boolValue]) base[@"italic"]=@YES;
                 if ([attrs[CRCode] boolValue]) base[@"code"]=@YES;
@@ -593,6 +698,7 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
     return @{@"paragraphs":paragraphs};
 }
 - (BOOL)allowRange:(NSRange)range {
+    if (![self allowFootnoteRange:range]) return NO;
     if (range.length) {
         for (NSValue *value in CRRanges(_text.string)) {
             NSRange paragraph = value.rangeValue;
@@ -650,7 +756,7 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
     id expanded=location<_text.string.length ? [_text.textStorage attribute:CRInlineSource atIndex:location effectiveRange:NULL] : nil;
     if (expanded) typing[CRInlineSource]=expanded;
     else [typing removeObjectForKey:CRInlineSource];
-    for (NSString *key in @[CRMathText,CRMathExpr,CRMathNumber,CRMathRendered,NSAttachmentAttributeName]) [typing removeObjectForKey:key];
+    for (NSString *key in @[CRMathText,CRMathExpr,CRMathNumber,CRMathRendered,CRFootnote,CRFootnoteNumber,NSToolTipAttributeName,NSAttachmentAttributeName]) [typing removeObjectForKey:key];
     typing[CRParagraph] = p;
     NSTextTableBlock *cell = CRCellAt(self,location);
     if (cell) typing[CRTableCell] = cell; else [typing removeObjectForKey:CRTableCell];
@@ -678,6 +784,10 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
     [self notify];
 }
 - (void)format:(NSString *)command {
+    if ([command isEqual:@"footnote:insert"]) { [self insertFootnote]; return; }
+    if ([command isEqual:@"footnote:definition"] || [command isEqual:@"footnote:reference"]) {
+        [self navigateFootnote:[command isEqual:@"footnote:definition"] atLocation:_text.selectedRange.location]; return;
+    }
     if ([command hasPrefix:@"code-line-numbers:"]) {
         BOOL enabled=[[command substringFromIndex:18] boolValue];
         if (_codeLineNumbers!=enabled) { _codeLineNumbers=enabled; [self restyle]; }
@@ -687,6 +797,8 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
         [self setCodeLanguage:[command substringFromIndex:14]];
         return;
     }
+    if ([command hasPrefix:@"quote-alert:"]) { [self setQuoteAlert:[command substringFromIndex:12]]; return; }
+    if ([command hasPrefix:@"image-size:"]) { [self setImageSize:[command substringFromIndex:11]]; return; }
     if ([command hasPrefix:@"math-numbering:"]) {
         if (_text.hasMarkedText) return;
         NSString *mode=[command substringFromIndex:15];
@@ -796,6 +908,15 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
     NSRange paragraph=[_text.string paragraphRangeForRange:NSMakeRange(selection.location,0)];
     NSDictionary *p=CRParagraphAt(self,paragraph.location);
     if (CRKind(p,@"code")) { [self codeNewline]; return; }
+    BOOL emptyFootnote=[p[@"footnoteId"] length] && CRContent(_text.string,paragraph).length==0;
+    if (emptyFootnote && [p[@"footnoteContinuation"] boolValue]) {
+        NSMutableAttributedString *after=[_text.textStorage mutableCopy];
+        NSDictionary *body=CRBody(), *attrs=[self visual:@{CRParagraph:body} paragraph:body];
+        if (paragraph.length) [after setAttributes:attrs range:paragraph];
+        [self beginStructuralCommand]; [_undo beginUndoGrouping];
+        [self restore:after selection:selection typing:attrs ending:paragraph.location==_text.string.length ? body : _emptyParagraph];
+        [_undo endUndoGrouping]; return;
+    }
     BOOL list=CRKind(p,@"checklist") || CRKind(p,@"bullet") || CRKind(p,@"ordered");
     // Enter on an empty list item or quote line leaves the block (Typora).
     if ((list || CRKind(p,@"quote")) && CRContent(_text.string,paragraph).length==0) {
@@ -818,7 +939,9 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
         NSTextCheckingResult *fence=[[NSRegularExpression regularExpressionWithPattern:@"^(```|~~~)([A-Za-z0-9_+.\\-]*)$" options:0 error:NULL] firstMatchInString:text options:0 range:NSMakeRange(0,text.length)];
         if (fence) {
             NSString *mark=[text substringWithRange:[fence rangeAtIndex:1]];
-            NSMutableDictionary *cp=[@{@"kind":@"code",@"open":[mark stringByAppendingString:[text substringWithRange:[fence rangeAtIndex:2]]],@"close":mark,@"runs":@[]} mutableCopy];
+            NSMutableDictionary *cp=[CRInFootnote(@{@"kind":@"code",@"open":[mark stringByAppendingString:[text substringWithRange:[fence rangeAtIndex:2]]],@"close":mark,@"runs":@[]},p) mutableCopy];
+            if (p[@"footnoteContinuation"]) cp[@"footnoteContinuation"]=p[@"footnoteContinuation"];
+            else [cp removeObjectForKey:@"footnoteContinuation"];
             NSMutableAttributedString *after=[_text.textStorage mutableCopy];
             [after replaceCharactersInRange:content withString:@""];
             NSRange remaining=[after.string paragraphRangeForRange:NSMakeRange(paragraph.location,0)];
@@ -832,7 +955,7 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
     if (selection.length==0 && selection.location==paragraph.location && content.length && !list && !CRKind(p,@"body") && !CRKind(p,@"quote")) {
         // Enter at the start of a heading opens an empty body line
         // above it and leaves the block itself intact.
-        NSDictionary *body=CRBody();
+        NSDictionary *body=CRInFootnote(CRBody(),p);
         NSAttributedString *line=[[NSAttributedString alloc] initWithString:@"\n" attributes:[self visual:@{CRParagraph:body} paragraph:body]];
         _suppress=YES;
         [self replace:selection with:line selection:NSMakeRange(selection.location+1,0)];
@@ -840,7 +963,8 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
         _suppress=NO; [self restyle]; [self renumber]; [self notify];
         return;
     }
-    NSDictionary *next=(list || CRKind(p,@"quote") || CRKind(p,@"source") || CRKind(p,@"code")) ? CRFresh(p) : CRBody();
+    NSDictionary *next=(list || CRKind(p,@"quote") || CRKind(p,@"source") || CRKind(p,@"code")) ? CRFresh(p) : CRInFootnote(CRBody(),p);
+    if (emptyFootnote) next=CRBody();
     NSDictionary *attrs=[self visual:@{CRParagraph:p} paragraph:p];
     NSAttributedString *newline=[[NSAttributedString alloc] initWithString:@"\n" attributes:attrs];
     _suppress=YES;
@@ -890,6 +1014,10 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
 #include "container_editing_darwin.h"
 #include "math_document_darwin.h"
 #include "inline_source_darwin.h"
+#include "footnote_darwin.h"
+#include "alert_darwin.h"
+#include "image_darwin.h"
+#include "toc_darwin.h"
 
 - (BOOL)moveTableCell:(BOOL)backward {
     if (!_text.editable || _text.hasMarkedText) return NO;
@@ -936,6 +1064,23 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
     NSString *prefix = [_text.string substringWithRange:beforeCaret];
     if (_text.typingAttributes[CRCode] || (caret && [[_text.textStorage attribute:CRCode atIndex:caret-1 effectiveRange:NULL] boolValue])) return;
     if ([self emojiRule:YES]) return;
+    if (CRKind(paragraph,@"body") && ![paragraph[@"footnoteId"] length] && [prefix hasPrefix:@"[^"] && [prefix hasSuffix:@"]: "]) {
+        char *json=cr_parse_markdown((char *)prefix.UTF8String);
+        NSDictionary *doc=json ? [NSJSONSerialization JSONObjectWithData:[[NSString stringWithUTF8String:json] dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL] : nil;
+        if (json) free(json);
+        NSArray *ps=doc[@"paragraphs"];
+        if (ps.count==1 && [ps[0][@"footnoteId"] length]) {
+            NSMutableDictionary *p=[ps[0] mutableCopy]; p[@"footnoteGroup"]=NSUUID.UUID.UUIDString;
+            [p removeObjectForKey:@"footnoteRaw"]; [p removeObjectForKey:@"footnoteBaseline"];
+            if (paragraph[@"separator"]) p[@"separator"]=paragraph[@"separator"];
+            NSDictionary *attrs=[self visual:@{CRParagraph:p} paragraph:p];
+            [self replace:beforeCaret with:[[NSAttributedString alloc] initWithString:@"" attributes:attrs] selection:NSMakeRange(beforeCaret.location,0)];
+            NSRange remaining=[_text.string paragraphRangeForRange:NSMakeRange(beforeCaret.location,0)];
+            if (remaining.length) [_text.textStorage addAttribute:CRParagraph value:p range:remaining];
+            else _emptyParagraph=p;
+            _text.typingAttributes=attrs; [self restyle]; return;
+        }
+    }
     NSString *kind = nil;
     NSInteger level=0, ordinal=0;
     BOOL checked=NO;
@@ -996,7 +1141,7 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
             if ([self renderSource:[_text.string substringWithRange:CRContent(_text.string,whole)] inRange:whole]) return;
         }
     }
-    NSArray *patterns = @[@"\\$[^$\\n]+\\$$", @"\\*\\*[^*\\n]+\\*\\*$", @"__[^_\\n]+__$", @"~~[^~\\n]+~~$", @"`[^`\\n]+`$", @"\\*[^*\\n]+\\*$", @"_[^_\\n]+_$", @"==[^=\\n]+==$", @"\\^[^^\\n]+\\^$", @"~[^~\\n]+~$", @"<u>[^\\n]+</u>$", @"<mark>[^\\n]+</mark>$", @"<sup>[^\\n]+</sup>$", @"<sub>[^\\n]+</sub>$", @"\\[[^\\]\\n]+\\]\\([^\\n]+\\)$"];
+    NSArray *patterns = @[@"\\[\\^[^\\] \\t\\n]+\\]$",@"\\$[^$\\n]+\\$$", @"\\*\\*[^*\\n]+\\*\\*$", @"__[^_\\n]+__$", @"~~[^~\\n]+~~$", @"`[^`\\n]+`$", @"\\*[^*\\n]+\\*$", @"_[^_\\n]+_$", @"==[^=\\n]+==$", @"\\^[^^\\n]+\\^$", @"~[^~\\n]+~$", @"<u>[^\\n]+</u>$", @"<mark>[^\\n]+</mark>$", @"<sup>[^\\n]+</sup>$", @"<sub>[^\\n]+</sub>$", @"\\[[^\\]\\n]+\\]\\([^\\n]+\\)$"];
     for (NSString *pattern in patterns) {
         NSTextCheckingResult *match = [[NSRegularExpression regularExpressionWithPattern:pattern options:0 error:NULL] firstMatchInString:prefix options:0 range:NSMakeRange(0,prefix.length)];
         if (!match) continue;
@@ -1013,7 +1158,7 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
         if (paragraphs.count != 1 || !CRKind(paragraphs[0],@"body")) continue;
         NSArray *runs = paragraphs[0][@"runs"];
         BOOL styled=NO;
-        for (NSDictionary *run in runs) styled |= [run[@"bold"] boolValue] || [run[@"italic"] boolValue] || [run[@"strike"] boolValue] || [run[@"code"] boolValue] || [run[@"underline"] boolValue] || [run[@"highlight"] boolValue] || [run[@"sup"] boolValue] || [run[@"sub"] boolValue] || [run[@"link"] length] > 0 || [run[@"math"] length] > 0;
+        for (NSDictionary *run in runs) styled |= [run[@"bold"] boolValue] || [run[@"italic"] boolValue] || [run[@"strike"] boolValue] || [run[@"code"] boolValue] || [run[@"underline"] boolValue] || [run[@"highlight"] boolValue] || [run[@"sup"] boolValue] || [run[@"sub"] boolValue] || [run[@"link"] length] > 0 || [run[@"math"] length] > 0 || [run[@"footnote"] length] > 0;
         if (!styled) continue;
         NSRange range=NSMakeRange(beforeCaret.location+match.range.location,match.range.length);
         NSDictionary *extra=cell ? @{CRTableCell:cell} : @{};
@@ -1069,10 +1214,11 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
         NSString *text=lines[i];
         if ([text hasSuffix:@"\r"]) text=[text substringToIndex:text.length-1];
         NSString *sep=i+1<lines.count ? @"\n" : ([p[@"separator"] isKindOfClass:NSString.class] ? p[@"separator"] : @"");
-        NSDictionary *lp=@{@"kind":@"source",@"runs":@[@{@"text":text}],@"raw":text,@"separator":sep};
+        NSDictionary *lp=CRInFootnote(@{@"kind":@"source",@"runs":@[@{@"text":text}],@"raw":text,@"separator":sep},p);
         [value appendAttributedString:[[NSAttributedString alloc] initWithString:text attributes:[self visual:@{CRParagraph:lp} paragraph:lp]]];
         if (i+1<lines.count) [value appendAttributedString:[[NSAttributedString alloc] initWithString:@"\n" attributes:[self visual:@{CRParagraph:lp} paragraph:lp]]];
     }
+    if ([p[@"footnoteId"] length] && value.length) [value addAttribute:CRFootnoteFigureSource value:@{@"id":NSUUID.UUID.UUIDString,@"paragraph":p,@"source":value.string} range:NSMakeRange(0,value.length)];
     return value;
 }
 - (void)revealSourceAt:(NSUInteger)location {
@@ -1086,12 +1232,8 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
     _draftGroup=[self draftGroupAt:_text.selectedRange.location];
 }
 
-- (NSRect)imageBounds:(NSImage *)img {
-    CGFloat w=img.size.width,h=img.size.height;
-    if (w<=0 || h<=0) return NSMakeRect(0,0,1,1);
-    CGFloat maxW=MAX(60,_text.textContainer.size.width-8*_zoom);
-    if (w>maxW) { h=h*maxW/w; w=maxW; }
-    return NSMakeRect(0,0,w,h);
+- (NSRect)imageBounds:(NSImage *)img spec:(NSString *)spec {
+    return CRImageBoundsFromSpec(img, spec, MAX(60,_text.textContainer.size.width-8*_zoom));
 }
 - (NSImage *)placeholderImage {
     return [NSImage imageWithSize:NSMakeSize(240*_zoom,120*_zoom) flipped:NO drawingHandler:^BOOL(NSRect r) {
@@ -1114,7 +1256,9 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
     if (index<0) return NSMakeRange(NSNotFound,0);
     BOOL (^drafty)(NSInteger)=^BOOL(NSInteger i){
         NSDictionary *p=CRParagraphAt(self,[ranges[i] rangeValue].location);
-        return CRKind(p,@"source") || CRKind(p,@"body");
+        NSString *group=CRParagraphAt(self,[ranges[index] rangeValue].location)[@"footnoteGroup"];
+        BOOL sameGroup=(!group && !p[@"footnoteGroup"]) || [group isEqual:p[@"footnoteGroup"]];
+        return sameGroup && (CRKind(p,@"source") || CRKind(p,@"body"));
     };
     if (!drafty(index)) return NSMakeRange(NSNotFound,0);
     NSInteger start=index,end=index;
@@ -1129,6 +1273,8 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
 // Anything else stays editable text.
 - (BOOL)renderSource:(NSString *)text inRange:(NSRange)range {
     if (!text.length) return NO;
+    NSDictionary *origin=range.location<_text.string.length ? [_text.textStorage attribute:CRFootnoteFigureSource atIndex:range.location effectiveRange:NULL][@"paragraph"] : nil;
+    if ([origin[@"raw"] containsString:@"\r\n"]) text=[text stringByReplacingOccurrencesOfString:@"\n" withString:@"\r\n"];
     char *json=cr_parse_markdown((char *)text.UTF8String);
     if (!json) return NO;
     NSMutableDictionary *doc=[[NSJSONSerialization JSONObjectWithData:[[NSString stringWithUTF8String:json] dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL] mutableCopy];
@@ -1138,7 +1284,7 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
     BOOL renderable=YES;
     NSMutableArray *paragraphs=[NSMutableArray array];
     for (NSDictionary *p in ps) {
-        if (!CRKind(p,@"math") && !CRKind(p,@"image") && !CRKind(p,@"code") && !CRKind(p,@"diagram")) renderable=NO;
+        if (!CRKind(p,@"math") && !CRKind(p,@"image") && !CRKind(p,@"code") && !CRKind(p,@"diagram") && !CRKind(p,@"toc")) renderable=NO;
         // Fresh parse IDs collide with the document's; identity stays valid
         // through baseline, not id.
         NSMutableDictionary *clean=[p mutableCopy];
@@ -1146,6 +1292,18 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
         [paragraphs addObject:clean];
     }
     if (!renderable) return NO;
+    if (origin[@"separator"] && paragraphs.count) {
+        NSMutableDictionary *last=[paragraphs.lastObject mutableCopy]; last[@"separator"]=origin[@"separator"]; paragraphs[paragraphs.count-1]=last;
+    }
+    // Revealing a figure and folding it back is not an edit. The rebuilt block
+    // is the very paragraph that was revealed, so keep its identity: without
+    // id/nextId the serializer sees a changed adjacency and widens the
+    // neighbouring separators into blank lines the source never had.
+    if (origin && paragraphs.count==1) {
+        NSMutableDictionary *only=[paragraphs.firstObject mutableCopy];
+        for (NSString *key in @[@"id",@"nextId"]) if ([origin[key] isKindOfClass:NSString.class] && [origin[key] length]) only[key]=origin[key];
+        paragraphs[0]=only;
+    }
     doc[@"paragraphs"]=paragraphs;
     NSDictionary *ending=_emptyParagraph;
     NSAttributedString *value=[self attributedDocument:doc replacingRange:range];
@@ -1213,6 +1371,7 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
     NSImage *img=nil;
     BOOL failed=NO;
     NSTextAttachment *pending=nil;
+    NSString *imageSpec=nil;
     if (CRKind(p,@"diagram")) {
         NSString *key=[NSString stringWithFormat:@"d|%d|%f|%@",_dark,_zoom,raw];
         id cached=_mathCache[key];
@@ -1240,8 +1399,10 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
         NSDictionary *prepared=[self nextMath];
         img=[self mathImage:prepared]; failed=!img;
     } else {
-        NSTextCheckingResult *m=[[NSRegularExpression regularExpressionWithPattern:@"!\\[[^\\]]*\\]\\(([^\\s)]+)" options:0 error:NULL] firstMatchInString:raw options:0 range:NSMakeRange(0,raw.length)];
-        NSString *url=m ? [[raw substringWithRange:[m rangeAtIndex:1]] stringByRemovingPercentEncoding] : nil;
+        // The destination may carry a title and a size suffix; only the URL
+        // loads, and the suffix decides how large the figure is drawn.
+        imageSpec=CRImageRawSpec(raw);
+        NSString *url=[CRImageRawURL(raw) stringByRemovingPercentEncoding];
         if (!url.length) failed=YES;
         else {
             id cached=_imageCache[url];
@@ -1256,17 +1417,18 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
                         dispatch_async(dispatch_get_main_queue(),^{
                             self.imageCache[url]=loaded ?: (id)[NSNull null];
                             [self.imagePending removeObjectForKey:url];
-                            for (NSTextAttachment *att in [self.imageAttachments[url] objectEnumerator]) if (loaded) { att.image=loaded; att.bounds=[self imageBounds:loaded]; }
+                            for (NSTextAttachment *att in [self.imageAttachments[url] objectEnumerator]) if (loaded) { att.image=loaded; att.bounds=[self imageBounds:loaded spec:self.imageSpecForURL[url]]; }
                             [self.text.layoutManager invalidateLayoutForCharacterRange:NSMakeRange(0,self.text.textStorage.length) actualCharacterRange:NULL];
                             [self.text setNeedsDisplay:YES];
                         });
                     }] resume];
                 }
                 NSTextAttachment *att=[NSTextAttachment new];
-                att.image=img; att.bounds=[self imageBounds:img];
+                att.image=img; att.bounds=[self imageBounds:img spec:imageSpec];
                 NSMutableArray *list=_imageAttachments[url];
                 if (!list) { list=[NSMutableArray new]; _imageAttachments[url]=list; }
                 [list addObject:att];
+                self.imageSpecForURL[url]=imageSpec ?: @"";
                 pending=att;
             } else {
                 NSString *path=url;
@@ -1282,7 +1444,7 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
     if (!att) {
         att=[NSTextAttachment new];
         att.image=img;
-        att.bounds=[self imageBounds:img];
+        att.bounds=[self imageBounds:img spec:imageSpec];
     }
     if (!att.image) return [self sourceText:p];
     NSMutableAttributedString *s=[[NSAttributedString attributedStringWithAttachment:att] mutableCopy];
@@ -1324,10 +1486,13 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
     if (opaque) {
         if (![self.owner allowRange:effective]) return;
         NSString *string=[value isKindOfClass:NSAttributedString.class] ? [value string] : value;
-        NSDictionary *attrs=[self.owner visual:@{CRParagraph:CRBody()} paragraph:CRBody()];
+        NSDictionary *body=CRInFootnote(CRBody(),CRParagraphAt(self.owner,effective.location));
+        NSDictionary *attrs=[self.owner visual:@{CRParagraph:body} paragraph:body];
+        NSDictionary *ending=self.owner.emptyParagraph;
+        BOOL endsAtEOF=NSMaxRange(effective)==self.string.length;
         self.owner.suppress=YES;
         [self.owner replace:effective with:[[NSAttributedString alloc] initWithString:string attributes:attrs] selection:NSMakeRange(effective.location+string.length,0)];
-        self.typingAttributes=attrs; self.owner.emptyParagraph=CRBody(); self.owner.suppress=NO; [self.owner notify];
+        self.typingAttributes=attrs; self.owner.emptyParagraph=endsAtEOF ? body : ending; self.owner.suppress=NO; [self.owner notify];
         return;
     }
     if ([self.owner autoPair:value range:effective]) return;
@@ -1445,6 +1610,7 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
     NSRange effective=replacement;
     if (effective.location==NSNotFound && self.hasMarkedText) effective=self.markedRange;
     if (effective.location==NSNotFound) effective=self.selectedRange;
+    if (![self.owner allowRange:effective]) return;
     // Composition stays native inside a code body. Replacing its display
     // separator would remove a hidden fence belonging to the next block.
     if (effective.length) for (NSDictionary *block in [self.owner codeBlocks]) {
@@ -1525,8 +1691,17 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
     flushWithLabel();
     [super drawRect:dirty];
     [e drawCodeLineNumbers:dirty];
+    NSMutableSet *footnoteMarkers=[NSMutableSet set];
     for (NSValue *v in CRRanges(self.string)) {
         NSDictionary *p=CRParagraphAt(e,v.rangeValue.location);
+        NSString *noteGroup=p[@"footnoteGroup"];
+        if ([p[@"footnoteId"] length] && ![footnoteMarkers containsObject:noteGroup]) {
+            if (noteGroup) [footnoteMarkers addObject:noteGroup];
+            NSRect line=[e markerLineRect:v.rangeValue];
+            NSString *number=e.footnotes[p[@"footnoteId"]][@"number"] ?: @"·";
+            NSDictionary *attrs=@{NSFontAttributeName:[NSFont systemFontOfSize:11.5*e.zoom weight:NSFontWeightMedium],NSForegroundColorAttributeName:NSColor.linkColor};
+            [[number stringByAppendingString:@"."] drawAtPoint:NSMakePoint(self.textContainerOrigin.x+4*e.zoom,NSMidY(line)-8*e.zoom) withAttributes:attrs];
+        }
         if ([p[@"listContinuation"] boolValue]) continue;
         NSRect rect=[e markerRect:v.rangeValue];
         if (!NSIntersectsRect(rect,dirty)) continue;
@@ -1562,7 +1737,9 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
             [[NSString stringWithFormat:@"%@.",p[@"ordinal"] ?: @1] drawAtPoint:NSMakePoint(rect.origin.x,NSMidY(lineRect)-(f.ascender-f.descender)/2) withAttributes:@{NSFontAttributeName:f,NSForegroundColorAttributeName:markerColor}];
         }
         else if (CRKind(p,@"quote")) {
-            [(e.dark ? [NSColor colorWithWhite:0.40 alpha:1] : [NSColor colorWithWhite:0.80 alpha:1]) setFill];
+            NSString *alert = [p[@"alert"] isKindOfClass:NSString.class] ? p[@"alert"] : nil;
+            if (alert.length) [CRAlertAccent(alert,e.dark) setFill];
+            else [(e.dark ? [NSColor colorWithWhite:0.40 alpha:1] : [NSColor colorWithWhite:0.80 alpha:1]) setFill];
             for (NSInteger level=0;level<=[p[@"depth"] integerValue];level++) [[NSBezierPath bezierPathWithRoundedRect:NSMakeRect(rect.origin.x+7+level*26*e.zoom,rect.origin.y,3*e.zoom,rect.size.height) xRadius:1.5*e.zoom yRadius:1.5*e.zoom] fill];
         }
     }
@@ -1581,7 +1758,7 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
     if (simpleClick && glyph<self.layoutManager.numberOfGlyphs && NSPointInRect(containerPoint,[self.layoutManager boundingRectForGlyphRange:NSMakeRange(glyph,1) inTextContainer:self.textContainer])) {
         NSUInteger hit=[self.layoutManager characterIndexForGlyphAtIndex:glyph];
         NSDictionary *attrs=hit<self.string.length ? [self.textStorage attributesAtIndex:hit effectiveRange:NULL] : @{};
-        BOOL styled=attrs[CRMathText]!=nil;
+        BOOL styled=attrs[CRMathText]!=nil || attrs[CRFootnote]!=nil;
         for (NSString *key in @[CRBold,CRItalic,CRCode,NSStrikethroughStyleAttributeName,CRUnderline,CRHighlight,CRSup,CRSub,NSLinkAttributeName]) if (attrs[key] && ![attrs[key] isEqual:@NO]) styled=YES;
         if (styled && !attrs[CRInlineSource]) {
             // Wait for release or the first drag, leaving the event queued for
@@ -1598,6 +1775,14 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
                 }
             }
         }
+    }
+    if (index < self.string.length && CRKind(CRParagraphAt(self.owner,index),@"toc")) {
+        // The list is a picture of the headings, so a pick jumps to the heading it
+        // names. The marker itself is opened from the context menu.
+        NSRange tocRange=NSMakeRange(index,1);
+        for (NSValue *v in CRRanges(self.string)) if (NSLocationInRange(index,v.rangeValue)) { tocRange=v.rangeValue; break; }
+        NSInteger entry=[self.owner tocEntryAtPoint:point range:tocRange];
+        if (entry>=0) { [self.window makeFirstResponder:self]; [self.owner jumpToTOCEntry:entry]; return; }
     }
     if (index < self.string.length && (CRKind(CRParagraphAt(self.owner,index),@"math") || CRKind(CRParagraphAt(self.owner,index),@"diagram") || CRKind(CRParagraphAt(self.owner,index),@"image"))) { [self.window makeFirstResponder:self]; [self.owner revealSourceAt:index]; return; }
     if (index < self.string.length && CRKind(CRParagraphAt(self.owner,index),@"opaque")) { [self.owner source]; return; }
@@ -1626,7 +1811,7 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
     NSData *data=[NSJSONSerialization dataWithJSONObject:doc options:0 error:NULL];
     [NSPasteboard.generalPasteboard addTypes:@[CROwnPaste] owner:nil];
     [NSPasteboard.generalPasteboard setData:data forType:CROwnPaste];
-    BOOL opaque=NO; for (NSDictionary *p in doc[@"paragraphs"]) opaque |= CRKind(p,@"opaque");
+    BOOL opaque=NO; for (NSDictionary *p in doc[@"paragraphs"]) opaque |= CRKind(p,@"opaque") || CRHasFootnote(p);
     if (opaque) {
         const char *json=[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding].UTF8String;
         char *source=cr_markdown_json((char *)json);
@@ -1676,13 +1861,15 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
     if (own) {
         NSDictionary *document=[NSJSONSerialization JSONObjectWithData:own options:0 error:NULL];
         NSArray *paragraphs=CRImportedParagraphs(document[@"paragraphs"]);
-        BOOL opaque=NO; for (NSDictionary *p in paragraphs) opaque |= CRKind(p,@"opaque") || CRKind(p,@"table") || CRKind(p,@"source");
+        BOOL opaque=NO; for (NSDictionary *p in paragraphs) opaque |= CRKind(p,@"opaque") || CRKind(p,@"table") || CRKind(p,@"source") || [p[@"footnoteId"] length];
         if (opaque && self.string.length) {
             NSData *data=[NSJSONSerialization dataWithJSONObject:@{@"paragraphs":paragraphs} options:0 error:NULL];
             cr_insert((uintptr_t)(__bridge void *)self.owner,[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding].UTF8String);
             return;
         }
+        NSDictionary *ending=self.owner.emptyParagraph;
         NSMutableAttributedString *value=[[self.owner attributedDocument:@{@"paragraphs":paragraphs} replacingRange:self.selectedRange] mutableCopy];
+        if (NSMaxRange(self.selectedRange)<self.string.length) self.owner.emptyParagraph=ending;
         // Inline rich paste belongs to the destination paragraph, not the
         // source block's round-trip metadata.
         if (!opaque && paragraphs.count==1 && value.length) [value addAttribute:CRParagraph value:CRParagraphAt(self.owner,self.selectedRange.location) range:NSMakeRange(0,value.length)];
@@ -1795,13 +1982,13 @@ uintptr_t cr_new(uintptr_t window, uintptr_t callback) {
     e.draftGroup=NSMakeRange(NSNotFound,0);
     e.lastCaret=NSNotFound;
     [e.text registerForDraggedTypes:@[NSFilenamesPboardType,NSPasteboardTypeFileURL]];
-    e.mathCache=[NSMutableDictionary new]; e.imageCache=[NSMutableDictionary new]; e.imagePending=[NSMutableDictionary new]; e.imageAttachments=[NSMutableDictionary new];
+    e.mathCache=[NSMutableDictionary new]; e.imageCache=[NSMutableDictionary new]; e.imagePending=[NSMutableDictionary new]; e.imageAttachments=[NSMutableDictionary new]; e.imageSpecForURL=[NSMutableDictionary new]; e.tocSignature=[NSString string];
     e.text.typingAttributes=@{CRParagraph:CRBody()}; e.scroll.documentView=e.text; [w.contentView addSubview:e.scroll positioned:NSWindowAbove relativeTo:nil];
     [e restyle];
     return (uintptr_t)(__bridge_retained void *)e;
 }
 void cr_close(uintptr_t ptr) { CREditor *e=(__bridge_transfer CREditor *)(void *)ptr; e.callback=0; e.text.delegate=nil; [e.scroll removeFromSuperview]; [e.undo removeAllActions]; }
-void cr_load(uintptr_t ptr,const char *json) { CREditor *e=CRE(ptr); e.documentRevision++; e.suppress=YES; NSAttributedString *value=[e attributedDocument:CRJSON(json)]; [e.text.textStorage setAttributedString:value]; e.text.selectedRange=NSMakeRange(0,0); e.text.typingAttributes=@{CRParagraph: value.length ? [value attribute:CRParagraph atIndex:0 effectiveRange:NULL] : e.emptyParagraph ?: CRBody()}; [e.undo removeAllActions]; e.suppress=NO; [e restyle]; [e refreshMath]; }
+void cr_load(uintptr_t ptr,const char *json) { CREditor *e=CRE(ptr); e.documentRevision++; e.suppress=YES; e.tocSignature=nil; NSAttributedString *value=[e attributedDocument:CRJSON(json)]; [e.text.textStorage setAttributedString:value]; e.text.selectedRange=NSMakeRange(0,0); e.text.typingAttributes=@{CRParagraph: value.length ? [value attribute:CRParagraph atIndex:0 effectiveRange:NULL] : e.emptyParagraph ?: CRBody()}; [e.undo removeAllActions]; e.suppress=NO; [e restyle]; [e refreshMath]; [e refreshTOC]; }
 char *cr_snapshot(uintptr_t ptr,int *marked) { CREditor *e=CRE(ptr); *marked=e.text.hasMarkedText; if (*marked) return NULL; NSData *data=[NSJSONSerialization dataWithJSONObject:[e document] options:0 error:NULL]; if (!data) return NULL; return strdup([[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding].UTF8String); }
 void cr_format(uintptr_t ptr,const char *command) { [CRE(ptr) format:[NSString stringWithUTF8String:command]]; }
 void cr_insert(uintptr_t ptr,const char *json) {
@@ -1809,19 +1996,23 @@ void cr_insert(uintptr_t ptr,const char *json) {
     if (!e.text.editable || e.text.hasMarkedText || ![e allowRange:selection]) return;
     NSTextTableBlock *destination=CRCellAt(e,selection.location);
     if (destination) selection=NSMakeRange(NSMaxRange(CRTableRange(e,destination.table)),0);
+    BOOL endsAtEOF=NSMaxRange(selection)==e.text.string.length;
     NSMutableDictionary *doc=[CRJSON(json) mutableCopy];
     doc[@"paragraphs"]=CRImportedParagraphs(doc[@"paragraphs"]);
+    NSDictionary *container=CRParagraphAt(e,e.text.selectedRange.location);
+    doc[@"paragraphs"]=[e footnoteFragment:doc[@"paragraphs"] container:container];
     NSDictionary *ending=e.emptyParagraph;
     NSMutableAttributedString *insert=[[e attributedDocument:doc replacingRange:selection] mutableCopy];
     e.emptyParagraph=ending;
-    NSDictionary *attrs=[e visual:@{CRParagraph:CRBody()} paragraph:CRBody()];
+    NSDictionary *boundary=CRInFootnote(CRBody(),container);
+    NSDictionary *attrs=[e visual:@{CRParagraph:boundary} paragraph:boundary];
     if (selection.location && [e.text.string characterAtIndex:selection.location-1]!='\n') [insert insertAttributedString:[[NSAttributedString alloc] initWithString:@"\n" attributes:attrs] atIndex:0];
     [insert appendAttributedString:[[NSAttributedString alloc] initWithString:@"\n" attributes:attrs]];
     __block NSUInteger tableStart=NSNotFound;
     [insert enumerateAttribute:CRTableCell inRange:NSMakeRange(0,insert.length) options:0 usingBlock:^(id cell, NSRange range, BOOL *stop) { if (cell) { tableStart=range.location; *stop=YES; } }];
     e.suppress=YES;
     [e replace:selection with:insert selection:NSMakeRange(selection.location+(tableStart==NSNotFound ? insert.length : tableStart),0)];
-    e.text.typingAttributes=attrs; e.emptyParagraph=CRBody(); e.suppress=NO;
+    e.text.typingAttributes=attrs; e.emptyParagraph=endsAtEOF ? boundary : ending; e.suppress=NO;
     [e updateTypingParagraph]; [e notify];
 }
 // CRUpdateInset caps the reading measure: past ~47 CJK chars per line the eye
@@ -1849,15 +2040,15 @@ void cr_style(uintptr_t ptr,double zoom,int dark,int editable) {
         [copy enumerateAttribute:NSAttachmentAttributeName inRange:NSMakeRange(0,copy.length) options:0 usingBlock:^(id attachment, NSRange range, BOOL *stop) {
             if (!attachment) return;
             NSDictionary *paragraph=CRParagraphAt(e,range.location);
-            if (!CRKind(paragraph,@"image") && !CRKind(paragraph,@"diagram")) return;
-            NSAttributedString *figure=[e figure:paragraph];
+            if (!CRKind(paragraph,@"image") && !CRKind(paragraph,@"diagram") && !CRKind(paragraph,@"toc")) return;
+            NSAttributedString *figure=CRKind(paragraph,@"toc") ? [e tocFigure:paragraph] : [e figure:paragraph];
             NSTextAttachment *updated=figure.length ? [figure attribute:NSAttachmentAttributeName atIndex:0 effectiveRange:NULL] : nil;
             if (updated) [e.text.textStorage addAttribute:NSAttachmentAttributeName value:updated range:range];
         }];
         e.suppress=wasSuppress;
     }
     [e restyle];
-    if (figures) [e refreshMath];
+    if (figures) { e.tocSignature=nil; [e refreshMath]; [e refreshTOC]; }
 }
 void cr_focus(uintptr_t ptr,int focus) { CREditor *e=CRE(ptr); if (focus) { if (e.window.firstResponder!=e.text) e.previousResponder=e.window.firstResponder; [e.window makeFirstResponder:e.text]; } else if (e.window.firstResponder==e.text) { NSResponder *previous=e.previousResponder; if (!previous || previous==e.text) previous=CRUnderlyingResponder(e.window.contentView,e.scroll) ?: e.window.contentView; [e.window makeFirstResponder:previous]; } }
 
@@ -1901,19 +2092,75 @@ uintptr_t cr_test_window(void) { NSWindow *window=[[NSWindow alloc] initWithCont
 void cr_test_close_window(uintptr_t ptr) { NSWindow *window=(__bridge_transfer NSWindow *)(void *)ptr; [window close]; }
 void cr_test_select(uintptr_t ptr,int start,int length) { CRE(ptr).text.selectedRange=NSMakeRange(start,length); }
 char *cr_test_text(uintptr_t ptr) { return strdup(CRE(ptr).text.string.UTF8String); }
+char *cr_test_clipboard_text(void) { return strdup(([NSPasteboard.generalPasteboard stringForType:NSPasteboardTypeString] ?: @"").UTF8String); }
 char *cr_test_code_controls(uintptr_t ptr) {
     CREditor *editor=CRE(ptr);
     NSDictionary *state=[editor respondsToSelector:@selector(codeControlState)] ? [editor codeControlState] : @{};
     NSData *json=[NSJSONSerialization dataWithJSONObject:state options:0 error:NULL];
     return strdup([[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding].UTF8String);
 }
+char *cr_test_footnotes(uintptr_t ptr) {
+    CREditor *e=CRE(ptr);
+    NSMutableArray *references=[NSMutableArray array], *definitions=[NSMutableArray array];
+    [e.text.textStorage enumerateAttributesInRange:NSMakeRange(0,e.text.string.length) options:0 usingBlock:^(NSDictionary *attrs, NSRange range, BOOL *stop) {
+        id run=attrs[CRFootnote];
+        if (![run isKindOfClass:NSDictionary.class]) return;
+        [references addObject:@{@"label":run[@"footnote"] ?: @"",@"location":@(range.location),@"length":@(range.length),@"number":attrs[@"CorraFootnoteNumber"] ?: @"",@"tooltip":attrs[NSToolTipAttributeName] ?: @"",@"attachment":attrs[NSAttachmentAttributeName] ? @YES : @NO}];
+    }];
+    for (NSValue *value in CRRanges(e.text.string)) {
+        NSDictionary *p=CRParagraphAt(e,value.rangeValue.location);
+        if ([p[@"footnoteId"] length] && ![p[@"footnoteContinuation"] boolValue]) [definitions addObject:@{@"label":p[@"footnoteId"],@"location":@(value.rangeValue.location),@"length":@(CRContent(e.text.string,value.rangeValue).length)}];
+    }
+    NSData *json=[NSJSONSerialization dataWithJSONObject:@{@"references":references,@"definitions":definitions,@"document":[e document]} options:0 error:NULL];
+    return strdup([[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding].UTF8String);
+}
 void cr_test_selection(uintptr_t ptr,int *start,int *length) { NSRange r=CRE(ptr).text.selectedRange; *start=(int)r.location; *length=(int)r.length; }
+char *cr_test_images(uintptr_t ptr) {
+    CREditor *e=CRE(ptr);
+    NSMutableArray *figures=[NSMutableArray array];
+    for (NSValue *value in [e imageFigureRanges]) {
+        NSRange range=CRContent(e.text.string,value.rangeValue);
+        NSTextAttachment *att=[e.text.textStorage attribute:NSAttachmentAttributeName atIndex:range.location effectiveRange:NULL];
+        if (!att) continue;
+        NSDictionary *p=CRParagraphAt(e,value.rangeValue.location);
+        NSString *raw=[p[@"raw"] isKindOfClass:NSString.class] ? p[@"raw"] : @"";
+        [figures addObject:@{@"url":CRImageRawURL(raw) ?: @"",@"spec":CRImageRawSpec(raw) ?: @"",@"width":@(att.bounds.size.width),@"height":@(att.bounds.size.height)}];
+    }
+    NSData *json=[NSJSONSerialization dataWithJSONObject:figures options:0 error:NULL];
+    return strdup([[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding].UTF8String);
+}
+
+// cr_test_toc reports the [TOC] figures of the document: the entries they list
+// and the size they are drawn at.
+char *cr_test_toc(uintptr_t ptr) {
+    CREditor *e=CRE(ptr);
+    NSMutableArray *tocs=[NSMutableArray array];
+    for (NSValue *value in [e tocFigureRanges]) {
+        NSRange range=CRContent(e.text.string,value.rangeValue);
+        NSTextAttachment *att=[e.text.textStorage attribute:NSAttachmentAttributeName atIndex:range.location effectiveRange:NULL];
+        if (!att) continue;
+        [tocs addObject:@{@"entries":[e tocEntriesFromText],@"width":@(att.bounds.size.width),@"height":@(att.bounds.size.height)}];
+    }
+    NSData *json=[NSJSONSerialization dataWithJSONObject:tocs options:0 error:NULL];
+    return strdup([[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding].UTF8String);
+}
 void cr_test_action(uintptr_t ptr,const char *action,const char *text) {
     CREditor *e=CRE(ptr); NSString *a=[NSString stringWithUTF8String:action], *s=[NSString stringWithUTF8String:text];
     if ([a isEqual:@"undo"]) { [e.text breakUndoCoalescing]; [e.undo undo]; }
+    else if ([a isEqual:@"toc"]) {
+        // Pick one entry of the first [TOC] figure, the way a click would.
+        NSValue *value=[e tocFigureRanges].firstObject;
+        if (!value) return;
+        NSUInteger glyph=[e.text.layoutManager glyphIndexForCharacterAtIndex:value.rangeValue.location];
+        NSRect rect=[e.text.layoutManager boundingRectForGlyphRange:NSMakeRange(glyph,1) inTextContainer:e.text.textContainer];
+        NSPoint point=NSMakePoint(NSMidX(rect)+e.text.textContainerOrigin.x,rect.origin.y+e.text.textContainerOrigin.y+([s integerValue]+0.5)*CRTOCLine(e.zoom));
+        NSEvent *event=[NSEvent mouseEventWithType:NSEventTypeLeftMouseDown location:[e.text convertPoint:point toView:nil] modifierFlags:0 timestamp:0 windowNumber:e.window.windowNumber context:nil eventNumber:0 clickCount:1 pressure:1];
+        [e.text mouseDown:event];
+    }
     else if ([a isEqual:@"key"]) {
         NSString *characters=[s hasSuffix:@"return"] ? @"\r" : [s hasSuffix:@"backspace"] ? @"\x7f" : [s hasSuffix:@"left"] ? @"[" : @"]";
         NSEventModifierFlags flags=[s hasPrefix:@"alt-"] ? NSEventModifierFlagOption : NSEventModifierFlagCommand;
+        if ([s hasPrefix:@"footnote-"]) { characters=[s hasSuffix:@"down"] ? @"\uf701" : @"\uf700"; flags=NSEventModifierFlagCommand|NSEventModifierFlagOption; }
         if ([s containsString:@"shift"]) flags |= NSEventModifierFlagShift;
         NSEvent *event=[NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:flags timestamp:0 windowNumber:e.window.windowNumber context:nil characters:characters charactersIgnoringModifiers:characters isARepeat:NO keyCode:0];
         [e.text keyDown:event];
@@ -1950,6 +2197,7 @@ void cr_test_action(uintptr_t ptr,const char *action,const char *text) {
         }
     }
     else if ([a isEqual:@"newline"]) [e.text insertNewline:nil];
+    else if ([a isEqual:@"type"]) [e.text insertText:s replacementRange:e.text.selectedRange];
     else if ([a isEqual:@"reveal"]) { if (![e revealInlineAt:e.text.selectedRange.location]) [e revealSourceAt:e.text.selectedRange.location]; }
     else if ([a isEqual:@"move-right"]) [e.text moveRight:nil];
     else if ([a isEqual:@"move-left"]) [e.text moveLeft:nil];
@@ -1974,7 +2222,7 @@ void cr_test_action(uintptr_t ptr,const char *action,const char *text) {
     else if ([a isEqual:@"commitIME"]) [e.text insertText:s replacementRange:NSMakeRange(NSNotFound,0)];
     else [e.text insertText:s replacementRange:e.text.selectedRange];
 }
-int cr_test_traits(uintptr_t ptr,const char *trait) { CREditor *e=CRE(ptr); NSString *key=[NSString stringWithUTF8String:trait]; __block BOOL found=NO; [e.text.textStorage enumerateAttributesInRange:NSMakeRange(0,e.text.string.length) options:0 usingBlock:^(NSDictionary *attrs, NSRange r, BOOL *stop) { if ([key isEqual:@"bold"]) found |= ([[NSFontManager sharedFontManager] traitsOfFont:attrs[NSFontAttributeName]] & NSBoldFontMask)!=0; else if ([key isEqual:@"underline"]) found |= [attrs[NSUnderlineStyleAttributeName] integerValue]!=0; else if ([key isEqual:@"highlight"]) found |= attrs[CRHighlight]!=nil && attrs[NSBackgroundColorAttributeName]!=nil; else if ([key isEqual:@"sup"]) found |= [attrs[NSSuperscriptAttributeName] integerValue]>0; else if ([key isEqual:@"sub"]) found |= [attrs[NSSuperscriptAttributeName] integerValue]<0; else if ([key hasPrefix:@"hl:"]) found |= [attrs[CRHl] isEqual:[key substringFromIndex:3]]; else found |= CRKind(attrs[CRParagraph],key); }];
+int cr_test_traits(uintptr_t ptr,const char *trait) { CREditor *e=CRE(ptr); NSString *key=[NSString stringWithUTF8String:trait]; __block BOOL found=NO; [e.text.textStorage enumerateAttributesInRange:NSMakeRange(0,e.text.string.length) options:0 usingBlock:^(NSDictionary *attrs, NSRange r, BOOL *stop) { if ([key isEqual:@"bold"]) found |= ([[NSFontManager sharedFontManager] traitsOfFont:attrs[NSFontAttributeName]] & NSBoldFontMask)!=0; else if ([key isEqual:@"italic"]) found |= ([[NSFontManager sharedFontManager] traitsOfFont:attrs[NSFontAttributeName]] & NSItalicFontMask)!=0; else if ([key isEqual:@"underline"]) found |= [attrs[NSUnderlineStyleAttributeName] integerValue]!=0; else if ([key isEqual:@"highlight"]) found |= attrs[CRHighlight]!=nil && attrs[NSBackgroundColorAttributeName]!=nil; else if ([key isEqual:@"sup"]) found |= [attrs[NSSuperscriptAttributeName] integerValue]>0; else if ([key isEqual:@"sub"]) found |= [attrs[NSSuperscriptAttributeName] integerValue]<0; else if ([key hasPrefix:@"hl:"]) found |= [attrs[CRHl] isEqual:[key substringFromIndex:3]]; else found |= CRKind(attrs[CRParagraph],key); }];
     if ([key isEqual:@"scrolled"]) return e.text.visibleRect.origin.y > 0.5;
     if ([key isEqual:@"attachments-clean"]) {
         __block BOOL clean=YES;
@@ -1997,6 +2245,19 @@ int cr_test_traits(uintptr_t ptr,const char *trait) { CREditor *e=CRE(ptr); NSSt
             if ([attrs[CRMathNumber] isEqual:[key substringFromIndex:12]] && attachment.image.size.width>0 && attachment.image.size.height>0) numbered=YES;
         }];
         return numbered;
+    }
+    if ([key hasPrefix:@"alert:"]) {
+        // Reports the callout label a paragraph carries, which lives only in
+        // the paragraph attribute: the marker itself stays ordinary text.
+        NSString *want=[key substringFromIndex:6];
+        __block BOOL present=NO;
+        [e.text.textStorage enumerateAttribute:CRParagraph inRange:NSMakeRange(0,e.text.textStorage.length) options:0 usingBlock:^(id value, NSRange range, BOOL *stop) {
+            if (![value isKindOfClass:NSDictionary.class]) return;
+            NSString *have=value[@"alert"];
+            if (![have isKindOfClass:NSString.class]) have=@"";
+            if ([have isEqual:want]) present=YES;
+        }];
+        return present;
     }
     if ([key isEqual:@"findbar"]) return e.text.usesFindBar ? 1 : 0;
     if ([key hasPrefix:@"alphaAt:"]) { NSInteger index=[[key substringFromIndex:8] integerValue]; if (index>=0 && index<e.text.textStorage.length) { NSColor *color=[e.text.textStorage attribute:NSForegroundColorAttributeName atIndex:index effectiveRange:NULL]; return color && color.alphaComponent<0.99; } return 0; }

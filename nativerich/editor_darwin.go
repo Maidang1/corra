@@ -298,7 +298,7 @@ func cr_render_block(language, body *C.char, dark C.int, zoom C.double) *C.char 
 			return nil
 		}
 	case "mermaid", "d2", "goat":
-		kind := map[string]render.DiagramKind{"mermaid": render.DiagramMermaid, "d2": render.DiagramD2, "goat": render.DiagramGoAT}[lang]
+		kind := map[string]render.DiagramKind{"mermaid": render.DiagramMermaid, "d2": render.DiagramD2, "goat": render.DiagramGoAT, "flow": render.DiagramFlowchartJS, "sequence": render.DiagramSequenceJS}[lang]
 		svg, err := render.RenderDiagram(context.Background(), kind, src)
 		if err != nil {
 			return nil

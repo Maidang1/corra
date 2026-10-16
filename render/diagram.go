@@ -17,13 +17,16 @@ import (
 	"oss.terrastruct.com/d2/lib/textmeasure"
 )
 
-// Diagram renders diagram source (mermaid, d2, goat) to an SVG document.
-// The returned bytes are the SVG; views decide how to display them.
+// Diagram renders diagram source (mermaid, d2, goat, flow, sequence) to an SVG
+// document. The returned bytes are the SVG; views decide how to display them.
 
 var (
 	mermaidOnce   sync.Once
 	mermaidRender *mermaid.Renderer
 	mermaidErr    error
+	// errUnsupportedDiagram means the source is not valid for its engine. The
+	// caller shows the source instead of a wrong diagram.
+	errUnsupportedDiagram = errors.New("diagram: unsupported syntax")
 )
 
 // MermaidRenderer returns the shared mermaid renderer, compiling the
@@ -59,6 +62,20 @@ func RenderDiagram(ctx context.Context, kind DiagramKind, src string) (out []byt
 		return renderD2(ctx, src)
 	case DiagramGoAT:
 		return renderGoAT(src)
+	case DiagramFlowchartJS, DiagramSequenceJS:
+		// Both grammars translate to mermaid and reuse its renderer, so the
+		// layout is mermaid's rather than a pixel copy of the original engine.
+		var translated string
+		var err error
+		if kind == DiagramFlowchartJS {
+			translated, err = flowchartToMermaid(src)
+		} else {
+			translated, err = sequenceToMermaid(src)
+		}
+		if err != nil {
+			return nil, err
+		}
+		return RenderDiagram(ctx, DiagramMermaid, translated)
 	}
 	return nil, errors.New("unknown diagram kind")
 }

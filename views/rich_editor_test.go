@@ -83,6 +83,18 @@ func TestRichCodeLineNumbersFollowPreference(t *testing.T) {
 	}
 }
 
+func TestRichFootnoteInsertionUsesNativeTransaction(t *testing.T) {
+	v, tt := notesFixture(t)
+	e := &fakeRichEditor{}
+	v.AttachRichEditor(e)
+	tt.Frame()
+	loads, source := e.loads, e.source
+	v.InsertFootnote()
+	if e.command != "footnote:insert" || e.loads != loads || e.source != source {
+		t.Fatalf("footnote insertion bypassed native transaction: command=%q loads=%d/%d source=%q", e.command, e.loads, loads, e.source)
+	}
+}
+
 func TestRichSourceSwitchSynchronizesBothDirections(t *testing.T) {
 	v, tt := notesFixture(t)
 	e := &fakeRichEditor{}

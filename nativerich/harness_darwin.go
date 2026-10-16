@@ -74,3 +74,27 @@ func nativeTestCodeControls(e *Editor) string {
 	defer C.free(unsafe.Pointer(value))
 	return C.GoString(value)
 }
+
+func nativeTestFootnotes(e *Editor) string {
+	value := C.cr_test_footnotes(e.native)
+	defer C.free(unsafe.Pointer(value))
+	return C.GoString(value)
+}
+
+func nativeTestImages(e *Editor) string {
+	value := C.cr_test_images(e.native)
+	defer C.free(unsafe.Pointer(value))
+	return C.GoString(value)
+}
+
+func nativeTestTOC(e *Editor) string {
+	value := C.cr_test_toc(e.native)
+	defer C.free(unsafe.Pointer(value))
+	return C.GoString(value)
+}
+
+func nativeTestClipboardText() string {
+	value := C.cr_test_clipboard_text()
+	defer C.free(unsafe.Pointer(value))
+	return C.GoString(value)
+}

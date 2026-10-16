@@ -56,9 +56,12 @@
         NSUInteger codeCount=exit ? parts.count-1 : parts.count;
         for (NSUInteger i=0;i<parts.count;i++) {
             BOOL code=i<codeCount;
-            NSMutableDictionary *p=[(code ? first : CRBody()) mutableCopy];
+            NSMutableDictionary *p=[(code ? first : CRInFootnote(CRBody(),first)) mutableCopy];
             for (NSString *key in @[@"id",@"nextId",@"baseline",@"raw",@"open",@"close"]) [p removeObjectForKey:key];
             if (code) {
+                // A boxed C "||" expression is an int, which would serialize
+                // as 0/1 and break Go's bool decoding of the whole document.
+                if ([first[@"footnoteId"] length]) p[@"footnoteContinuation"]=@((BOOL)(i>0 || [first[@"footnoteContinuation"] boolValue]));
                 p[@"codeNewline"]=newline;
                 p[@"codeClose"]=close;
                 p[@"codeSeparator"]=separator;

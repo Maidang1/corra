@@ -21,12 +21,12 @@
     if (_suppress || !_text.editable || _text.hasMarkedText || _text.selectedRange.length || location>=_text.string.length) return NO;
     if ([self revealInlineMathAt:location]) return YES;
     NSDictionary *paragraph=CRParagraphAt(self,location);
-    if ([@[@"source",@"code",@"opaque",@"math",@"image",@"diagram"] containsObject:paragraph[@"kind"]]) return NO;
+    if ([@[@"source",@"code",@"opaque",@"math",@"image",@"diagram",@"toc"] containsObject:paragraph[@"kind"]]) return NO;
     NSRange limit=CRContent(_text.string,[_text.string paragraphRangeForRange:NSMakeRange(location,0)]);
     if (!NSLocationInRange(location,limit)) return NO;
     NSDictionary *attrs=[_text.textStorage attributesAtIndex:location effectiveRange:NULL];
     if (attrs[CRInlineSource]) return NO;
-    NSArray *keys=@[CRBold,CRItalic,CRCode,NSStrikethroughStyleAttributeName,CRUnderline,CRHighlight,CRSup,CRSub,NSLinkAttributeName];
+    NSArray *keys=@[CRBold,CRItalic,CRCode,NSStrikethroughStyleAttributeName,CRUnderline,CRHighlight,CRSup,CRSub,NSLinkAttributeName,CRFootnote];
     BOOL styled=NO;
     for (NSString *key in keys) if (attrs[key] && ![attrs[key] isEqual:@NO]) styled=YES;
     if (!styled) return NO;

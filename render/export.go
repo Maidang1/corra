@@ -146,6 +146,10 @@ func pdfBlock(ctx context.Context, page *template.PageBuilder, b *Block, doc *Do
 		opts := []template.TextOption{template.FontSize(pdfBaseSz)}
 		if b.Kind == KindQuote {
 			opts = append(opts, template.Italic())
+			if b.Alert != "" {
+				// GitHub prints the callout's name as its title.
+				pdfText(page, AlertTitle(b.Alert), template.FontSize(pdfBaseSz), template.Bold())
+			}
 		}
 		if b.Kind == KindHTML {
 			t = b.Source
@@ -268,6 +272,15 @@ func pdfMathImage(page *template.PageBuilder, img image.Image) error {
 
 // pdfInlineText flattens a paragraph block's inline source to readable text.
 func pdfInlineText(b *Block) string {
+	if b.Kind == KindQuote && len(b.Items) > 0 {
+		// A quote's source keeps its ">" markers, which would print; the items
+		// are the quote's own text without them.
+		parts := make([]string, 0, len(b.Items))
+		for _, it := range b.Items {
+			parts = append(parts, PlainText(it.Source))
+		}
+		return strings.Join(parts, " ")
+	}
 	ins := ParseInlines(strings.TrimSpace(b.Source))
 	return inlinePlainAll(ins)
 }

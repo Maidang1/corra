@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/Maidang1/corra/internal/mdext"
@@ -39,7 +38,7 @@ type revealSourceSpan struct {
 // An error leaves callers free to retain the rendered fragment unchanged.
 func RevealInline(runs []Run, table bool) (InlineReveal, error) {
 	for _, run := range runs {
-		if !utf8.ValidString(run.Text) || !utf8.ValidString(run.Math) || !utf8.ValidString(run.Link) || !utf8.ValidString(run.LinkTitle) {
+		if !utf8.ValidString(run.Text) || !utf8.ValidString(run.Math) || !utf8.ValidString(run.Footnote) || !utf8.ValidString(run.Link) || !utf8.ValidString(run.LinkTitle) {
 			return InlineReveal{}, fmt.Errorf("invalid UTF-8 inline run")
 		}
 	}
@@ -83,7 +82,7 @@ func RevealInline(runs []Run, table bool) (InlineReveal, error) {
 	}
 	var visible []rune
 	for _, run := range runs {
-		if run.Math != "" {
+		if run.Math != "" || run.Footnote != "" {
 			visible = append(visible, '\ufffc')
 		} else if run.Break {
 			visible = append(visible, '\u2028')
@@ -120,7 +119,7 @@ func sameRevealRuns(expected, actual []Run) bool {
 					runs, offset = runs[1:], 0
 					return Run{Break: true}, true
 				}
-				if run.Math != "" {
+				if run.Math != "" || run.Footnote != "" {
 					runs, offset = runs[1:], 0
 					run.Text = run.Math
 					return run, true
@@ -168,6 +167,7 @@ func inlineSourceAtoms(source string, table bool, spans []revealSourceSpan) ([]r
 	src := []byte(input)
 	md := goldmark.New(goldmark.WithExtensions(extension.GFM, mdext.InlineExtender))
 	md.Parser().AddOptions(parser.WithInlineParsers(util.Prioritized(inlineMathParser{}, 50)))
+	md.Parser().AddOptions(parser.WithInlineParsers(util.Prioritized(footnoteInlineParser{}, 49)))
 	root := md.Parser().Parse(text.NewReader(src))
 	mdext.TransformHTML(root, src)
 	var atoms []revealAtom
@@ -187,6 +187,13 @@ func inlineSourceAtoms(source string, table bool, spans []revealSourceSpan) ([]r
 			return ast.WalkContinue, nil
 		}
 		switch n := node.(type) {
+		case *footnoteInline:
+			start := n.Pos()
+			if start < 0 || start+len(n.source) > len(src) || string(src[start:start+len(n.source)]) != n.source {
+				return ast.WalkStop, fmt.Errorf("footnote source has no exact position")
+			}
+			add('\ufffc', start, start+len(n.source))
+			return ast.WalkSkipChildren, nil
 		case *ast.Text:
 			segment := n.Segment
 			if n.HardLineBreak() && segment.Start == segment.Stop && n.Pos() >= 0 && n.Pos() < len(src) && src[n.Pos()] == '<' {
@@ -315,36 +322,18 @@ func revealSourceSpans(runs []Run, table bool, source string) ([]revealSourceSpa
 		levels = levels[1:]
 	}
 	for _, level := range levels {
-		var raw strings.Builder
 		var spans []revealSourceSpan
-		for i, run := range runs {
-			italic := "_"
-			if level == escapeEntities {
-				italic = "*"
-			}
-			if i > 0 {
-				r, _ := utf8.DecodeLastRuneInString(runs[i-1].Text)
-				if unicode.IsLetter(r) || unicode.IsNumber(r) {
-					italic = "*"
-				}
-			}
-			if i+1 < len(runs) {
-				r, _ := utf8.DecodeRuneInString(runs[i+1].Text)
-				if unicode.IsLetter(r) || unicode.IsNumber(r) {
-					italic = "*"
-				}
-			}
-			start := raw.Len()
-			raw.WriteString(serializeRun(run, italic, level))
+		raw := serializeRunsObserved(runs, level, func(i, start, end int) {
+			run := runs[i]
 			if run.Source {
-				span := revealSourceSpan{start: start, end: raw.Len()}
+				span := revealSourceSpan{start: start, end: end}
 				for offset, r := range run.Text {
 					span.atoms = append(span.atoms, revealAtom{r, start + offset, start + offset + utf8.RuneLen(r)})
 				}
 				spans = append(spans, span)
 			}
-		}
-		value, boundaries := revealTransform(raw.String(), table, level != escapeReveal)
+		})
+		value, boundaries := revealTransform(raw, table, level != escapeReveal)
 		if level != escapeReveal {
 			var whitespaceBoundaries []int
 			value, whitespaceBoundaries = revealPreserveWhitespace(value, table)
@@ -483,7 +472,7 @@ func InlineCaretMap(source string, table bool) ([]int, error) {
 	var visible []rune
 	for _, run := range doc.Paragraphs[0].Runs {
 		switch {
-		case run.Math != "":
+		case run.Math != "" || run.Footnote != "":
 			visible = append(visible, '\ufffc')
 		case run.Break:
 			visible = append(visible, '\u2028')

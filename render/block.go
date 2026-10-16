@@ -14,7 +14,7 @@ const (
 	KindList                    // -, *, 1. (flat or nested)
 	KindTable                   // GFM pipe table
 	KindMathBlock               // $$ ... $$
-	KindDiagram                 // mermaid / d2 / goat fenced block
+	KindDiagram                 // mermaid / d2 / goat / flow / sequence fenced block
 	KindChart                   // ```chart YAML data
 	KindImage                   // standalone image paragraph
 	KindHR                      // ---
@@ -48,6 +48,11 @@ const (
 	DiagramMermaid DiagramKind = iota
 	DiagramD2
 	DiagramGoAT
+	// DiagramFlowchartJS is a ```flow fence (flowchart.js syntax) and
+	// DiagramSequenceJS a ```sequence fence (sequence.js syntax). Both render
+	// through mermaid; see render/flowchart.go and render/sequence.go.
+	DiagramFlowchartJS
+	DiagramSequenceJS
 )
 
 // Block is one top-level document block.
@@ -89,6 +94,11 @@ type Block struct {
 	ImageWidth  int // pixels, 0 = auto (from =WxH or <img width>)
 	ImageHeight int
 	ImageZoom   int // percent, 0 = none (from =NN%)
+
+	// KindQuote: Alert is the GitHub callout label ("NOTE", "TIP", ...) when
+	// the quote's first line is "[!LABEL]". Items then hold the callout body
+	// without the marker, and Source stays the untouched quote source.
+	Alert string
 }
 
 // HeadingText returns the plain text of a heading block (for the outline).

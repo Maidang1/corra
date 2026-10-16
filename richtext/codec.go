@@ -34,6 +34,10 @@ type Paragraph struct {
 	Checked bool   `json:"checked,omitempty"`
 	Ordinal int    `json:"ordinal,omitempty"`
 	Depth   int    `json:"depth,omitempty"`
+	// Alert is the GitHub callout label ("NOTE", "TIP", ...) of a quote whose
+	// first line is "[!LABEL]". The marker itself stays in Raw and Runs, so an
+	// untouched alert still round-trips byte for byte.
+	Alert string `json:"alert,omitempty"`
 	// List metadata preserves original indentation until the tree is changed.
 	ListIndent       string   `json:"listIndent,omitempty"`
 	ListID           string   `json:"listId,omitempty"`
@@ -58,6 +62,15 @@ type Paragraph struct {
 	CodeNewline   string `json:"codeNewline,omitempty"`
 	CodeClose     string `json:"codeClose,omitempty"`
 	CodeSeparator string `json:"codeSeparator,omitempty"`
+	// Definitions retain their inner kind. Group distinguishes repeated labels;
+	// marker and indent on every child recover the container after deletions.
+	FootnoteID           string `json:"footnoteId,omitempty"`
+	FootnoteGroup        string `json:"footnoteGroup,omitempty"`
+	FootnoteContinuation bool   `json:"footnoteContinuation,omitempty"`
+	FootnoteMarker       string `json:"footnoteMarker,omitempty"`
+	FootnoteIndent       string `json:"footnoteIndent,omitempty"`
+	FootnoteRaw          string `json:"footnoteRaw,omitempty"`
+	FootnoteBaseline     string `json:"footnoteBaseline,omitempty"`
 }
 
 type Cell struct {
@@ -81,6 +94,8 @@ type Run struct {
 	Sub       bool   `json:"sub,omitempty"`       // ~x~ or <sub>
 	// Math holds an inline math expression; Text keeps its exact $...$ source.
 	Math string `json:"math,omitempty"`
+	// Footnote is the reference label; Text retains its exact [^label] token.
+	Footnote string `json:"footnote,omitempty"`
 	// Break is a hard line break inside the paragraph (two trailing spaces, a
 	// trailing backslash, or <br>). It carries no text and renders as a soft
 	// visual line that keeps the paragraph's block identity.
@@ -120,7 +135,9 @@ func Parse(source string) Document {
 	src := []byte(source)
 	md := goldmark.New(goldmark.WithExtensions(extension.GFM, mdext.InlineExtender))
 	md.Parser().AddOptions(parser.WithBlockParsers(util.Prioritized(mathBlockParser{}, 50)))
+	md.Parser().AddOptions(parser.WithBlockParsers(util.Prioritized(footnoteBlockParser{}, 49)))
 	md.Parser().AddOptions(parser.WithInlineParsers(util.Prioritized(inlineMathParser{}, 50)))
+	md.Parser().AddOptions(parser.WithInlineParsers(util.Prioritized(footnoteInlineParser{}, 49)))
 	root := md.Parser().Parse(text.NewReader(src))
 	mdext.TransformHTML(root, src)
 	type block struct {
@@ -214,7 +231,7 @@ func Parse(source string) Document {
 			ps[0].ListIndent = raw[:len(raw)-len(strings.TrimLeft(raw, " \t"))]
 			ps[0].ListBaseline = listFingerprint(ps[0])
 		}
-		if len(ps) == 1 && ps[0].Kind != "code" {
+		if len(ps) == 1 && ps[0].Kind != "code" && ps[0].FootnoteID == "" {
 			// codeLines already set Raw per content line.
 			ps[0].Raw = raw
 		}
@@ -239,6 +256,17 @@ func identifyParagraphs(doc Document) Document {
 			p.NextID = fmt.Sprintf("p%d", i+1)
 		}
 		p.Baseline = fingerprint(*p)
+	}
+	for i := 0; i < len(doc.Paragraphs); {
+		p := &doc.Paragraphs[i]
+		end := i + 1
+		if p.FootnoteID != "" {
+			for end < len(doc.Paragraphs) && doc.Paragraphs[end].FootnoteGroup == p.FootnoteGroup {
+				end++
+			}
+			p.FootnoteBaseline = footnoteFingerprint(doc.Paragraphs[i:end])
+		}
+		i = end
 	}
 	return doc
 }
@@ -441,6 +469,13 @@ func fenceLanguage(n *ast.FencedCodeBlock, src []byte) string {
 // loneImage recognizes a paragraph holding nothing but one image.
 func loneImage(node ast.Node, raw string) *Paragraph {
 	if node.ChildCount() != 1 {
+		// goldmark rejects a destination holding a space unless it is wrapped
+		// in angle brackets, so a Typora size suffix arrives as a run of plain
+		// text. Read the figure off the source instead; Raw stays byte for byte
+		// what the document holds either way.
+		if _, _, _, ok := mdext.SizedImage(raw); ok {
+			return &Paragraph{Kind: "image", Raw: raw, Runs: []Run{{Text: raw}}}
+		}
 		return nil
 	}
 	if _, ok := node.FirstChild().(*ast.Image); !ok {
@@ -458,6 +493,11 @@ func convertBlock(node ast.Node, src []byte, raw string) []Paragraph {
 		if img := loneImage(node, raw); img != nil {
 			return []Paragraph{*img}
 		}
+		if mdext.IsTOC(raw) {
+			// The marker is one paragraph that renders the document's headings,
+			// so it keeps its own kind like math and diagrams do.
+			return []Paragraph{{Kind: "toc", Raw: raw, Runs: []Run{{Text: raw}}}}
+		}
 	case *ast.ListItem:
 		if n.FirstChild() == nil {
 			return []Paragraph{p}
@@ -466,7 +506,7 @@ func convertBlock(node ast.Node, src []byte, raw string) []Paragraph {
 	case *ast.Blockquote:
 		return quoteParagraphs(n, src, raw)
 	case *ast.FencedCodeBlock:
-		if lang := fenceLanguage(n, src); lang == "chart" || lang == "mermaid" || lang == "d2" || lang == "goat" {
+		if lang := fenceLanguage(n, src); lang == "chart" || lang == "mermaid" || lang == "d2" || lang == "goat" || lang == "flow" || lang == "sequence" {
 			// A diagram/chart fence renders as a figure (like math): the raw
 			// fence stays for click-to-edit and byte-exact round-trips.
 			return []Paragraph{{Kind: "diagram", Raw: raw, Runs: []Run{{Text: lang}}}}
@@ -476,6 +516,8 @@ func convertBlock(node ast.Node, src []byte, raw string) []Paragraph {
 		return sourceLines(raw)
 	case *mathBlock:
 		return []Paragraph{{Kind: "math", Raw: raw, Runs: []Run{{Text: strings.Join(strings.Fields(raw), " ")}}}}
+	case *footnoteBlock:
+		return footnoteParagraphs(n, raw)
 	case *ast.List:
 		return sourceLines(raw)
 	case *east.Table:
@@ -528,6 +570,10 @@ func collectRuns(parent ast.Node, src []byte, style Run, p *Paragraph) bool {
 	for node := parent.FirstChild(); node != nil; node = node.NextSibling() {
 		run := style
 		switch n := node.(type) {
+		case *footnoteInline:
+			flush()
+			run.Text, run.Footnote = n.source, n.label
+			appendRun(p, run)
 		case *inlineMath:
 			flush()
 			run.Text, run.Math = n.source, n.tex
@@ -577,9 +623,6 @@ func collectRuns(parent ast.Node, src []byte, style Run, p *Paragraph) bool {
 			appendRun(p, run)
 		case *ast.Link:
 			flush()
-			if n.Reference != nil && strings.HasPrefix(strings.TrimSpace(string(n.Reference.Value)), "^") {
-				return false // footnotes retain their editable source representation
-			}
 			run.Link = string(decodeText(n.Destination))
 			run.LinkTitle = string(decodeText(n.Title))
 			if !collectRuns(node, src, run, p) {
@@ -690,7 +733,7 @@ func appendRun(p *Paragraph, run Run) {
 	if run.Text == "" {
 		return
 	}
-	if len(p.Runs) != 0 {
+	if len(p.Runs) != 0 && run.Footnote == "" {
 		last := &p.Runs[len(p.Runs)-1]
 		other := *last
 		other.Text = run.Text
@@ -707,6 +750,7 @@ func fingerprint(p Paragraph) string {
 	p.ListIndent, p.ListID, p.ListBaseline = "", "", ""
 	p.ListContainer, p.ListMarker = "", ""
 	p.ListItem = ""
+	p.FootnoteRaw, p.FootnoteBaseline = "", ""
 	normalized := Paragraph{Runs: []Run{}}
 	for _, run := range p.Runs {
 		appendRun(&normalized, run)
@@ -733,7 +777,7 @@ func fingerprint(p Paragraph) string {
 
 // Serialize reuses original blocks when possible. Opaque blocks are protected
 // even if a native text system accidentally changes their visible label.
-func Serialize(doc Document) string {
+func serializeDocument(doc Document) string {
 	var out strings.Builder
 	lists := listSources(doc)
 	for i, p := range doc.Paragraphs {
@@ -995,8 +1039,14 @@ const (
 )
 
 func serializeRuns(runs []Run, level escapeLevel) string {
+	return serializeRunsObserved(runs, level, nil)
+}
+
+func serializeRunsObserved(runs []Run, level escapeLevel, emitted func(int, int, int)) string {
 	var text strings.Builder
-	for i, run := range runs {
+	for i := 0; i < len(runs); i++ {
+		run := runs[i]
+		start := text.Len()
 		italic := "_"
 		if level == escapeEntities {
 			italic = "*"
@@ -1013,10 +1063,36 @@ func serializeRuns(runs []Run, level escapeLevel) string {
 				italic = "*"
 			}
 		}
-		text.WriteString(serializeRun(run, italic, level))
+		// A reference attachment splits a native style range. Emit its shared
+		// delimiters once so adjacent emphasis delimiters cannot become text.
+		end, hasFootnote := i+1, run.Footnote != ""
+		style := footnoteRunStyle(run)
+		if !run.Source && !run.Code && !run.Break && run.Math == "" {
+			for end < len(runs) && !runs[end].Source && !runs[end].Code && !runs[end].Break && runs[end].Math == "" && footnoteRunStyle(runs[end]) == style {
+				hasFootnote = hasFootnote || runs[end].Footnote != ""
+				end++
+			}
+		}
+		if hasFootnote && end > i+1 {
+			var value strings.Builder
+			for _, part := range runs[i:end] {
+				part.Bold, part.Italic, part.Strike, part.Underline, part.Highlight, part.Sup, part.Sub = false, false, false, false, false, false, false
+				part.Link, part.LinkTitle = "", ""
+				value.WriteString(serializeRun(part, italic, level))
+			}
+			text.WriteString(formatInlineRun(style, value.String(), italic))
+			i = end - 1
+		} else {
+			text.WriteString(serializeRun(run, italic, level))
+			if emitted != nil {
+				emitted(i, start, text.Len())
+			}
+		}
 	}
 	return text.String()
 }
+
+func footnoteRunStyle(run Run) Run { run.Text, run.Footnote = "", ""; return run }
 
 func blockPrefix(p Paragraph, value string) string {
 	switch p.Kind {
@@ -1166,7 +1242,10 @@ func serializeRun(run Run, italic string, level escapeLevel) string {
 		return serializeRun(plain, italic, level)
 	}
 	value := escapeText(run.Text, level)
-	if (level == escapeEntities || level == escapeReveal) && !run.Code {
+	if run.Footnote != "" {
+		value = run.Text
+	}
+	if (level == escapeEntities || level == escapeReveal) && !run.Code && run.Footnote == "" {
 		var encoded strings.Builder
 		for _, r := range run.Text {
 			if level != escapeReveal && unicode.IsSpace(r) {
@@ -1194,6 +1273,10 @@ func serializeRun(run Run, italic string, level escapeLevel) string {
 		}
 		value = delim + content + delim
 	}
+	return formatInlineRun(run, value, italic)
+}
+
+func formatInlineRun(run Run, value, italic string) string {
 	// Delimiters cannot enclose boundary whitespace in CommonMark.
 	left := len(value) - len(strings.TrimLeftFunc(value, unicode.IsSpace))
 	right := len(strings.TrimRightFunc(value, unicode.IsSpace))

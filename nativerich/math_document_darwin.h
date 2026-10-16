@@ -154,7 +154,7 @@
             // Replace the attachment attribute, never mutate a shared undo
             // snapshot's image or rebuild the editor's text and selection.
             NSTextAttachment *attachment=[NSTextAttachment new]; attachment.image=image;
-            attachment.bounds=display ? [self imageBounds:image] : NSMakeRect(0,-image.size.height*0.22,image.size.width,image.size.height);
+            attachment.bounds=display ? [self imageBounds:image spec:nil] : NSMakeRect(0,-image.size.height*0.22,image.size.width,image.size.height);
             [_text.textStorage addAttribute:NSAttachmentAttributeName value:attachment range:range];
         }
         [_text.textStorage addAttributes:@{CRMathRendered:result,CRMathNumber:result[@"number"] ?: @""} range:range];
