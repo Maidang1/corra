@@ -39,6 +39,10 @@ int cr_test_screenshot(uintptr_t editor, const char *path);
 int cr_test_layout(uintptr_t editor);
 char *cr_test_text(uintptr_t editor);
 char *cr_test_code_controls(uintptr_t editor);
+char *cr_test_footnotes(uintptr_t editor);
+char *cr_test_images(uintptr_t editor);
+char *cr_test_toc(uintptr_t editor);
+char *cr_test_clipboard_text(void);
 
 char *cr_markdown_json(char *json);
 char *cr_parse_markdown(char *source);

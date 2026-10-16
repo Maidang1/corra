@@ -498,11 +498,11 @@ func TestDeletingParagraphRetainsCRLFBoundaryAfterJSON(t *testing.T) {
 	}
 }
 
-func TestFootnotesAreProtectedIncludingDefinitionContinuations(t *testing.T) {
+func TestFootnotesKeepEditableDefinitionContinuations(t *testing.T) {
 	doc := Parse("text[^1]\n\n[^1]: first\n\n    second\n\nafter")
-	for _, p := range doc.Paragraphs[:len(doc.Paragraphs)-1] {
-		if p.Kind != "source" {
-			t.Fatalf("footnote not kept as source: %+v", p)
+	for _, p := range doc.Paragraphs[1:len(doc.Paragraphs)-1] {
+		if p.Kind != "body" || p.FootnoteID != "1" {
+			t.Fatalf("footnote not kept editable: %+v", p)
 		}
 	}
 }
@@ -723,6 +723,33 @@ func TestTyporaBlockShapes(t *testing.T) {
 		doc.Paragraphs[c.index].Kind = c.kind
 		if got := Serialize(doc); got != c.want {
 			t.Errorf("%q kind change: %q != %q", c.source, got, c.want)
+		}
+	}
+}
+
+// Typora hangs the size off the destination with a space, which goldmark reads
+// as ordinary text. The paragraph is still a figure, and the suffix is part of
+// the bytes an untouched document has to keep.
+func TestSizedImageIsAFigureThatRoundTrips(t *testing.T) {
+	source := "![alt](photo.png =300x200)\n\n![alt](photo.png =50%)\n\n![a](<b c.png =10x>)\n"
+	doc := Parse(source)
+	want := []string{"image", "image", "image"}
+	if len(doc.Paragraphs) != len(want) {
+		t.Fatalf("got %d paragraphs: %+v", len(doc.Paragraphs), doc)
+	}
+	for i, kind := range want {
+		if doc.Paragraphs[i].Kind != kind {
+			t.Errorf("paragraph %d = %+v, want %s", i, doc.Paragraphs[i], kind)
+		}
+	}
+	if got := Serialize(doc); got != source {
+		t.Errorf("serialize: %q != %q", got, source)
+	}
+	// A "=" that is not a size stays text, and an image inside a sentence is
+	// still not a figure of its own.
+	for _, text := range []string{"![a](p.png =tall)", "![a](p.png =1x2x3)", "![a](p.png =)", "see ![a](p.png =10x10) now"} {
+		if doc := Parse(text); doc.Paragraphs[0].Kind == "image" {
+			t.Errorf("%q became a figure: %+v", text, doc.Paragraphs[0])
 		}
 	}
 }

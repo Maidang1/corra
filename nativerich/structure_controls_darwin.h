@@ -1,10 +1,14 @@
 // Included in CRTextView's implementation so context actions and keys share
 // the same transaction paths as toolbar commands.
 - (BOOL)handleStructureKey:(NSEvent *)event {
-    if (!self.editable || self.hasMarkedText) return NO;
+    if (self.hasMarkedText) return NO;
     NSEventModifierFlags modifiers=event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
     modifiers &= ~(NSEventModifierFlagCapsLock | NSEventModifierFlagNumericPad | NSEventModifierFlagFunction);
     NSString *key=event.charactersIgnoringModifiers;
+    if (modifiers==(NSEventModifierFlagCommand|NSEventModifierFlagOption) && ([@[@"\uf700",@"\uf701"] containsObject:key]) && [self.owner footnoteLabelAt:self.selectedRange.location]) {
+        [self.owner navigateFootnote:[key isEqual:@"\uf701"] atLocation:self.selectedRange.location]; return YES;
+    }
+    if (!self.editable) return NO;
     BOOL table=CRCellAt(self.owner,self.selectedRange.location)!=nil;
     if (modifiers==NSEventModifierFlagOption && [key isEqual:@"\r"] && CRList(CRParagraphAt(self.owner,self.selectedRange.location))) {
         [self.owner continueListParagraph]; return YES;
@@ -41,6 +45,12 @@
 - (void)moveUp:(id)sender { [super moveUp:sender]; if (!self.selectedRange.length) [self.owner revealInlineAt:self.selectedRange.location]; }
 - (void)moveDown:(id)sender { [super moveDown:sender]; if (!self.selectedRange.length) [self.owner revealInlineAt:self.selectedRange.location]; }
 - (void)structuralAction:(NSMenuItem *)item { [self.owner format:item.representedObject]; }
+- (void)footnoteAction:(NSMenuItem *)item {
+    NSDictionary *target=item.representedObject;
+    NSUInteger location=[target[@"location"] unsignedIntegerValue];
+    if (self.hasMarkedText || [target[@"revision"] unsignedIntegerValue]!=self.owner.documentRevision || ![[self.owner footnoteLabelAt:location] isEqual:target[@"label"]]) return;
+    [self.owner navigateFootnote:[target[@"command"] isEqual:@"footnote:definition"] atLocation:location];
+}
 - (void)codeLanguageAction:(NSMenuItem *)item {
     NSDictionary *target=item.representedObject;
     if (![target isKindOfClass:NSDictionary.class] || [target[@"revision"] unsignedIntegerValue]!=self.owner.documentRevision) return;
@@ -70,6 +80,42 @@
         if (response==NSAlertFirstButtonReturn && self.window && self.owner.documentRevision==revision && [self.string isEqual:snapshot] && !self.hasMarkedText) [self.owner setCodeLanguage:language atLocation:location];
     }];
 }
+- (void)chooseImageSize:(NSMenuItem *)sender {
+    NSDictionary *target=sender.representedObject;
+    NSUInteger location=[target[@"location"] unsignedIntegerValue];
+    if (!self.editable || self.hasMarkedText || location>self.string.length || [target[@"revision"] unsignedIntegerValue]!=self.owner.documentRevision) return;
+    if (![self.owner imageFigureRanges].count) return;
+    NSAlert *alert=[NSAlert new];
+    alert.messageText=@"图片大小";
+    alert.informativeText=@"按像素输入宽高，留空表示自动；也可用百分比，例如 50%。";
+    [alert addButtonWithTitle:@"应用"]; [alert addButtonWithTitle:@"取消"];
+    NSTextField *width=[[NSTextField alloc] initWithFrame:NSMakeRect(0,32,130,24)];
+    NSTextField *height=[[NSTextField alloc] initWithFrame:NSMakeRect(0,0,130,24)];
+    width.placeholderString=@"宽度（像素）"; height.placeholderString=@"高度（像素）";
+    NSView *box=[[NSView alloc] initWithFrame:NSMakeRect(0,0,130,60)];
+    [box addSubview:width]; [box addSubview:height];
+    alert.accessoryView=box; alert.window.initialFirstResponder=width;
+    NSString *snapshot=[self.string copy];
+    NSUInteger revision=self.owner.documentRevision;
+    [alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse response) {
+        if (response!=NSAlertFirstButtonReturn || !self.window || self.owner.documentRevision!=revision || ![self.string isEqual:snapshot] || self.hasMarkedText) return;
+        NSString *w=[width.stringValue stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        NSString *h=[height.stringValue stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        NSString *spec=@"";
+        if (w.length && h.length) spec=[NSString stringWithFormat:@"%@x%@",w,h];
+        else if (w.length) spec=[w stringByAppendingString:@"x"];
+        else if (h.length) spec=[@"x" stringByAppendingString:h];
+        [self.owner setImageSize:spec atLocation:location];
+    }];
+}
+- (void)revealTOCMarker:(NSMenuItem *)item {
+    NSDictionary *target=item.representedObject;
+    if (self.hasMarkedText || ![target isKindOfClass:NSDictionary.class]) return;
+    if ([target[@"revision"] unsignedIntegerValue]!=self.owner.documentRevision) return;
+    NSUInteger location=[target[@"location"] unsignedIntegerValue];
+    if (!CRKind(CRParagraphAt(self.owner,location),@"toc")) return;
+    [self.owner revealSourceAt:location];
+}
 - (NSMenu *)menuForEvent:(NSEvent *)event {
     NSMenu *menu=[[super menuForEvent:event] copy] ?: [NSMenu new];
     NSPoint point=[self convertPoint:event.locationInWindow fromView:nil];
@@ -77,6 +123,41 @@
     if (!NSLocationInRange(location,self.selectedRange)) self.selectedRange=NSMakeRange(location,0);
     BOOL table=CRCellAt(self.owner,location)!=nil;
     BOOL list=CRList(CRParagraphAt(self.owner,location));
+    if ([self.owner imageFigureAt:location]) {
+        [menu addItem:NSMenuItem.separatorItem];
+        NSMenuItem *title=[[NSMenuItem alloc] initWithTitle:@"图片大小" action:NULL keyEquivalent:@""];
+        [menu addItem:title];
+        for (NSArray *entry in @[
+            @[@"原始大小", @""], @[@"25%", @"25%"], @[@"50%", @"50%"], @[@"75%", @"75%"], @[@"100%", @"100%"],
+            @[@"400 像素宽", @"400x"], @[@"600 像素宽", @"600x"], @[@"800 像素宽", @"800x"],
+        ]) {
+            NSMenuItem *item=[[NSMenuItem alloc] initWithTitle:entry[0] action:@selector(structuralAction:) keyEquivalent:@""];
+            item.target=self; item.representedObject=[@"image-size:" stringByAppendingString:entry[1]];
+            if ([entry[1] isEqual:[self.owner imageSpecAt:location]]) item.state=NSControlStateValueOn;
+            [menu addItem:item];
+        }
+        [menu addItem:NSMenuItem.separatorItem];
+        NSMenuItem *custom=[[NSMenuItem alloc] initWithTitle:@"自定义大小…" action:@selector(chooseImageSize:) keyEquivalent:@""];
+        custom.target=self; custom.representedObject=@{@"location":@(location),@"revision":@(self.owner.documentRevision)};
+        [menu addItem:custom];
+        return menu;
+    }
+    if (CRKind(CRParagraphAt(self.owner,location),@"toc")) {
+        [menu addItem:NSMenuItem.separatorItem];
+        NSMenuItem *marker=[[NSMenuItem alloc] initWithTitle:@"编辑目录标记" action:@selector(revealTOCMarker:) keyEquivalent:@""];
+        marker.target=self; marker.representedObject=@{@"command":@"toc:reveal",@"location":@(location),@"revision":@(self.owner.documentRevision)};
+        [menu addItem:marker];
+        return menu;
+    }
+    NSString *footnote=[self.owner footnoteLabelAt:location];
+    if (footnote.length) {
+        [menu addItem:NSMenuItem.separatorItem];
+        for (NSArray *entry in @[@[@"跳到脚注定义",@"footnote:definition"],@[@"返回脚注引用",@"footnote:reference"]]) {
+            NSMenuItem *item=[[NSMenuItem alloc] initWithTitle:entry[0] action:@selector(footnoteAction:) keyEquivalent:@""];
+            item.target=self; item.representedObject=@{@"command":entry[1],@"location":@(location),@"revision":@(self.owner.documentRevision),@"label":footnote};
+            [menu addItem:item];
+        }
+    }
     if (CRKind(CRParagraphAt(self.owner,location),@"code")) {
         [menu addItem:NSMenuItem.separatorItem];
         NSMenuItem *language=[[NSMenuItem alloc] initWithTitle:@"代码语言…" action:@selector(chooseCodeLanguage:) keyEquivalent:@""];
@@ -105,6 +186,7 @@
     return menu;
 }
 - (BOOL)validateMenuItem:(NSMenuItem *)item {
-    if (item.action==@selector(structuralAction:) || item.action==@selector(chooseCodeLanguage:) || item.action==@selector(codeLanguageAction:)) return self.editable && !self.hasMarkedText;
+    if (item.action==@selector(footnoteAction:)) return !self.hasMarkedText;
+    if (item.action==@selector(structuralAction:) || item.action==@selector(chooseCodeLanguage:) || item.action==@selector(codeLanguageAction:) || item.action==@selector(revealTOCMarker:)) return self.editable && !self.hasMarkedText;
     return [super validateMenuItem:item];
 }

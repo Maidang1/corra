@@ -105,6 +105,10 @@ func (v *View) headingBlock(c *ui.Context, i int) {
 func (v *View) quoteBlock(c *ui.Context, i int) {
 	b := &v.App.Doc.Blocks[i]
 	t := c.Theme()
+	if b.Alert != "" {
+		v.alertBlock(c, b, t)
+		return
+	}
 	// A rounded bar at the text edge, as the native editor draws quotes.
 	ui.Row(c).FillWidth().Gap(10).Padding(2, 0).Children(func() {
 		ui.Box(c).Width(3).FillHeight().Background(t.Scrollbar).Radius(1.5)
@@ -114,6 +118,45 @@ func (v *View) quoteBlock(c *ui.Context, i int) {
 			}
 		})
 	})
+}
+
+// alertBlock draws a GitHub-style callout: a tinted card, an accent bar and the
+// label as its title. The marker itself was stripped by the parser.
+func (v *View) alertBlock(c *ui.Context, b *render.Block, t *ui.Theme) {
+	accent, tint := alertColors(b.Alert, t.Dark)
+	ui.Row(c).FillWidth().Gap(10).Padding(4, 0).Children(func() {
+		ui.Box(c).Width(3).FillHeight().Background(accent).Radius(1.5)
+		ui.Column(c).FillWidth().Gap(4).Padding(8, 12).Radius(6).Background(tint).Children(func() {
+			ui.Text(c, render.AlertTitle(b.Alert)).FontSize(t.FontSize - 2.5).
+				TextColor(accent).Bold()
+			for j := range b.Items {
+				v.inlineFlow(c, b.Items[j].Source, t, t.FontSize)
+			}
+		})
+	})
+}
+
+// alertColors picks the accent and tint of a callout kind, matching the CSS the
+// HTML export writes.
+func alertColors(label string, dark bool) (accent, tint ui.Color) {
+	type pair struct{ accent, light, dark string }
+	palette := map[string]pair{
+		"NOTE":      {"#54aeff", "#ddf4ff", "#10233a"},
+		"TIP":       {"#4ac26b", "#dafbe1", "#122b1c"},
+		"IMPORTANT": {"#b062f5", "#fbefff", "#241a38"},
+		"WARNING":   {"#d4a72c", "#fff8c5", "#2e2612"},
+		"CAUTION":   {"#ff8182", "#ffebe9", "#33191a"},
+	}
+	p, ok := palette[label]
+	if !ok {
+		p = palette["NOTE"]
+	}
+	accent = ui.Hex(p.accent)
+	tint = ui.Hex(p.light)
+	if dark {
+		tint = ui.Hex(p.dark)
+	}
+	return accent, tint
 }
 
 func (v *View) listBlock(c *ui.Context, i int) {
@@ -284,7 +327,7 @@ func (v *View) mathBlock(c *ui.Context, i int) {
 func (v *View) diagramBlock(c *ui.Context, i int) {
 	b := &v.App.Doc.Blocks[i]
 	t := c.Theme()
-	kindName := map[render.DiagramKind]string{render.DiagramMermaid: "mermaid", render.DiagramD2: "d2", render.DiagramGoAT: "goat"}[b.Diagram]
+	kindName := map[render.DiagramKind]string{render.DiagramMermaid: "mermaid", render.DiagramD2: "d2", render.DiagramGoAT: "goat", render.DiagramFlowchartJS: "flow", render.DiagramSequenceJS: "sequence"}[b.Diagram]
 	key := app.ImageKey("diag-"+kindName, b, v.App.Zoom, t.Dark)
 	img, ok := v.App.BlockImage(key, func() (image.Image, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), diagramTimeout)

@@ -196,6 +196,18 @@ func TestParseFootnote(t *testing.T) {
 	}
 }
 
+func TestParseEmptyAndStructuredFootnote(t *testing.T) {
+	for _, fixture := range []struct{ source, want string }{
+		{"text[^1]\n\n[^1]: ", ""},
+		{"text[^1]\n\n[^1]: intro\n\n    - first **item**\n    - second", "intro first item second"},
+	} {
+		doc := Parse(fixture.source)
+		if len(doc.Footnotes) != 1 || doc.Footnotes[0] != fixture.want {
+			t.Errorf("footnote content=%v want=%q", doc.Footnotes, fixture.want)
+		}
+	}
+}
+
 func TestHighlight(t *testing.T) {
 	spans := Highlight("package main\nfunc main() {}", "go")
 	joined := ""
@@ -376,6 +388,42 @@ func TestImageSizeSuffix(t *testing.T) {
 	}
 }
 
+// Typora writes the suffix straight after the destination, with a space and no
+// angle brackets. goldmark reads that as ordinary text, so the figure has to be
+// recovered from the source the paragraph already holds.
+func TestImageSizeSuffixBare(t *testing.T) {
+	for _, tc := range []struct {
+		source              string
+		url                 string
+		width, height, zoom int
+	}{
+		{"![a](img.png =320x200)", "img.png", 320, 200, 0},
+		{"![a](img.png =320x)", "img.png", 320, 0, 0},
+		{"![a](img.png =x200)", "img.png", 0, 200, 0},
+		{"![a](img.png =50%)", "img.png", 0, 0, 50},
+		{"![a](img.png \"t\" =100x100)", "img.png", 100, 100, 0},
+		{"![a](<img.png =320x200>)", "img.png", 320, 200, 0},
+	} {
+		doc := Parse(tc.source + "\n")
+		if len(doc.Blocks) != 1 || doc.Blocks[0].Kind != KindImage {
+			t.Fatalf("%q blocks: %+v", tc.source, doc.Blocks)
+		}
+		b := doc.Blocks[0]
+		if b.ImageURL != tc.url || b.ImageWidth != tc.width || b.ImageHeight != tc.height || b.ImageZoom != tc.zoom {
+			t.Errorf("%q size: %+v", tc.source, b)
+		}
+		if b.Source != tc.source {
+			t.Errorf("%q source: %q", tc.source, b.Source)
+		}
+	}
+	// A "=" that is not a size leaves the paragraph as text.
+	for _, source := range []string{"![a](img.png =tall)", "![a](img.png =1x2x3)", "![a](img.png =)", "![a](img.png =320x200) tail"} {
+		if doc := Parse(source + "\n"); doc.Blocks[0].Kind != KindParagraph {
+			t.Errorf("%q kind: %+v", source, doc.Blocks[0])
+		}
+	}
+}
+
 func TestImgTagBlock(t *testing.T) {
 	doc := Parse(`<img src="pic.png" width="240" alt="p">`)
 	if len(doc.Blocks) != 1 || doc.Blocks[0].Kind != KindImage || doc.Blocks[0].ImageWidth != 240 {
@@ -442,5 +490,32 @@ func TestExportPDFWithImageAndBreaks(t *testing.T) {
 	})
 	if err != nil || len(out) < 1000 {
 		t.Fatalf("pdf: %v %d", err, len(out))
+	}
+}
+
+// A size suffix the bare form carries is part of the figure, not of its URL, so
+// the export has to move it into the width and height of the <img>.
+func TestExportHTMLImageSize(t *testing.T) {
+	// mainBody keeps the opening <main> tag, so it is part of every expectation.
+	for _, tc := range []struct{ source, want string }{
+		{"![a](p.png =320x200)\n", "<main class=\"markdown-body\">\n<p><img src=\"p.png\" alt=\"a\" width=\"320\" height=\"200\"></p>"},
+		{"![a](p.png =400x)\n", "<main class=\"markdown-body\">\n<p><img src=\"p.png\" alt=\"a\" width=\"400\"></p>"},
+		{"![a](p.png =x200)\n", "<main class=\"markdown-body\">\n<p><img src=\"p.png\" alt=\"a\" height=\"200\"></p>"},
+		{"![a](p.png =50%)\n", "<main class=\"markdown-body\">\n<p><img src=\"p.png\" alt=\"a\" style=\"width:50%\"></p>"},
+		{"![a](p.png \"t\" =10x10)\n", "<main class=\"markdown-body\">\n<p><img src=\"p.png\" alt=\"a\" title=\"t\" width=\"10\" height=\"10\"></p>"},
+		{"![a](<p.png =320x200>)\n", "<main class=\"markdown-body\">\n<p><img src=\"p.png\" alt=\"a\" width=\"320\" height=\"200\"></p>"},
+		{"| h |\n|---|\n| ![a](p.png =30x30) |\n", "<main class=\"markdown-body\">\n<table>\n<thead>\n<tr>\n<th>h</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><img src=\"p.png\" alt=\"a\" width=\"30\" height=\"30\"></td>\n</tr>\n</tbody>\n</table>"},
+		// A "=" that is not a size is ordinary text, and so is an image in the
+		// middle of a sentence.
+		{"![a](p.png =tall)\n", "<main class=\"markdown-body\">\n<p>![a](p.png =tall)</p>"},
+		{"see ![a](p.png =10x10)\n", "<main class=\"markdown-body\">\n<p>see ![a](p.png =10x10)</p>"},
+	} {
+		out, err := ExportHTML(tc.source, "T", false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := mainBody(string(out)); got != tc.want {
+			t.Errorf("%q =>\n%s\nwant:\n%s", tc.source, got, tc.want)
+		}
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"github.com/egoist/mygo"
 
 	"github.com/Maidang1/corra/app"
+	"github.com/Maidang1/corra/views"
 )
 
 // buildMenu builds the application menu.
@@ -140,8 +141,10 @@ func buildMenu() *mygo.Menu {
 			item("编号列表", "CmdOrCtrl+Alt+O", func() { view.FormatAction("1. ", "") }),
 			item("任务列表", "CmdOrCtrl+Alt+L", func() { view.FormatAction("- [ ] ", "") }),
 			item("引用", "CmdOrCtrl+Alt+Q", func() { view.FormatAction("> ", "") }),
+			alertMenu(view),
 			mygo.Separator(),
 			item("插入链接…", "CmdOrCtrl+K", func() { view.InsertLinkAction() }),
+			imageSizeMenu(view),
 			item("插入代码块", "CmdOrCtrl+Alt+C", func() { view.InsertMarkdown("\n```\n\n```\n") }),
 			item("插入数学公式块", "CmdOrCtrl+Alt+M", func() { view.InsertMarkdown("\n$$\n\n$$\n") }),
 			item("插入水平分割线", "CmdOrCtrl+Shift+_", func() { view.InsertMarkdown("\n---\n") }),
@@ -217,4 +220,42 @@ func zoomBy(d float32) {
 	}
 	view.App.Zoom = z
 	editorApp.InvalidateUI()
+}
+
+// alertMenu lists the GitHub callout kinds. Each one turns the caret's
+// paragraph into "> [!LABEL]" and every renderer paints it as a callout.
+func alertMenu(view *views.View) *mygo.MenuItem {
+	kind := func(label string) *mygo.MenuItem {
+		return &mygo.MenuItem{Label: label, Click: func(_ *mygo.MenuItem, _ *mygo.Window) {
+			view.InsertAlert(label)
+		}}
+	}
+	return &mygo.MenuItem{
+		Label: "提示块",
+		Submenu: []*mygo.MenuItem{
+			kind("Note"), kind("Tip"), kind("Important"), kind("Warning"), kind("Caution"),
+			mygo.Separator(),
+			{Label: "移除提示块", Click: func(_ *mygo.MenuItem, _ *mygo.Window) { view.InsertAlert("") }},
+		},
+	}
+}
+
+// imageSizeMenu resizes the figure under the caret. The sizes are the suffixes
+// Typora writes onto the destination, so the document keeps the reader's choice
+// and every renderer draws it the same way.
+func imageSizeMenu(view *views.View) *mygo.MenuItem {
+	size := func(label, spec string) *mygo.MenuItem {
+		return &mygo.MenuItem{Label: label, Click: func(_ *mygo.MenuItem, _ *mygo.Window) {
+			view.InsertImageSize(spec)
+		}}
+	}
+	return &mygo.MenuItem{
+		Label: "图片大小",
+		Submenu: []*mygo.MenuItem{
+			size("原始大小", ""),
+			size("25%", "25%"), size("50%", "50%"), size("75%", "75%"), size("100%", "100%"),
+			mygo.Separator(),
+			size("400 像素宽", "400x"), size("600 像素宽", "600x"), size("800 像素宽", "800x"),
+		},
+	}
 }

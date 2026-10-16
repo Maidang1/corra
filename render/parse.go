@@ -88,8 +88,10 @@ func ParseOptions(src string, smartPunct bool) *Document {
 				if d, ok := def.(*east.Footnote); ok {
 					var buf bytes.Buffer
 					for c := d.FirstChild(); c != nil; c = c.NextSibling() {
-						buf.WriteString(plainTextBody(blockSource(c, []byte(body)), smartPunct))
-						buf.WriteByte(' ')
+						if content := footnoteBlockText(c, []byte(body), smartPunct); content != "" {
+							buf.WriteString(content)
+							buf.WriteByte(' ')
+						}
 					}
 					doc.Footnotes = append(doc.Footnotes, strings.TrimSpace(buf.String()))
 				}
@@ -108,6 +110,23 @@ func ParseOptions(src string, smartPunct bool) *Document {
 		}
 	}
 	return doc
+}
+
+func footnoteBlockText(node gast.Node, src []byte, smartPunct bool) string {
+	// Goldmark adds an inline backlink directly to an empty definition.
+	if node.Type() != gast.TypeBlock {
+		return ""
+	}
+	if node.Lines().Len() != 0 {
+		return strings.TrimSpace(plainTextBody(blockSource(node, src), smartPunct))
+	}
+	var parts []string
+	for child := node.FirstChild(); child != nil; child = child.NextSibling() {
+		if content := footnoteBlockText(child, src, smartPunct); content != "" {
+			parts = append(parts, content)
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 // nodeRange returns the byte range a node spans in the source.
@@ -130,6 +149,42 @@ func blockSource(n gast.Node, src []byte) string {
 	return buf.String()
 }
 
+// containerSource spans a container block (a blockquote) from the first line it
+// contains to the last, which is the source the block owns. A container has no
+// lines of its own, so blockSource would return nothing for it.
+func containerSource(n gast.Node, src []byte) string {
+	start, end := -1, -1
+	var walk func(gast.Node)
+	walk = func(node gast.Node) {
+		// Lines() panics on inline nodes, and they carry no source lines.
+		if node.Type() != gast.TypeInline {
+			lines := node.Lines()
+			for i := 0; i < lines.Len(); i++ {
+				seg := lines.At(i)
+				if start < 0 || seg.Start < start {
+					start = seg.Start
+				}
+				if seg.Stop > end {
+					end = seg.Stop
+				}
+			}
+		}
+		for c := node.FirstChild(); c != nil; c = c.NextSibling() {
+			walk(c)
+		}
+	}
+	walk(n)
+	if start < 0 || end < start || end > len(src) {
+		return ""
+	}
+	// The block's own position is where its first marker line starts, which the
+	// walk skips because a container owns no lines of its own.
+	if pos := n.Pos(); pos >= 0 && pos < start {
+		start = pos
+	}
+	return string(src[start:end])
+}
+
 func buildBlock(n gast.Node, src []byte) (Block, bool) {
 	b := Block{Source: blockSource(n, src)}
 	switch t := n.(type) {
@@ -143,6 +198,12 @@ func buildBlock(n gast.Node, src []byte) (Block, bool) {
 			b.Kind = KindDiagram
 			b.DiagramS = blockSource(t, src)
 			b.Diagram = map[string]DiagramKind{"mermaid": DiagramMermaid, "d2": DiagramD2, "goat": DiagramGoAT}[info]
+		case "flow", "sequence":
+			// Typora's flowchart.js / sequence.js fences. Only these two
+			// spellings are recognised: an alias would be rewritten on re-edit.
+			b.Kind = KindDiagram
+			b.DiagramS = blockSource(t, src)
+			b.Diagram = map[string]DiagramKind{"flow": DiagramFlowchartJS, "sequence": DiagramSequenceJS}[info]
 		case "chart":
 			b.Kind = KindChart
 			b.ChartS = blockSource(t, src)
@@ -154,12 +215,27 @@ func buildBlock(n gast.Node, src []byte) (Block, bool) {
 		b.Kind = KindCodeBlock
 	case *gast.Blockquote:
 		b.Kind = KindQuote
+		// A blockquote is a container: it owns no lines of its own, so its
+		// source has to be spanned from its first to its last child.
+		b.Source = containerSource(n, src)
 		for c := n.FirstChild(); c != nil; c = c.NextSibling() {
 			if p, ok := c.(*gast.Paragraph); ok {
-				b.Items = append(b.Items, ListItem{Source: strings.TrimSpace(inlineSource(p, src)), CheckboxOffset: -1})
+				item := ListItem{Source: strings.TrimSpace(inlineSource(p, src)), CheckboxOffset: -1}
+				if len(b.Items) == 0 && b.Alert == "" {
+					// A "[!NOTE]" first line makes the whole quote a callout;
+					// the marker is dropped so it is not printed twice.
+					if label, body := mdext.AlertLabelPrefix(item.Source); label != "" {
+						b.Alert = label
+						item.Source = strings.TrimSpace(body)
+					}
+				}
+				b.Items = append(b.Items, item)
 			} else if list, ok := c.(*gast.List); ok {
 				appendListItems(list, src, 0, &b.Items)
 			}
+		}
+		if b.Alert != "" && len(b.Items) > 0 && b.Items[0].Source == "" {
+			b.Items = b.Items[1:]
 		}
 	case *gast.List:
 		b.Kind = KindList
@@ -218,6 +294,15 @@ func buildBlock(n gast.Node, src []byte) (Block, bool) {
 		}
 		if mdext.IsTOC(b.Source) {
 			b.Kind = KindTOC
+			break
+		}
+		if alt, url, spec, ok := mdext.SizedImage(b.Source); ok {
+			// The size suffix keeps goldmark from seeing a link at all, so the
+			// figure is rebuilt from the source the paragraph already holds.
+			b.Kind = KindImage
+			b.ImageAlt = alt
+			b.ImageURL = url
+			applyImageSize(&b, spec)
 			break
 		}
 		b.Kind = KindParagraph
@@ -464,8 +549,14 @@ func parseImageSize(b *Block) {
 	if i < 0 || i+1 >= len(url) || url[i+1] != '=' {
 		return
 	}
-	spec := url[i+2:]
 	b.ImageURL = strings.TrimRight(url[:i], " ")
+	applyImageSize(b, url[i+2:])
+}
+
+// applyImageSize reads a size suffix ("300x200", "50%", "400x", "x200") into
+// the block. A part the suffix leaves out is zero, which every caller reads as
+// "keep the natural size" or "keep the aspect ratio".
+func applyImageSize(b *Block, spec string) {
 	if strings.HasSuffix(spec, "%") {
 		if v, err := strconv.Atoi(strings.TrimSuffix(spec, "%")); err == nil && v > 0 && v <= 400 {
 			b.ImageZoom = v

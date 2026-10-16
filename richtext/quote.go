@@ -51,7 +51,7 @@ func quoteParagraphs(quote *ast.Blockquote, src []byte, raw string) []Paragraph 
 		}
 		out = append(out, p)
 	}
-	return out
+	return applyAlerts(out)
 }
 
 func splitQuoteSeparator(source string) (string, string) {

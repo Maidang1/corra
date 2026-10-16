@@ -34,6 +34,7 @@ func ExportHTMLOpts(ctx context.Context, src, title string, smartPunct bool, mat
 		ctx = context.Background()
 	}
 	mathRenderer := &mathHTMLRenderer{results: make(map[gast.Node]MathResult)}
+	alertLabels := map[gast.Node]string{}
 	exts := []goldmark.Extender{
 		extension.GFM,
 		extension.Footnote,
@@ -51,6 +52,7 @@ func ExportHTMLOpts(ctx context.Context, src, title string, smartPunct bool, mat
 			ghtml.WithUnsafe(), // the document is the user's own
 			renderer.WithNodeRenderers(
 				util.Prioritized(&mdHTMLRenderer{}, 500),
+				util.Prioritized(&blockquoteHTMLRenderer{labels: alertLabels}, 500),
 				util.Prioritized(mathRenderer, 500),
 			),
 		),
@@ -63,6 +65,8 @@ func ExportHTMLOpts(ctx context.Context, src, title string, smartPunct bool, mat
 	var buf bytes.Buffer
 	parsed := md.Parser().Parse(text.NewReader([]byte(body)))
 	mdext.TransformHTML(parsed, []byte(body))
+	mdext.TransformSizedImages(parsed, []byte(body))
+	transformAlerts(parsed, []byte(body), alertLabels)
 	plan := collectMath(parsed)
 	if len(plan.Expressions) > 0 {
 		results, err := RenderMathBatchContext(ctx, plan.Expressions, mathOptions, 16, color.Black)
@@ -217,6 +221,13 @@ h1,h2{border-bottom:1px solid #eaecef;padding-bottom:.2em}h1{font-size:1.7em}h2{
 code,kbd{font:0.9em ui-monospace,"SF Mono",Menlo,Consolas,monospace;background:#f3f4f6;border-radius:4px;padding:.1em .3em}
 pre{background:#f6f8fa;border-radius:8px;padding:12px;overflow:auto}pre code{background:none;padding:0}
 blockquote{margin:0;padding:0 1em;color:#57606a;border-left:3px solid #d0d7de}
+.alert{margin:1em 0;padding:.6em 1em;border-left:4px solid;border-radius:6px}
+.alert .alert-title{font-weight:600;margin:0 0 .3em}
+.alert-note{background:#ddf4ff;border-color:#54aeff}.alert-note .alert-title{color:#0a3069}
+.alert-tip{background:#dafbe1;border-color:#4ac26b}.alert-tip .alert-title{color:#0f5323}
+.alert-important{background:#fbefff;border-color:#b062f5}.alert-important .alert-title{color:#512a97}
+.alert-warning{background:#fff8c5;border-color:#d4a72c}.alert-warning .alert-title{color:#7d4e00}
+.alert-caution{background:#ffebe9;border-color:#ff8182}.alert-caution .alert-title{color:#a40e26}
 table{border-collapse:collapse}td,th{border:1px solid #d0d7de;padding:4px 10px}
 img{max-width:100%}
 .math-display{display:block;text-align:center;margin:1em 0;overflow-x:auto}.math-inline{vertical-align:middle}.math-error{white-space:pre-wrap;color:#a12d24}
