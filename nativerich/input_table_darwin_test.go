@@ -119,7 +119,7 @@ func TestNativeInputRuleUndoCompositionAndLiterals(t *testing.T) {
 		for _, source := range []string{`\**literal**`, `\# title`, `hello_world_`, "**unfinished", "## pasted"} {
 			editor.Load("")
 			if source == "## pasted" {
-				nativeTestAction(editor, "paste", source)
+				nativeTestAction(editor, "plainPaste", source)
 			} else {
 				nativeTypeCharacters(editor, source)
 			}

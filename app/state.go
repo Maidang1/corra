@@ -23,13 +23,12 @@ const (
 )
 
 // Mode is the pane mode. The native rich editor is the default when attached;
-// platforms without it retain the Markdown source and rendered preview.
+// platforms without it keep the Markdown source editor.
 type Mode int
 
 const (
-	ModePreview Mode = iota // rendered, read-only document
-	ModeEdit                // full Markdown source editing
-	ModeRich                // native WYSIWYG editing
+	ModeEdit Mode = iota // full Markdown source editing
+	ModeRich             // native WYSIWYG editing
 )
 
 // App is the editor's root state. The view is a function of App; mutations
@@ -48,7 +47,7 @@ type App struct {
 	Mode        Mode
 	ThemeMode   ThemeMode
 	Zoom        float32 // 1 = 100%
-	Sidebar     bool
+	Sidebar     bool // navigation sidebar visible (folders + notes list)
 	Outline     bool // outline (TOC) panel visible
 	OutlineSel  int  // selected outline row
 	FindOpen    bool
@@ -56,10 +55,9 @@ type App struct {
 	FindCurrent int
 
 	// Typora-parity display options.
-	SmartPunct       bool   // typographic quotes/dashes in preview & export
-	CodeLineNumbers  bool   // line numbers in code fences
-	HeadingNumbering bool   // 1.2.3-style numbers on headings
-	MathNumbering    string // none (default), ams, or all
+	SmartPunct      bool   // typographic quotes/dashes in the source editor & export
+	CodeLineNumbers bool   // line numbers in code fences
+	MathNumbering   string // none (default), ams, or all
 	WordCount        bool   // word-count status bar
 	Spellcheck       bool   // continuous spell checking in the native editor
 	FocusMode        bool   // dim all but the caret's paragraph
@@ -81,13 +79,6 @@ type App struct {
 	// External change conflict.
 	Conflict      bool
 	conflictDirty bool // we had unsaved changes when the file changed
-
-	// Block source editor (modal): which block is being edited and its text.
-	EditBlock   int
-	EditText    string
-	EditOpen    bool
-	EditIsNew   bool // commit appends a new block at the end
-	InsertAfter bool // unused reserved
 
 	// Hosting settings (图床).
 	Hosting HostingConfig
@@ -134,11 +125,12 @@ const Welcome = `# 欢迎使用 Corra
 
 一个用 Go 写的原生 Markdown 备忘录，采用 Apple Notes 风格的布局，能力对照 Typora。
 
-## 三栏布局
+## 两栏布局
 
-- **左栏**：备忘录文件夹（库根目录的子文件夹）
-- **中栏**：按日期分组的备忘录列表，顶部可全文搜索
-- **右栏**：编辑区，顶部显示笔记日期；「视图」菜单可开启大纲面板与字数统计
+- **左栏**：项目文件夹（全部备忘录、各文件夹、最近删除）；选中文件夹后，其备忘录按日期分组列在下方，栏内搜索框可全文检索
+- **右栏**：写作与预览区，顶部显示笔记日期；「视图」菜单可开启大纲面板与字数统计
+
+边栏左上角按钮或「视图」菜单（Cmd+Alt+S）可收起边栏，专注写作。
 
 ## 编辑与预览
 
@@ -249,33 +241,6 @@ func (a *App) NewDocument() {
 	a.Dirty = false
 	a.Title = "未命名"
 	a.Hist.PushBase("")
-	a.mu.Unlock()
-	a.InvalidateUI()
-}
-
-// ReplaceBlockRange splices newSource over block i and reparses.
-func (a *App) ReplaceBlockRange(i int, newSource string) {
-	a.mu.Lock()
-	if i < 0 || i >= len(a.Doc.Blocks) {
-		a.mu.Unlock()
-		return
-	}
-	b := a.Doc.Blocks[i]
-	start, end := b.Start, b.End
-	if end < start || end > len(a.Source) {
-		// Offsets unusable (e.g. computed from a stale doc): fall back to
-		// locating the source text.
-		idx := indexOf(a.Source, b.Source)
-		if idx < 0 {
-			a.mu.Unlock()
-			return
-		}
-		start, end = idx, idx+len(b.Source)
-	}
-	a.Source = a.Source[:start] + newSource + a.Source[end:]
-	a.reparse()
-	a.Hist.Push(a.Source, 0)
-	a.Dirty = true
 	a.mu.Unlock()
 	a.InvalidateUI()
 }

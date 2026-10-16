@@ -9,91 +9,132 @@ import (
 )
 
 const (
-	sidebarW = 248.0
-	listW    = 224.0
-	toolbarH = 58.0
+	sidebarW = 280.0
+	// topRowH is the height of both cards' top rows: the toolbar line the
+	// window's traffic lights land on (they sit at y=26, center y=32, the
+	// rows' center at 8+24).
+	topRowH = 48.0
 )
 
+// header is the workspace card's top row: the note's toolbar. Its empty
+// stretches drag the window. When the sidebar is collapsed the row also
+// hosts the expand control, clear of the traffic lights.
 func (v *View) header(c *ui.Context) {
 	t := c.Theme()
-	ui.Row(c).FillWidth().Height(toolbarH).Gap(0).Background(t.Surface).
-		Shadow(0, 5, 16, 0, ui.Hex("#00000008")).Children(func() {
+	ui.Row(c).FillWidth().Height(topRowH).Gap(10).AlignItems(ui.Center).DragWindow().
+		Padding(0, max(12, c.TitleBar().Right), 0, 16).Children(func() {
 		if !v.App.Sidebar {
-			ui.Row(c).Padding(0, 8, 0, max(12, c.TitleBar().Left)).Children(func() {
+			// Collapsed: the leading slot hosts the expand control,
+			// offset past the traffic lights (the card starts at x=8).
+			ui.Row(c).FillHeight().AlignItems(ui.Center).Padding(0, 4, 0, max(0, c.TitleBar().Left-8-16)).Children(func() {
 				iconButton(c, iconSidebar, "切换边栏", v.toggleSidebar)
 			})
 		}
-		ui.Row(c).Width(listW).FillHeight().Padding(6, 14, 6, 20).Gap(8).Children(func() {
-			ui.Column(c).Grow(1).Gap(0).DragWindow().Children(func() {
-				ui.Text(c, folderLabel(v.App.SelFolder)).FontSize(14).Bold().NoWrap().Clip()
-				ui.Text(c, itoa(len(v.App.VisibleNotes()))+" 个备忘录").FontSize(12).TextColor(t.TextMuted)
+		if v.App.Sidebar {
+			// The folder title counts as navigation: it collapses with
+			// the sidebar.
+			ui.Column(c).Gap(0).Children(func() {
+				ui.Text(c, folderLabel(v.App.SelFolder)).FontSize(13).Bold().NoWrap().Clip()
+				ui.Text(c, itoa(len(v.App.VisibleNotes()))+" 个备忘录").FontSize(11).TextColor(t.TextMuted)
 			})
 			toolbarCapsule(c).Children(func() {
 				iconButton(c, iconEllipsis, "文件夹选项", nil).Menu(v.folderMenu)
 			})
+		}
+		ui.Spacer(c)
+		v.modeSwitcher(c)
+		toolbarCapsule(c).Children(func() { iconButton(c, iconCompose, "新建备忘录 (Cmd+N)", v.newNote) })
+		toolbarCapsule(c).Children(func() {
+			ui.ButtonBase(c).Key("format").Label("文本格式").Tooltip("文本格式").Size(36, 36).Radius(18).
+				Disabled(!v.canEdit()).Children(func() { ui.Text(c, "Aa").FontSize(18).TextColor(t.TextMuted) }).Menu(v.formatMenu)
+			iconButton(c, iconChecklist, "插入任务列表", func() { v.insertSnippet("- [ ] ") }).Disabled(!v.canEdit())
+			iconButton(c, iconTable, "插入表格", func() { v.insertSnippet("\n| 列 1 | 列 2 | 列 3 |\n| --- | --- | --- |\n|  |  |  |\n") }).Disabled(!v.canEdit())
+			iconButton(c, iconPaperclip, "插入图片（可上传图床）", func() {
+				if v.flushAutosave() && v.OnInsertImage != nil {
+					v.OnInsertImage()
+				}
+			}).Disabled(!v.canEdit() || v.OnInsertImage == nil)
 		})
-		ui.Row(c).Grow(1).FillHeight().Padding(6, max(10, c.TitleBar().Right), 6, 12).Gap(12).Children(func() {
-			toolbarCapsule(c).Children(func() { iconButton(c, iconCompose, "新建备忘录 (Cmd+N)", v.newNote) })
-			toolbarCapsule(c).Children(func() {
-				ui.ButtonBase(c).Key("format").Label("文本格式").Tooltip("文本格式").Size(36, 36).Radius(18).
-					Disabled(!v.canEdit()).Children(func() { ui.Text(c, "Aa").FontSize(18).TextColor(t.TextMuted) }).Menu(v.formatMenu)
-				iconButton(c, iconChecklist, "插入任务列表", func() { v.insertSnippet("- [ ] ") }).Disabled(!v.canEdit())
-				iconButton(c, iconTable, "插入表格", func() { v.insertSnippet("\n| 列 1 | 列 2 | 列 3 |\n| --- | --- | --- |\n|  |  |  |\n") }).Disabled(!v.canEdit())
-				iconButton(c, iconPaperclip, "插入图片（可上传图床）", func() {
-					if v.flushAutosave() && v.OnInsertImage != nil {
-						v.OnInsertImage()
+		toolbarCapsule(c).Children(func() {
+			iconButton(c, iconShare, "共享与导出", nil).Disabled(v.App.Path == "").Menu(func(m *ui.Menu) {
+				if m.Item("复制 Markdown").Chosen() {
+					if v.syncEditor() {
+						c.Services().WriteClipboard(v.App.Source)
 					}
-				}).Disabled(!v.canEdit() || v.OnInsertImage == nil)
+				}
+				if m.Item("导出 PDF…").Disabled(v.OnExportPDF == nil).Chosen() {
+					if v.syncEditor() {
+						v.OnExportPDF()
+					}
+				}
 			})
-			toolbarCapsule(c).Children(func() {
-				iconButton(c, iconShare, "共享与导出", nil).Disabled(v.App.Path == "").Menu(func(m *ui.Menu) {
-					if m.Item("复制 Markdown").Chosen() {
-						if v.syncEditor() {
-							c.Services().WriteClipboard(v.App.Source)
-						}
-					}
-					if m.Item("导出 PDF…").Disabled(v.OnExportPDF == nil).Chosen() {
-						if v.syncEditor() {
-							v.OnExportPDF()
-						}
-					}
-				})
-				iconButton(c, iconEllipsis, "备忘录选项", nil).Menu(v.noteMenu)
-			})
-			v.searchBox(c)
+			iconButton(c, iconEllipsis, "备忘录选项", nil).Menu(v.noteMenu)
 		})
 	})
-	ui.Divider(c).FillWidth()
 }
 
+// toolbarCapsule groups toolbar buttons into one floating pill: a lifted
+// white (or graphite) lozenge with a hairline rim and a faint shadow, the
+// way macOS clusters toolbar controls.
 func toolbarCapsule(c *ui.Context) ui.Element {
 	t := c.Theme()
-	bg, rim := ui.Hex("#fafafa"), ui.Hex("#ffffff")
+	bg, rim := ui.Hex("#fbfbfb"), ui.Hex("#00000014")
 	if t.Dark {
-		bg, rim = ui.Hex("#303032"), ui.Hex("#48484a")
+		bg, rim = ui.Hex("#303034"), ui.Hex("#ffffff20")
 	}
-	return ui.Row(c).Gap(2).Padding(1, 3).Radius(24).Background(bg).Border(1, rim).
-		Shadow(0, 3, 12, 0, ui.Hex("#0000000a"))
+	return ui.Row(c).Gap(2).Padding(2, 4).Radius(20).Background(bg).Border(1, rim).
+		Shadow(0, 2, 6, 0, ui.Hex("#0000000d"))
 }
 
-func (v *View) searchBox(c *ui.Context) {
-	t := c.Theme()
-	ui.Row(c).Key("search").Grow(1).MinWidth(90).Height(40).Gap(7).Padding(0, 12).Radius(22).
-		Background(t.SurfaceHover).Border(1, t.Border).Children(func() {
-		ui.Icon(c, iconSearch).Size(17, 17).TextColor(t.TextMuted)
-		field := ui.TextInputBase(c, &v.App.Query).Label("搜索备忘录").Placeholder("搜索").FillWidth().FontSize(14).
-			OnChange(func() { v.reconcileSelection() })
-		if v.focusSearch {
-			field.Focus()
-			v.focusSearch = false
-		}
+// modeSwitcher is the header's segmented control for the two editing
+// surfaces: 文稿 (WYSIWYG) and 源码 (Markdown source). The current surface
+// rides on a raised segment; clicking the other one switches (Cmd+E).
+func (v *View) modeSwitcher(c *ui.Context) {
+	enabled := v.canEdit() && v.rich != nil
+	toolbarCapsule(c).Children(func() {
+		v.modeSegment(c, "文稿", iconDoc, v.App.Mode == app.ModeRich, enabled, func() {
+			if v.App.Mode != app.ModeRich {
+				v.toggleMode()
+			}
+		})
+		v.modeSegment(c, "源码", iconCode, v.App.Mode == app.ModeEdit, enabled, func() {
+			if v.App.Mode != app.ModeEdit {
+				v.EditSource()
+			}
+		})
 	})
+}
+
+// modeSegment is one segment of the switcher: a small icon-plus-label
+// lozenge, lifted with a hairline rim when it is the current mode.
+func (v *View) modeSegment(c *ui.Context, label string, icon *ui.SVG, active, enabled bool, fn func()) {
+	t := c.Theme()
+	fg := t.TextMuted
+	if active {
+		fg = t.Text
+	}
+	seg := ui.ButtonBase(c).Key(label).Label("切换到"+label).Tooltip(label).Padding(6, 10).Radius(16).
+		Disabled(!enabled)
+	if active {
+		bg, rim := ui.Hex("#ffffff"), ui.Hex("#00000010")
+		if t.Dark {
+			bg, rim = ui.Hex("#4a4a4f"), ui.Hex("#ffffff24")
+		}
+		seg = seg.Background(bg).Border(1, rim).Shadow(0, 1, 3, 0, ui.Hex("#00000014"))
+	}
+	seg.Children(func() {
+		ui.Row(c).Gap(5).AlignItems(ui.Center).Children(func() {
+			ui.Icon(c, icon).Size(15, 15).TextColor(fg)
+			ui.Text(c, label).FontSize(12.5).TextColor(fg)
+		})
+	}).OnClick(fn)
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
 
 func (v *View) toggleSidebar()       { v.App.Sidebar = !v.App.Sidebar; v.App.InvalidateUI() }
 func (v *View) ToggleSidebarAction() { v.toggleSidebar() }
+
 func (v *View) SearchAction() {
 	if v.rich != nil {
 		v.rich.Blur()
@@ -104,33 +145,22 @@ func (v *View) SearchAction() {
 
 func (v *View) canEdit() bool { return v.App.Path != "" && v.App.SelFolder != app.TrashName }
 
+// toggleMode switches between the two editing surfaces: the native
+// WYSIWYG editor and the Markdown source editor (Cmd+E or the header's
+// mode button). Without the native editor there is only source.
 func (v *View) toggleMode() {
-	if !v.canEdit() {
+	if !v.canEdit() || v.rich == nil {
 		return
 	}
-	if v.rich != nil {
-		if v.App.Mode != app.ModeEdit {
-			v.EditSource()
-			return
-		}
-		if !v.flushAutosave() {
-			return
-		}
-		v.App.Mode = app.ModeRich
-		v.focusEditor = true
-		v.App.InvalidateUI()
+	if v.App.Mode != app.ModeEdit {
+		v.EditSource()
 		return
 	}
-	if v.App.Mode == app.ModeEdit {
-		if !v.flushAutosave() {
-			return
-		}
-		v.App.Mode = app.ModePreview
-		v.App.Refresh()
-	} else {
-		v.App.Mode = app.ModeEdit
-		v.focusEditor = true
+	if !v.flushAutosave() {
+		return
 	}
+	v.App.Mode = app.ModeRich
+	v.focusEditor = true
 	v.App.InvalidateUI()
 }
 

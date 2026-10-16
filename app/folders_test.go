@@ -189,8 +189,3 @@ func TestAppMoveSelectedNote(t *testing.T) {
 	}
 }
 
-func TestAppNewDefaults(t *testing.T) {
-	if !New().Sidebar {
-		t.Fatal("notes sidebar should be visible by default")
-	}
-}

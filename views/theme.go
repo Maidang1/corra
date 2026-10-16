@@ -63,6 +63,32 @@ var (
 	fontMono = "SF Mono, Menlo, Cascadia Code, JetBrains Mono, Consolas, Noto Sans Mono CJK SC, monospace"
 )
 
+// windowBackground is the cool gray the window wears behind its floating
+// cards — Apple's Finder/Notes gray, slightly darker than any surface.
+func windowBackground(t *ui.Theme) ui.Color {
+	if t.Dark {
+		return ui.Hex("#16171b")
+	}
+	return ui.Hex("#f1f1f4")
+}
+
+// cardBorder is the hairline rim around a floating card.
+func cardBorder(t *ui.Theme) ui.Color {
+	if t.Dark {
+		return ui.Hex("#ffffff14")
+	}
+	return ui.Hex("#0000000f")
+}
+
+// cardShadow is the soft, diffuse drop shadow under a floating card:
+// no offset harshness, a long blur, a whisper of black.
+func cardShadow(t *ui.Theme) ui.Color {
+	if t.Dark {
+		return ui.Hex("#00000080")
+	}
+	return ui.Hex("#1c1c1e1f")
+}
+
 // theme resolves the effective theme for the app's theme mode.
 func (v *View) theme(c *ui.Context) *ui.Theme {
 	darkNow := v.App.SysDark

@@ -1,91 +1,10 @@
 package views
 
 import (
-	"fmt"
-	"os"
-	"strings"
-
-	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
 	"github.com/Maidang1/corra/app"
 )
-
-// openBlockEditor opens the modal source editor for block i. If isNew, the
-// block is appended on commit instead.
-func (v *View) openBlockEditor(i int, source string, isNew bool) {
-	if !v.canEdit() {
-		return
-	}
-	// Structured previews navigate into the same source buffer; replacing a
-	// reconstructed block would lose fences, indentation, or table source.
-	if !isNew {
-		v.App.Mode = app.ModeEdit
-		v.ensureEditor()
-		if i >= 0 && i < len(v.App.Doc.Blocks) {
-			b := v.App.Doc.Blocks[i]
-			pos := b.Start
-			if b.Source != "" {
-				if found := strings.Index(v.App.Source, b.Source); found >= 0 {
-					pos = found
-				}
-			}
-			pos = max(0, min(pos, v.edState.Buffer.Len()))
-			v.edState.Select(pos, pos)
-		}
-		v.focusEditor = true
-		v.App.InvalidateUI()
-		return
-	}
-	v.App.EditBlock = i
-	v.App.EditText = source
-	v.App.EditOpen = true
-	v.App.EditIsNew = isNew
-	v.App.InvalidateUI()
-}
-
-// blockEditorModal edits a block's raw source in a modal dialog.
-func (v *View) blockEditorModal(c *ui.Context) {
-	t := c.Theme()
-	open := true
-	title := "编辑块源码"
-	if v.App.EditIsNew {
-		title = "新建块"
-	}
-	ui.Modal(c, &open, func() {
-		ui.Box(c).Width(560).Background(t.Background).Border(1, t.Border).
-			Padding(18, 20).Children(func() {
-			ui.Column(c).FillWidth().Gap(12).Children(func() {
-				ui.Text(c, title).FontSize(15).Bold()
-				ui.TextArea(c, &v.App.EditText).Font(fontMono).FontSize(13).
-					Height(220).LineHeight(1.5)
-				ui.Row(c).FillWidth().Gap(8).Children(func() {
-					ui.Spacer(c)
-					ui.Button(c, "取消").OnClick(func() {
-						v.App.EditOpen = false
-						v.App.InvalidateUI()
-					})
-					ui.PrimaryButton(c, "确定").OnClick(func() {
-						if !v.canEdit() {
-							v.App.EditOpen = false
-							return
-						}
-						text := v.App.EditText
-						v.App.EditOpen = false
-						if v.App.EditIsNew {
-							v.App.AppendBlock(text)
-						} else {
-							v.App.ReplaceBlockRange(v.App.EditBlock, text)
-						}
-					})
-				})
-			})
-		})
-	})
-	if !open {
-		v.App.EditOpen = false
-	}
-}
 
 // conflictDialog asks how to resolve an external change.
 func (v *View) conflictDialog(c *ui.Context) {
@@ -180,8 +99,3 @@ func (v *View) hostingDialog(c *ui.Context) {
 
 // onConflictResolve and onSaveHosting are bound from main.go.
 // (declared in view.go)
-
-var _ = fmt.Sprint
-var _ = os.Getenv
-var _ = strings.TrimSpace
-var _ = mygo.IsDev

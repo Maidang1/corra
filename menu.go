@@ -155,8 +155,6 @@ func buildMenu() *mygo.Menu {
 		Label: "视图",
 		Submenu: []*mygo.MenuItem{
 			item("切换源码 / 文稿", "CmdOrCtrl+E", func() { view.ToggleModeAction() }),
-			item("所见即所得文稿", "", func() { view.RichAction() }),
-			item("阅读预览（含复杂内容）", "CmdOrCtrl+Shift+P", func() { view.PreviewAction() }),
 			item("显示 / 隐藏边栏", "CmdOrCtrl+Alt+S", func() { view.ToggleSidebarAction() }),
 			item("大纲", "CmdOrCtrl+Alt+T", func() { view.App.Outline = !view.App.Outline; editorApp.InvalidateUI() }),
 			item("搜索备忘录", "CmdOrCtrl+Shift+F", func() { view.SearchAction() }),
@@ -168,7 +166,6 @@ func buildMenu() *mygo.Menu {
 			mygo.Separator(),
 			checked("代码块显示行号", editorApp.CodeLineNumbers, func() { editorApp.CodeLineNumbers = !editorApp.CodeLineNumbers; editorApp.InvalidateUI() }),
 			checked("智能标点", editorApp.SmartPunct, func() { editorApp.SmartPunct = !editorApp.SmartPunct; editorApp.Refresh() }),
-			checked("标题自动编号", editorApp.HeadingNumbering, func() { editorApp.HeadingNumbering = !editorApp.HeadingNumbering; editorApp.InvalidateUI() }),
 			{Label: "公式编号", Submenu: []*mygo.MenuItem{
 				checked("不自动编号", editorApp.MathNumbering == "" || editorApp.MathNumbering == "none", func() { editorApp.MathNumbering = "none"; editorApp.InvalidateUI() }),
 				checked("按 AMS 规则编号", editorApp.MathNumbering == "ams", func() { editorApp.MathNumbering = "ams"; editorApp.InvalidateUI() }),

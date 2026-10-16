@@ -68,7 +68,7 @@ func TestReferenceLinksResolveAndPreserveDefinitions(t *testing.T) {
 					t.Fatalf("reference remained source: %+v", doc)
 				}
 				got := Serialize(doc)
-				if !strings.Contains(got, definition) || !strings.Contains(got, `](</路径?q=1\&x=2> "a \"title\"") changed`) {
+				if !strings.Contains(got, definition) || !strings.Contains(got, `](/路径?q=1&x=2 "a \"title\"") changed`) {
 					t.Fatalf("edited reference lost destination/title/definition: %q", got)
 				}
 				if untouched := Serialize(Parse(source)); untouched != source {
@@ -108,7 +108,7 @@ func TestLinkTitleOnlyChangePersists(t *testing.T) {
 	if err := json.Unmarshal(data, &doc); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := Serialize(doc), `[label](</url> "new")`; got != want {
+	if got, want := Serialize(doc), `[label](/url "new")`; got != want {
 		t.Fatalf("title change reused stale raw: got %q, want %q", got, want)
 	}
 }

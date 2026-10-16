@@ -11,12 +11,15 @@ import (
 // fourth column; clicking one jumps to it in the active mode.
 func (v *View) outlinePanel(c *ui.Context) {
 	t := c.Theme()
-	ui.Column(c).Width(220).FillHeight().Background(t.Surface).Children(func() {
+	// Transparent over the card's surface: a panel background would paint
+	// the card's right corners square. The scroll's thumb is inset from
+	// the bottom rim for the same reason.
+	ui.Column(c).Width(220).FillHeight().Children(func() {
 		ui.Row(c).FillWidth().Padding(10, 12, 6, 12).Children(func() {
 			ui.Text(c, "大纲").FontSize(12).Bold()
 		})
 		ui.Divider(c).FillWidth()
-		ui.Scroll(c).Fill().Children(func() {
+		ui.Scroll(c).Fill().ScrollbarInsets(6, 4, 26, 6).Children(func() {
 			ui.Column(c).FillWidth().Gap(1).Padding(4, 6).Children(func() {
 				headingIdx := -1
 				for i := range v.App.Doc.Blocks {
@@ -45,8 +48,6 @@ func (v *View) outlinePanel(c *ui.Context) {
 // whichever editor surface is active.
 func (v *View) jumpToHeading(blockIdx, headingIdx int) {
 	switch {
-	case v.App.Mode == app.ModeRich && v.rich != nil:
-		v.rich.RevealHeading(headingIdx)
 	case v.App.Mode == app.ModeEdit && v.edState != nil:
 		b := &v.App.Doc.Blocks[blockIdx]
 		start := b.Start
@@ -55,8 +56,8 @@ func (v *View) jumpToHeading(blockIdx, headingIdx int) {
 		}
 		v.edState.Select(start, start)
 		v.focusEditor = true
-	default:
-		v.scrollToBlock = blockIdx
+	case v.rich != nil:
+		v.rich.RevealHeading(headingIdx)
 	}
 	v.App.InvalidateUI()
 }

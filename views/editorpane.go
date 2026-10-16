@@ -16,8 +16,8 @@ import (
 const autosaveDelay = 600 * time.Millisecond
 
 // editorPane renders the rightmost column: a centered date header and,
-// below it, either the full Markdown editor (edit mode) or the rendered
-// document (preview mode).
+// below it, either the native WYSIWYG editor (rich mode) or the full
+// Markdown source editor (edit mode).
 func (v *View) editorPane(c *ui.Context) {
 	t := c.Theme()
 	if v.App.Path == "" && v.App.Source == "" {
@@ -34,14 +34,9 @@ func (v *View) editorPane(c *ui.Context) {
 		})
 		return
 	}
-	if v.App.Mode == app.ModePreview {
-		ui.Column(c).Fill().Gap(0).Children(func() {
-			ui.Box(c).Fill().Children(func() { v.previewPane(c) })
-			v.statusBar(c)
-		})
-		return
-	}
-	ui.Column(c).Fill().Gap(0).Background(t.Surface).Children(func() {
+	// The card under the pane already paints the white surface; a second
+	// full-bleed background here would square off the card's corners.
+	ui.Column(c).Fill().Gap(0).Children(func() {
 		v.dateHeader(c)
 		v.ensureEditor()
 		if v.edState == nil {
@@ -255,21 +250,3 @@ func (v *View) autosave() bool {
 	return true
 }
 
-// previewPane renders the parsed document read-only, on the column's
-// white surface, the way Apple Notes shows a note.
-func (v *View) previewPane(c *ui.Context) {
-	ui.Column(c).Fill().Gap(0).Background(c.Theme().Surface).Children(func() {
-		v.dateHeader(c)
-		ui.Scroll(c).Fill().Children(func() {
-			ui.Column(c).FillWidth().Children(func() {
-				ui.Column(c).FillWidth().Gap(9).Padding(4, 26, 48, 26).
-					Children(func() {
-						for i := range v.App.Doc.Blocks {
-							v.block(c, i)
-						}
-						v.footnotes(c)
-					})
-			})
-		})
-	})
-}

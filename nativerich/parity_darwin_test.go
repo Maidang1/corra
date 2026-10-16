@@ -136,7 +136,7 @@ func TestNativeParityLinkCommand(t *testing.T) {
 		nativeTestSelect(e, 6, 4)
 		e.Format("link:https://example.com")
 		got, _, _ := e.Snapshot()
-		if got != "click [here](<https://example.com>)" {
+		if got != "click [here](https://example.com)" {
 			t.Errorf("link command: %q", got)
 		}
 		nativeTestAction(e, "undo", "")

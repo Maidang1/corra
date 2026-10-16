@@ -17,7 +17,7 @@ func TestRevealInlineContentBoundaries(t *testing.T) {
 		{"bold", Run{Text: "ab", Bold: true}, "**ab**", 2, 4},
 		{"italic", Run{Text: "ab", Italic: true}, "_ab_", 1, 3},
 		{"underline", Run{Text: "ab", Underline: true}, "<u>ab</u>", 3, 5},
-		{"link", Run{Text: "same", Link: "https://same.test/same", LinkTitle: "same"}, `[same](<https://same.test/same> "same")`, 1, 5},
+		{"link", Run{Text: "same", Link: "https://same.test/same", LinkTitle: "same"}, `[same](https://same.test/same "same")`, 1, 5},
 		{"code padded", Run{Text: " ab ", Code: true}, "`  ab  `", 2, 6},
 		{"code backticks", Run{Text: "`a`", Code: true}, "`` `a` ``", 3, 6},
 		{"math", Run{Text: `$x+1$`, Math: "x+1"}, `$x+1$`, 1, 4},

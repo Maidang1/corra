@@ -49,7 +49,7 @@ func TestRichDefaultLayoutAndNoReloadOnSave(t *testing.T) {
 	e := &fakeRichEditor{}
 	v.AttachRichEditor(e)
 	tt.Frame()
-	if v.App.Mode != app.ModeRich || !e.visible || e.width <= 0 || e.height <= 0 || e.x < listW {
+	if v.App.Mode != app.ModeRich || !e.visible || e.width <= 0 || e.height <= 0 || e.x < sidebarW {
 		t.Fatalf("native editor not in laid-out pane: mode=%v editor=%+v", v.App.Mode, e)
 	}
 	loads := e.loads
@@ -185,29 +185,6 @@ func TestRichNewNoteAndTrash(t *testing.T) {
 	v.formatSelection("**", "**")
 	if e.command != before {
 		t.Fatal("native command modified trashed note")
-	}
-}
-
-func TestRichReadingPreviewRetainsRenderedDocument(t *testing.T) {
-	v, tt := notesFixture(t)
-	e := &fakeRichEditor{}
-	v.AttachRichEditor(e)
-	tt.Frame()
-	e.source, e.changed = "# Rich preview\n\n| A | B |\n| - | - |\n| 1 | 2 |\n", true
-	v.PreviewAction()
-	tt.Frame()
-	if e.visible || v.App.Mode != app.ModePreview || !tt.HasText("Rich preview") {
-		t.Fatal("rich document cannot open full rendered reading preview")
-	}
-	v.RichAction()
-	tt.Frame()
-	if !e.visible || v.App.Mode != app.ModeRich {
-		t.Fatal("cannot return to WYSIWYG from reading preview")
-	}
-	v.PreviewAction()
-	v.formatSelection("**", "**")
-	if v.App.Mode != app.ModeRich || e.command != "bold" {
-		t.Fatal("formatting in reading view unexpectedly opens raw source")
 	}
 }
 

@@ -1,9 +1,19 @@
 package views
 
 import (
+	"strings"
+
 	"github.com/Maidang1/corra/app"
 	"github.com/egoist/mygo/ui"
 )
+
+// dirOf returns the directory part of a slash-separated path.
+func dirOf(p string) string {
+	if i := strings.LastIndexByte(p, '/'); i >= 0 {
+		return p[:i]
+	}
+	return ""
+}
 
 // RichEditor owns a native editing surface. Calls run on the UI thread; layout
 // uses MyGo's final logical-point rectangle, not guessed column dimensions.
@@ -89,7 +99,7 @@ func (v *View) syncEditor() bool {
 func (v *View) richVisible() bool {
 	return v.rich != nil && v.App.Mode == app.ModeRich &&
 		(v.App.Path != "" || v.App.Source != "") &&
-		!v.App.Conflict && !v.App.EditOpen && !v.HostOpen && v.FolderDialog == "" && !v.DeleteOpen
+		!v.App.Conflict && !v.HostOpen && v.FolderDialog == "" && !v.DeleteOpen
 }
 
 func (v *View) richPane(c *ui.Context) {
@@ -97,28 +107,23 @@ func (v *View) richPane(c *ui.Context) {
 	v.rich.SetCodeLineNumbers(v.App.CodeLineNumbers)
 	v.ensureRichEditor()
 	v.rich.SetStyle(float64(v.App.Zoom), c.Theme().Dark, v.canEdit())
-	ui.Column(c).Fill().Gap(0).Background(c.Theme().Surface).Children(func() {
+	// The native editor is a rectangular hole punched through the window:
+	// inset it from the card's rim so its square corners never cover the
+	// card's rounded ones.
+	ui.Column(c).Fill().Gap(0).Children(func() {
 		v.dateHeader(c)
-		ui.Box(c).Key("native-editor").Fill().Draw(func(_ *ui.Painter, r ui.Rect) {
-			v.rich.SetFrame(float64(r.X), float64(r.Y), float64(r.W), float64(r.H))
-			visible := v.richVisible()
-			v.rich.SetVisible(visible)
-			if visible && v.focusEditor {
-				v.rich.Focus()
-				v.focusEditor = false
-			}
+		ui.Box(c).Fill().Padding(0, 6, 8, 6).Children(func() {
+			ui.Box(c).Key("native-editor").Fill().Draw(func(_ *ui.Painter, r ui.Rect) {
+				v.rich.SetFrame(float64(r.X), float64(r.Y), float64(r.W), float64(r.H))
+				visible := v.richVisible()
+				v.rich.SetVisible(visible)
+				if visible && v.focusEditor {
+					v.rich.Focus()
+					v.focusEditor = false
+				}
+			})
 		})
 	})
-}
-
-func (v *View) modeLabel() string {
-	if v.rich != nil {
-		if v.App.Mode == app.ModeEdit {
-			return "所见即所得"
-		}
-		return "编辑 Markdown 源码"
-	}
-	return "编辑 / 预览"
 }
 
 // EditSource is also the native protected-block action. Flush before hiding the
@@ -143,17 +148,6 @@ func (v *View) RichAction() {
 	v.App.Mode = app.ModeRich
 	v.focusEditor = true
 	v.App.InvalidateUI()
-}
-
-func (v *View) PreviewAction() {
-	if !v.flushAutosave() {
-		return
-	}
-	v.App.Mode = app.ModePreview
-	if v.rich != nil {
-		v.rich.SetVisible(false)
-	}
-	v.App.Refresh()
 }
 
 func richFormat(prefix, suffix string) string {
