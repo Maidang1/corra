@@ -24,7 +24,7 @@ static NSString *CRAlertLabelOf(NSString *text) {
     NSString *label = [text substringWithRange:NSMakeRange(2, close.location - 2)];
     if (![CRAlertLabels() containsObject:label.uppercaseString]) return nil;
     NSString *rest = [text substringFromIndex:NSMaxRange(close)];
-    if (rest.length && ![rest hasPrefix:@" "] && ![rest hasPrefix:@"\t"]) return nil;
+    if (rest.length && ![rest hasPrefix:@" "] && ![rest hasPrefix:@"\t"] && ![rest hasPrefix:@"\u2028"]) return nil;
     return label.uppercaseString;
 }
 
@@ -34,7 +34,7 @@ static NSString *CRStripAlertMarker(NSString *text) {
     if (CRAlertLabelOf(text) == nil) return text;
     NSRange close = [text rangeOfString:@"]"];
     NSString *rest = [text substringFromIndex:NSMaxRange(close)];
-    NSRange gap = [rest rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:@" \t"]];
+    NSRange gap = [rest rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:@" \t\u2028"]];
     if (gap.location == 0) rest = [rest substringFromIndex:NSMaxRange(gap)];
     return rest;
 }
@@ -88,7 +88,7 @@ static NSColor *CRAlertTint(NSString *label, BOOL dark) {
         NSMutableDictionary *updated = [p mutableCopy];
         if (label.length) updated[@"alert"] = label;
         else [updated removeObjectForKey:@"alert"];
-        if (range.length) [_text.textStorage addAttribute:CRParagraph value:updated range:range];
+        if (range.length) { [_text.textStorage addAttribute:CRParagraph value:updated range:range]; [self markDirty:range]; }
         else {
             NSMutableDictionary *typing = [_text.typingAttributes mutableCopy];
             typing[CRParagraph] = updated;

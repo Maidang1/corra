@@ -42,8 +42,8 @@
     if (!self.selectedRange.length && !source && ![self.owner revealInlineAt:self.selectedRange.location] && self.string.length==oldLength && previous.location<self.string.length && self.selectedRange.location>previous.location) [self.owner revealInlineAt:previous.location];
 }
 - (void)moveLeft:(id)sender { [super moveLeft:sender]; if (!self.selectedRange.length) [self.owner revealInlineAt:self.selectedRange.location]; }
-- (void)moveUp:(id)sender { [super moveUp:sender]; if (!self.selectedRange.length) [self.owner revealInlineAt:self.selectedRange.location]; }
-- (void)moveDown:(id)sender { [super moveDown:sender]; if (!self.selectedRange.length) [self.owner revealInlineAt:self.selectedRange.location]; }
+- (void)moveUp:(id)sender { if ([self.owner escapeBlock:NO]) return; [super moveUp:sender]; if (!self.selectedRange.length) [self.owner revealInlineAt:self.selectedRange.location]; }
+- (void)moveDown:(id)sender { if ([self.owner escapeBlock:YES]) return; [super moveDown:sender]; if (!self.selectedRange.length) [self.owner revealInlineAt:self.selectedRange.location]; }
 - (void)structuralAction:(NSMenuItem *)item { [self.owner format:item.representedObject]; }
 - (void)footnoteAction:(NSMenuItem *)item {
     NSDictionary *target=item.representedObject;

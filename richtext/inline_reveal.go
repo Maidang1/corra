@@ -217,11 +217,7 @@ func inlineSourceAtoms(source string, table bool, spans []revealSourceSpan) ([]r
 				if end < len(src) {
 					end++
 				}
-				value := rune(' ')
-				if n.HardLineBreak() {
-					value = '\u2028'
-				}
-				add(value, segment.Stop, end)
+				add('\u2028', segment.Stop, end)
 			}
 		case *inlineMath:
 			start := n.Pos()

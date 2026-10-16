@@ -68,6 +68,12 @@ func listSources(doc Document) map[int]string {
 			line := p.Raw
 			if p.Baseline == "" || p.Baseline != fingerprint(p) || p.ListBaseline != listFingerprint(p) {
 				line = serializeParagraph(p)
+				// Wrapped lines of the item's text align under its content.
+				content := len(indent)
+				if !p.ListContinuation {
+					content += originalMarkerWidth(line)
+				}
+				line = strings.ReplaceAll(line, "\n", "\n"+strings.Repeat(" ", content))
 			} else {
 				line = strings.TrimLeft(line, " \t")
 			}

@@ -594,7 +594,7 @@ func TestKbdAndMarkHTML(t *testing.T) {
 	runs := doc.Paragraphs[0].Runs
 	var kbd, mark bool
 	for _, r := range runs {
-		if r.Code && r.Text == "⌘" {
+		if r.Kbd && r.Text == "⌘" {
 			kbd = true
 		}
 		if r.Highlight && r.Text == "重点" {
@@ -603,6 +603,11 @@ func TestKbdAndMarkHTML(t *testing.T) {
 	}
 	if !kbd || !mark {
 		t.Fatalf("kbd/mark: %+v", runs)
+	}
+	// An edit elsewhere must not turn the key into inline code.
+	doc.Paragraphs[0].Runs = append(doc.Paragraphs[0].Runs, Run{Text: "!"})
+	if got := Serialize(doc); got != "按 <kbd>⌘</kbd> 键和 ==重点==!" {
+		t.Fatalf("edited kbd: %q", got)
 	}
 }
 

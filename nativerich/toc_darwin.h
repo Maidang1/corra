@@ -109,11 +109,13 @@ static NSString *CRTOCSignature(NSArray *entries) {
 // undo history.
 - (void)refreshTOC {
     if (_suppress || _text.hasMarkedText) return;
+    // Without a [TOC] block there is nothing to redraw; forget the signature
+    // so one inserted later renders fresh.
+    if (![self tocFigureRanges].count) { _tocSignature = nil; return; }
     NSArray *entries = [self tocEntriesFromText];
     NSString *signature = CRTOCSignature(entries);
     if ([signature isEqual:_tocSignature]) return;
     _tocSignature = signature;
-    if (![self tocFigureRanges].count) return;
     NSImage *image = [self tocImage:entries width:CRTOCWidth(self)];
     BOOL previous = _suppress;
     _suppress = YES;

@@ -15,7 +15,7 @@
     if (range.length) [_text.textStorage addAttribute:CRParagraph value:next range:range];
     else _emptyParagraph=next;
     _text.typingAttributes=[self visual:@{CRParagraph:next} paragraph:next];
-    [self restyle]; _suppress=previous; [self notify];
+    [self restyleDirty]; _suppress=previous; [self notify];
 }
 - (BOOL)indentQuote:(BOOL)outdent {
     NSArray *ranges=CRSelectedParagraphs(self);
@@ -36,6 +36,6 @@
     BOOL previous=_suppress; _suppress=YES;
     [self replace:NSMakeRange(0,_text.string.length) with:after selection:_text.selectedRange];
     if (empty) { _emptyParagraph=empty; _text.typingAttributes=[self visual:@{CRParagraph:empty} paragraph:empty]; }
-    [self restyle]; [self updateTypingParagraph]; _suppress=previous; [self notify];
+    [self restyleDirty]; [self updateTypingParagraph]; _suppress=previous; [self notify];
     return YES;
 }

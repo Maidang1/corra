@@ -83,6 +83,6 @@
     BOOL previous=_suppress; _suppress=YES;
     [self replace:NSMakeRange(0,_text.string.length) with:after selection:selection];
     if (empty) { _emptyParagraph=empty; _text.typingAttributes=[self visual:@{CRParagraph:empty} paragraph:empty]; }
-    [self renumber]; [self restyle]; [self updateTypingParagraph];
+    [self renumber]; [self restyleDirty]; [self updateTypingParagraph];
     _suppress=previous; [self notify];
 }

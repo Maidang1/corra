@@ -111,8 +111,9 @@
     }
     return @{@"blocks":blocks,@"lines":[self codeLineNumberEntries],@"gutter":@([self codeGutterWidth]),@"enabled":@(_codeLineNumbers),@"actualIndent":@(indent),@"insetY":@(_text.textContainerInset.height)};
 }
-- (void)highlightCode {
-    [_text.textStorage removeAttribute:CRHl range:NSMakeRange(0,_text.string.length)];
+- (void)highlightCode { [self highlightCodeInRange:NSMakeRange(0,_text.string.length)]; }
+// highlightCodeInRange re-tokenizes only the code blocks touching dirty.
+- (void)highlightCodeInRange:(NSRange)dirty {
     NSArray *blocks=[self codeBlocks];
     NSUInteger maximum=1;
     for (NSDictionary *block in blocks) maximum=MAX(maximum,[block[@"lines"] count]);
@@ -120,9 +121,12 @@
     NSFont *font=[NSFont monospacedDigitSystemFontOfSize:11.5*_zoom weight:NSFontWeightRegular];
     _codeGutter=ceil([label sizeWithAttributes:@{NSFontAttributeName:font}].width+24*_zoom);
     for (NSDictionary *block in blocks) {
+        NSRange whole=[block[@"range"] rangeValue];
+        if (NSMaxRange(whole)<dirty.location || whole.location>NSMaxRange(dirty)) continue;
+        [_text.textStorage removeAttribute:CRHl range:whole];
         NSString *language=block[@"language"];
         if (!language.length) continue;
-        NSRange range=CRContent(_text.string,[block[@"range"] rangeValue]);
+        NSRange range=CRContent(_text.string,whole);
         if (!range.length) continue;
         char *out=cr_highlight((char *)[_text.string substringWithRange:range].UTF8String,(char *)language.UTF8String);
         if (!out) continue;

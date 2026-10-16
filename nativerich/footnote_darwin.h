@@ -59,6 +59,14 @@
     [value addAttributes:attrs range:NSMakeRange(0,value.length)];
     return value;
 }
+// hasFootnotes: any reference or definition exists, so numbering can change.
+- (BOOL)hasFootnotes {
+    __block BOOL found=NO;
+    NSRange all=NSMakeRange(0,_text.string.length);
+    [_text.textStorage enumerateAttribute:CRFootnote inRange:all options:0 usingBlock:^(id value, NSRange r, BOOL *stop) { if (value) found=*stop=YES; }];
+    if (!found) [_text.textStorage enumerateAttribute:CRParagraph inRange:all options:0 usingBlock:^(NSDictionary *p, NSRange r, BOOL *stop) { if ([p[@"footnoteId"] length]) found=*stop=YES; }];
+    return found;
+}
 - (void)refreshFootnotes {
     if (_text.hasMarkedText) return;
     [self prepareFootnotes:[self document]];
