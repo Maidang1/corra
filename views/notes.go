@@ -135,17 +135,7 @@ func (v *View) folderRow(c *ui.Context, label string, icon *ui.SVG, folder strin
 			ui.Text(c, fmt.Sprint(count)).FontSize(12).TextColor(t.TextMuted)
 		})
 	}).OnClick(func() { v.selectFolder(folder) }).ContextMenu(func(m *ui.Menu) {
-		if m.Item("新建文件夹…").Chosen() {
-			v.openFolderDialog("新建文件夹", "")
-		}
-		if folder != "" && folder != app.TrashName {
-			if m.Item("重命名文件夹…").Chosen() {
-				v.openFolderDialog("重命名文件夹", folder)
-			}
-			if m.Item("删除空文件夹").Chosen() {
-				v.removeFolder(folder)
-			}
-		}
+		v.folderMenuItems(m, folder)
 	})
 }
 

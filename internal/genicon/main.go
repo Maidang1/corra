@@ -1,130 +1,94 @@
-// Command genicon draws the app icon (1024x102 PNG) deterministically in
+// Command genicon draws the app icon (1024×1024 PNG) deterministically in
 // pure Go, so the repository carries no binary assets. Run before
 // packaging: go run ./internal/genicon
+//
+// The mark: an ink-blue macOS squircle with a fountain-pen nib — Corra is
+// a writing tool. The nib's slit and breather hole are punched out with an
+// even-odd fill, so no masks or secondary passes are needed.
 package main
 
 import (
-	"image"
 	"image/color"
-	"image/draw"
-	"image/png"
-	"math"
 	"os"
+
+	"git.sr.ht/~sbinet/gg"
 )
 
-const size = 1024
+const (
+	size   = 1024.0
+	radius = 228.0 // macOS icon corner, ~22.3% of the side
+)
 
 func main() {
-	img := image.NewRGBA(image.Rect(0, 0, size, size))
+	dc := gg.NewContext(int(size), int(size))
 
-	// Vertical gradient background, deep ink, with rounded corners.
-	top := color.RGBA{24, 26, 32, 255}
-	bot := color.RGBA{38, 42, 54, 255}
-	md := &rounded{rect: image.Rect(0, 0, size, size), radius: 230}
-	draw.DrawMask(img, img.Bounds(), &gradientImage{top: top, bot: bot}, image.Point{}, md, image.Point{}, draw.Over)
+	// Squircle tile: a vertical ink gradient, light at the top like a
+	// backlit key, deep navy at the foot.
+	tile := gg.NewLinearGradient(0, 0, 0, size)
+	tile.AddColorStop(0, color.RGBA{86, 141, 255, 255})
+	tile.AddColorStop(0.55, color.RGBA{38, 92, 235, 255})
+	tile.AddColorStop(1, color.RGBA{13, 46, 138, 255})
+	dc.DrawRoundedRectangle(0, 0, size, size, radius)
+	dc.SetFillStyle(tile)
+	dc.Fill()
 
-	// Accent ring.
-	ring := color.RGBA{94, 141, 255, 255}
-	for a := 0; a < 360*4; a++ {
-		ang := float64(a) / 4 * math.Pi / 180
-		for w := 0; w < 26; w++ {
-			r := 448 + float64(w)
-			x := size/2 + int(r*math.Cos(ang))
-			y := size/2 + int(r*math.Sin(ang))
-			img.SetRGBA(x, y, ring)
-		}
-	}
+	// Top sheen: a soft radial light falling off by the icon's middle.
+	dc.DrawRoundedRectangle(0, 0, size, size, radius)
+	dc.Clip()
+	sheen := gg.NewRadialGradient(size/2, -140, 60, size/2, -140, 760)
+	sheen.AddColorStop(0, color.RGBA{255, 255, 255, 44})
+	sheen.AddColorStop(1, color.RGBA{255, 255, 255, 0})
+	dc.SetFillStyle(sheen)
+	dc.DrawRectangle(0, 0, size, size)
+	dc.Fill()
 
-	// "C" glyph, centered.
-	drawBigC(img, size/2, size/2, 16, color.RGBA{240, 242, 246, 255})
+	// Nib glyph, warm paper white with a hint of blue at the foot.
+	nib := gg.NewLinearGradient(0, 220, 0, 800)
+	nib.AddColorStop(0, color.RGBA{255, 255, 255, 255})
+	nib.AddColorStop(1, color.RGBA{214, 228, 252, 255})
+	dc.SetFillStyle(nib)
+	dc.SetFillRule(gg.FillRuleEvenOdd)
+	nibPath(dc)
+	dc.Fill()
+	dc.ResetClip()
+
+	// Hairline rim inside the tile edge, so the icon holds together on
+	// both light and dark desktops.
+	dc.DrawRoundedRectangle(1.5, 1.5, size-3, size-3, radius-1.5)
+	dc.SetStrokeStyle(gg.NewSolidPattern(color.RGBA{255, 255, 255, 40}))
+	dc.SetLineWidth(3)
+	dc.Stroke()
 
 	if err := os.MkdirAll("resources", 0o755); err != nil {
 		panic(err)
 	}
-	f, err := os.Create("resources/icon.png")
-	if err != nil {
-		panic(err)
-	}
-	defer f.Close()
-	if err := png.Encode(f, img); err != nil {
+	if err := dc.SavePNG("resources/icon.png"); err != nil {
 		panic(err)
 	}
 }
 
-// rounded is a rounded-rectangle alpha mask.
-type rounded struct {
-	rect   image.Rectangle
-	radius int
-}
+// nibPath traces the fountain-pen nib centered on the tile: the outline,
+// then the slit and the breather hole as subpaths the even-odd rule
+// punches out.
+func nibPath(dc *gg.Context) {
+	// Outline: a gently domed heel at the top, full shoulders, and the
+	// sides tapering to the sharp writing tip at the bottom.
+	dc.MoveTo(384, 296)
+	dc.QuadraticTo(512, 238, 640, 296) // heel dome
+	dc.CubicTo(694, 388, 708, 486, 664, 596)
+	dc.CubicTo(628, 688, 560, 760, 512, 800) // right side to the tip
+	dc.CubicTo(464, 760, 396, 688, 360, 596)
+	dc.CubicTo(316, 486, 330, 388, 384, 296)
+	dc.ClosePath()
 
-func (r *rounded) ColorModel() color.Model { return color.AlphaModel }
+	// Slit: a narrow wedge from under the breather hole to the tip.
+	dc.MoveTo(501, 508)
+	dc.LineTo(523, 508)
+	dc.LineTo(516, 770)
+	dc.QuadraticTo(512, 784, 508, 770)
+	dc.ClosePath()
 
-func (r *rounded) Bounds() image.Rectangle { return r.rect }
-
-func (r *rounded) At(x, y int) color.Color {
-	dx, dy := 0, 0
-	if x < r.rect.Min.X+r.radius {
-		dx = r.rect.Min.X + r.radius - x
-	} else if x > r.rect.Max.X-1-r.radius {
-		dx = x - (r.rect.Max.X - 1 - r.radius)
-	}
-	if y < r.rect.Min.Y+r.radius {
-		dy = r.rect.Min.Y + r.radius - y
-	} else if y > r.rect.Max.Y-1-r.radius {
-		dy = y - (r.rect.Max.Y - 1 - r.radius)
-	}
-	if dx == 0 && dy == 0 {
-		return color.Alpha{255}
-	}
-	if dx*dx+dy*dy <= r.radius*r.radius {
-		return color.Alpha{255}
-	}
-	return color.Alpha{0}
-}
-
-type gradientImage struct{ top, bot color.RGBA }
-
-func (g *gradientImage) ColorModel() color.Model { return color.RGBAModel }
-func (g *gradientImage) Bounds() image.Rectangle { return image.Rect(0, 0, size, size) }
-func (g *gradientImage) At(x, y int) color.Color {
-	t := float64(y) / (size - 1)
-	return color.RGBA{
-		R: uint8(float64(g.top.R) + t*float64(g.bot.R-g.top.R)),
-		G: uint8(float64(g.top.G) + t*float64(g.bot.G-g.top.G)),
-		B: uint8(float64(g.top.B) + t*float64(g.bot.B-g.top.B)),
-		A: 255,
-	}
-}
-
-// drawBigC rasterizes a blocky "C" at the given scale.
-func drawBigC(img *image.RGBA, cx, cy, scale int, c color.RGBA) {
-	// 7x13 bitmap for "C" in basicfont, scaled up.
-	glyph := []string{
-		"0111110",
-		"1111111",
-		"1110000",
-		"1110000",
-		"1110000",
-		"1110000",
-		"1110000",
-		"1110000",
-		"1110000",
-		"1110000",
-		"1110000",
-		"1111111",
-		"0111110",
-	}
-	w := 7 * scale
-	h := 13 * scale
-	x0 := cx - w/2
-	y0 := cy - h/2
-	for row, line := range glyph {
-		for col, ch := range line {
-			if ch != '1' {
-				continue
-			}
-			draw.Draw(img, image.Rect(x0+col*scale, y0+row*scale, x0+(col+1)*scale, y0+(row+1)*scale),
-				image.NewUniform(c), image.Point{}, draw.Src)
-		}
-	}
+	// Breather hole.
+	dc.DrawCircle(512, 458, 34)
+	dc.ClosePath()
 }

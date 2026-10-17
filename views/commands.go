@@ -52,11 +52,13 @@ func (v *View) reconcileSelection() {
 	}
 }
 
-func (v *View) folderMenu(m *ui.Menu) {
+// folderMenuItems builds the folder commands of a context menu. folder is
+// the menu's target: the sidebar row's folder, not the selected one, so a
+// right-click acts on the row under the pointer.
+func (v *View) folderMenuItems(m *ui.Menu, folder string) {
 	if m.Item("新建文件夹…").Chosen() {
 		v.openFolderDialog("新建文件夹", "")
 	}
-	folder := v.App.SelFolder
 	normal := folder != "" && folder != app.TrashName
 	if m.Item("重命名文件夹…").Disabled(!normal).Chosen() {
 		v.openFolderDialog("重命名文件夹", folder)
@@ -95,16 +97,8 @@ func (v *View) noteMenu(m *ui.Menu) {
 		v.deleteNote()
 	}
 	m.Separator()
-	if m.Item("切换 浅色 / 深色").Chosen() {
-		v.toggleTheme()
-	}
-	if m.Item("跟随系统外观").Checked(v.App.ThemeMode == app.ThemeSystem).Chosen() {
-		v.App.ThemeMode = app.ThemeSystem
-		v.App.InvalidateUI()
-	}
-	if m.Item("图床设置…").Chosen() {
-		v.HostDraft = v.App.Hosting
-		v.HostOpen = true
+	if m.Item("设置…").Chosen() {
+		v.SettingsOpen = true
 	}
 }
 

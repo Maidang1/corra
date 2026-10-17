@@ -171,6 +171,20 @@ func (e *Editor) SetStyle(zoom float64, dark, editable bool) {
 	}
 }
 
+// SetFont applies the settings' typefaces to the native editor: the body
+// family for prose and the monospace family for code. Empty values keep
+// the system fonts.
+func (e *Editor) SetFont(body, mono string) {
+	if e == nil || e.native == 0 {
+		return
+	}
+	bodyArg, freeBody := stringArg(body)
+	defer freeBody()
+	monoArg, freeMono := stringArg(mono)
+	defer freeMono()
+	C.cr_font(e.native, bodyArg, monoArg)
+}
+
 // SetMathNumbering changes presentation without editing Markdown or history.
 func (e *Editor) SetMathNumbering(mode string) {
 	if mode == "" {

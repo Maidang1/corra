@@ -22,21 +22,34 @@ func TestProbeHeaderClicks(t *testing.T) {
 	tt := ui.NewTester(v.Build, 1280, 820)
 	tt.SetScale(2)
 	tt.SetTitleBar(ui.TitleBar{Height: 28, Left: 80})
-	for _, l := range []string{"切换 浅色 / 深色", "插入任务列表", "新建文档 (Cmd+N)", "切换边栏"} {
+	for _, l := range []string{"设置…", "插入任务列表", "新建文档 (Cmd+N)", "切换边栏"} {
 		r, ok := tt.Find(l)
 		t.Logf("%s => %+v %v", l, r, ok)
 	}
-	tm := a.ThemeMode
 	if err := tt.Click("文档选项"); err != nil {
 		t.Fatal(err)
 	}
-	if err := tt.ChooseMenuItem("切换 浅色 / 深色"); err != nil {
+	if err := tt.ChooseMenuItem("设置…"); err != nil {
+		t.Fatal(err)
+	}
+	if !v.SettingsOpen {
+		t.Fatal("settings modal did not open")
+	}
+	tm := a.ThemeMode
+	if err := tt.Click("深色"); err != nil {
 		t.Fatal(err)
 	}
 	if a.ThemeMode == tm {
 		t.Fatal("theme did not change")
 	}
 	t.Logf("theme %v -> %v", tm, a.ThemeMode)
+	if err := tt.Click("完成"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if v.SettingsOpen {
+		t.Fatal("settings modal did not close")
+	}
 	src := a.Source
 	if err := tt.Click("插入任务列表"); err != nil {
 		t.Fatal(err)

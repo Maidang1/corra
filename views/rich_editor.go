@@ -26,6 +26,9 @@ type RichEditor interface {
 	SetFrame(x, y, width, height float64)
 	SetVisible(bool)
 	SetStyle(zoom float64, dark, editable bool)
+	// SetFont applies the settings' typefaces: body family for prose,
+	// mono family for code; empty keeps the system fonts.
+	SetFont(body, mono string)
 	SetBaseDir(dir string)
 	SetMathNumbering(mode string)
 	SetCodeLineNumbers(enabled bool)
@@ -106,7 +109,7 @@ func (v *View) syncEditor() bool {
 func (v *View) richVisible() bool {
 	return v.rich != nil && v.App.Mode == app.ModeRich &&
 		(v.App.Path != "" || v.App.Source != "") &&
-		!v.App.Conflict && !v.HostOpen && v.FolderDialog == "" && !v.DeleteOpen
+		!v.App.Conflict && !v.HostOpen && !v.SettingsOpen && v.FolderDialog == "" && !v.DeleteOpen
 }
 
 func (v *View) richPane(c *ui.Context) {
@@ -114,6 +117,7 @@ func (v *View) richPane(c *ui.Context) {
 	v.rich.SetCodeLineNumbers(v.App.CodeLineNumbers)
 	v.ensureRichEditor()
 	v.rich.SetStyle(float64(v.App.Zoom), c.Theme().Dark, v.canEdit())
+	v.rich.SetFont(v.App.BodyFont, v.App.MonoFont)
 	// The native editor is a rectangular hole punched through the window:
 	// inset it from the card's rim so its square corners never cover the
 	// card's rounded ones.

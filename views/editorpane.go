@@ -47,7 +47,7 @@ func (v *View) editorPane(c *ui.Context) {
 		// changes; colors left zero follow the window theme.
 		v.edState.Theme = &editor.Theme{Background: t.Surface}
 		v.edState.ReadOnly = !v.canEdit()
-		v.edState.Font = ui.Font{Family: fontMono, Size: 14 * v.App.Zoom}
+		v.edState.Font = ui.Font{Family: v.monoStack(), Size: 14 * v.App.Zoom}
 		// The same centered reading column as the rich editor (Typora keeps
 		// one measure in both modes).
 		side := float32(22)

@@ -81,11 +81,7 @@ func buildMenu() *mygo.Menu {
 			item("插入目录 [TOC]", "", func() { view.InsertMarkdown("\n[TOC]\n") }),
 			item("插入分页符", "", func() { view.InsertMarkdown("\n<div style=\"page-break-after: always\"></div>\n") }),
 			mygo.Separator(),
-			item("图床设置…", "", func() {
-				view.HostDraft = editorApp.Hosting
-				view.HostOpen = true
-				editorApp.InvalidateUI()
-			}),
+			item("设置…", "CmdOrCtrl+,", func() { view.OpenSettings() }),
 			mygo.Separator(),
 			role(mygo.RoleClose),
 			role(mygo.RoleQuit),
@@ -178,7 +174,6 @@ func buildMenu() *mygo.Menu {
 			item("缩小", "CmdOrCtrl+-", func() { zoomBy(-0.1) }),
 			item("实际大小", "CmdOrCtrl+Shift+0", func() { view.App.Zoom = 1; editorApp.InvalidateUI() }),
 			mygo.Separator(),
-			item("切换深浅色", "", func() { view.ToggleThemeAction() }),
 			role(mygo.RoleToggleFullScreen),
 		},
 	}

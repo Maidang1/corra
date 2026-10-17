@@ -54,6 +54,9 @@ no JavaScript. Go draws the shell on the GPU; macOS uses an AppKit
 - **Deep native integration** — system dark mode, drag & drop, file
   associations, external-change detection with a conflict dialog, global
   menu with accelerators
+- **Preferences (Cmd+,)** — appearance (system / light / dark), body and
+  code typefaces, and the writing aids in one settings panel, persisted
+  across launches
 
 ### Storage
 
@@ -143,6 +146,8 @@ JavaScript。Go 在 GPU 上绘制外壳，macOS 编辑区使用 AppKit 原生富
   标题自动编号、macOS 原生打印
 - **深度系统集成**：系统深浅色、拖放打开、文件关联、外部修改检测
   与冲突处理、全局菜单与快捷键
+- **设置面板（Cmd+,）**：外观（跟随系统 / 浅色 / 深色）、正文与代码
+  字体、写作辅助开关集中一处，并持久化保存
 
 ### 存储
 
