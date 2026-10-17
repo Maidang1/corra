@@ -57,6 +57,8 @@ extern char *cr_render_math_document(uintptr_t handle, const char *document, int
 @property BOOL suppress;
 @property BOOL dark;
 @property double zoom;
+@property NSString *bodyFont; // settings' body family; nil = system font
+@property NSString *monoFont; // settings' code family; nil = system mono
 @property NSDictionary *emptyParagraph;
 @property NSString *baseDir;
 @property NSMutableDictionary *mathCache;
@@ -506,7 +508,15 @@ static BOOL CRHasFootnote(NSDictionary *paragraph) {
     BOOL note = [p[@"footnoteId"] length] > 0 && !heading && !source;
     if (note) size = 14 * _zoom;
     if (([attrs[CRCode] boolValue] || [attrs[CRKbd] boolValue]) && !heading) size -= 1.5 * _zoom;
-    NSFont *font = ([attrs[CRCode] boolValue] || [attrs[CRKbd] boolValue] || source) ? [NSFont monospacedSystemFontOfSize:size weight:NSFontWeightRegular] : [NSFont systemFontOfSize:size weight:(heading && level > 2) ? NSFontWeightSemibold : NSFontWeightRegular];
+    BOOL mono = [attrs[CRCode] boolValue] || [attrs[CRKbd] boolValue] || source;
+    NSFont *font;
+    if (mono) {
+        font = _monoFont.length ? [NSFont fontWithName:_monoFont size:size] : nil;
+        if (!font) font = [NSFont monospacedSystemFontOfSize:size weight:NSFontWeightRegular];
+    } else {
+        font = _bodyFont.length ? [NSFont fontWithName:_bodyFont size:size] : nil;
+        if (!font) font = [NSFont systemFontOfSize:size weight:(heading && level > 2) ? NSFontWeightSemibold : NSFontWeightRegular];
+    }
     NSFontTraitMask traits = 0;
     if ([attrs[CRBold] boolValue] || (heading && level <= 2) || (cell && cell.startingRow == 0)) traits |= NSBoldFontMask;
     if (traits) font = [[NSFontManager sharedFontManager] convertFont:font toHaveTrait:traits];
@@ -2945,6 +2955,15 @@ static void CRUpdateInset(CREditor *e) {
 void cr_frame(uintptr_t ptr,double x,double y,double w,double h) { CREditor *e=CRE(ptr); NSView *parent=e.scroll.superview; CGFloat top=parent.isFlipped ? y : parent.bounds.size.height-y-h; NSRect frame=NSMakeRect(x,top,MAX(0,w),MAX(0,h)); if (!NSEqualRects(frame,e.scroll.frame)) { e.scroll.frame=frame; CRUpdateInset(e); } }
 void cr_visible(uintptr_t ptr,int visible) { CREditor *e=CRE(ptr); if (!visible && e.window.firstResponder==e.text) cr_focus(ptr,0); e.scroll.hidden=!visible; }
 void cr_base_dir(uintptr_t ptr,const char *path) { CRE(ptr).baseDir=[NSString stringWithUTF8String:path]; }
+void cr_font(uintptr_t ptr,const char *body,const char *mono) {
+    CREditor *e=CRE(ptr);
+    NSString *bodyName=body&&strlen(body)?[NSString stringWithUTF8String:body]:nil;
+    NSString *monoName=mono&&strlen(mono)?[NSString stringWithUTF8String:mono]:nil;
+    if ((e.bodyFont==bodyName || [e.bodyFont isEqualToString:bodyName]) && (e.monoFont==monoName || [e.monoFont isEqualToString:monoName])) return;
+    e.bodyFont=bodyName; e.monoFont=monoName;
+    [e restyle];
+    e.tocSignature=nil; [e refreshTOC]; // the TOC figure's labels use the body font
+}
 void cr_style(uintptr_t ptr,double zoom,int dark,int editable) {
     CREditor *e=CRE(ptr); zoom=MAX(0.5,MIN(3,zoom));
     if (e.zoom==zoom && e.dark==dark && e.text.editable==editable) return;

@@ -46,6 +46,8 @@ type App struct {
 	// View state.
 	Mode        Mode
 	ThemeMode   ThemeMode
+	BodyFont    string  // rich editor body family ("" = system default)
+	MonoFont    string  // source editor / code family ("" = system default)
 	Zoom        float32 // 1 = 100%
 	Sidebar     bool    // navigation sidebar visible (folders + notes list)
 	Outline     bool    // outline (TOC) panel visible
@@ -278,6 +280,23 @@ func (a *App) Redo() {
 	if src, caret, ok := a.Hist.Redo(a.Source, 0); ok {
 		a.SetSourceQuiet(src, caret)
 	}
+}
+
+// SnapshotSettings collects the persisted preferences.
+func (a *App) SnapshotSettings() Settings {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return Settings{ThemeMode: a.ThemeMode, BodyFont: a.BodyFont, MonoFont: a.MonoFont}
+}
+
+// ApplySettings loads persisted preferences into the app state (startup).
+func (a *App) ApplySettings(s Settings) {
+	a.mu.Lock()
+	a.ThemeMode = s.ThemeMode
+	a.BodyFont = s.BodyFont
+	a.MonoFont = s.MonoFont
+	a.mu.Unlock()
+	a.InvalidateUI()
 }
 
 // RecentPaths returns a copy of the recent-files list.

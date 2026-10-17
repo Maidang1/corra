@@ -52,11 +52,10 @@ func (v *View) header(c *ui.Context) {
 				ui.Column(c).Gap(0).Children(func() {
 					ui.Text(c, folderLabel(v.App.SelFolder)).FontSize(13).Bold().NoWrap().Clip()
 					ui.Text(c, itoa(len(v.App.VisibleNotes()))+" 个文档").FontSize(11).TextColor(t.TextMuted)
+				}).ContextMenu(func(m *ui.Menu) {
+					v.folderMenuItems(m, v.App.SelFolder)
 				})
 			}
-			toolbarCapsule(c).Children(func() {
-				iconButton(c, iconEllipsis, "文件夹选项", nil).Menu(v.folderMenu)
-			})
 		}
 		ui.Spacer(c)
 		v.modeSwitcher(c)
@@ -96,6 +95,7 @@ func (v *View) header(c *ui.Context) {
 				}
 				v.noteMenu(m)
 			})
+			iconButton(c, iconGear, "设置 (Cmd+,)", v.OpenSettings)
 		})
 	})
 }

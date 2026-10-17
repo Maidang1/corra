@@ -63,6 +63,15 @@ var (
 	fontMono = "SF Mono, Menlo, Cascadia Code, JetBrains Mono, Consolas, Noto Sans Mono CJK SC, monospace"
 )
 
+// monoStack is the source editor's font family list: the family chosen in
+// the settings first, the built-in stack as its fallback.
+func (v *View) monoStack() string {
+	if v.App.MonoFont == "" {
+		return fontMono
+	}
+	return v.App.MonoFont + ", " + fontMono
+}
+
 // cardBorder is the hairline rim around a floating card.
 func cardBorder(t *ui.Theme) ui.Color {
 	if t.Dark {
