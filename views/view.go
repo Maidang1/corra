@@ -48,6 +48,9 @@ type View struct {
 	HostOpen  bool
 	HostDraft app.HostingConfig
 
+	// Settings modal (preferences: appearance, fonts, writing aids).
+	SettingsOpen bool
+
 	// windowW is the window's width as of the last frame, for the
 	// toolbar's compact layout.
 	windowW float32
@@ -58,6 +61,7 @@ type View struct {
 	// Cross-package callbacks, bound from main.
 	OnConflictResolve func(reload bool)
 	OnSaveHosting     func(cfg app.HostingConfig)
+	OnSaveSettings    func()
 	OnOpenRecent      func(path string)
 	OnExportPDF       func()
 	OnCopyHTML        func() ([]byte, error)
@@ -140,6 +144,9 @@ func (v *View) Build(c *ui.Context) {
 	}
 	if v.HostOpen {
 		v.hostingDialog(c)
+	}
+	if v.SettingsOpen {
+		v.settingsDialog(c)
 	}
 	if v.FolderDialog != "" {
 		v.folderDialog(c)

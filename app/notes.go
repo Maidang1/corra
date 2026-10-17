@@ -60,7 +60,7 @@ func (a *App) NewNote() error {
 	root, folder := a.LibraryRoot, a.SelFolder
 	a.mu.Unlock()
 	if root == "" {
-		return fmt.Errorf("未设置备忘录文件夹")
+		return fmt.Errorf("未设置文档库目录")
 	}
 	if folder == TrashName {
 		folder = ""

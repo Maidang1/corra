@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/egoist/mygo"
@@ -64,5 +65,23 @@ func TestWelcomeNoteParsesAndRoundTrips(t *testing.T) {
 	}
 	if _, err := render.ExportPDF(nil, doc, "welcome"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestWelcomeUsesMarkdownEditorPositioning(t *testing.T) {
+	for _, want := range []string{
+		"原生 Markdown 桌面编辑器",
+		"## 文档库与编辑区",
+		"全部文档",
+		"文档修改时间",
+	} {
+		if !strings.Contains(app.Welcome, want) {
+			t.Errorf("welcome does not contain %q", want)
+		}
+	}
+	for _, legacy := range []string{"备忘录", "笔记", "Apple Notes", "## 两栏布局"} {
+		if strings.Contains(app.Welcome, legacy) {
+			t.Errorf("welcome retains legacy positioning %q", legacy)
+		}
 	}
 }

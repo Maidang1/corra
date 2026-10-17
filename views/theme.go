@@ -8,7 +8,7 @@ import (
 	"github.com/Maidang1/corra/app"
 )
 
-// Design tokens: a quiet, paper-like light theme and a low-contrast dark
+// Design tokens: a quiet, paper-like light theme and a restrained dark
 // theme, sharing one accent. Spacing is the base unit MyGo widgets size by.
 var (
 	light = &ui.Theme{
@@ -19,12 +19,12 @@ var (
 		SurfacePressed: ui.Hex("#e9ebed"),
 		Border:         ui.Hex("#e5e5e5"),
 		Text:           ui.Hex("#292929"),
-		TextMuted:      ui.Hex("#727272"),
+		TextMuted:      ui.Hex("#666666"),
 		Accent:         ui.Hex("#007aff"),
 		AccentHover:    ui.Hex("#0071e3"),
 		AccentPressed:  ui.Hex("#0060c2"),
 		AccentText:     ui.Hex("#ffffff"),
-		Danger:         ui.Hex("#d64545"),
+		Danger:         ui.Hex("#c43d3d"),
 		Warning:        ui.Hex("#c98a1b"),
 		Success:        ui.Hex("#3f9e5f"),
 		Selection:      ui.Hex("#d6e4ff"),
@@ -42,12 +42,12 @@ var (
 		SurfacePressed: ui.Hex("#36383f"),
 		Border:         ui.Hex("#3a3c44"),
 		Text:           ui.Hex("#e7e9ee"),
-		TextMuted:      ui.Hex("#8b909a"),
+		TextMuted:      ui.Hex("#c7ccd4"),
 		Accent:         ui.Hex("#0a84ff"), // macOS dark-mode system blue
 		AccentHover:    ui.Hex("#409cff"),
 		AccentPressed:  ui.Hex("#0070e0"),
 		AccentText:     ui.Hex("#ffffff"),
-		Danger:         ui.Hex("#e06c6c"),
+		Danger:         ui.Hex("#ffaaaa"),
 		Warning:        ui.Hex("#d9a13b"),
 		Success:        ui.Hex("#5cb87e"),
 		Selection:      ui.Hex("#2e4a86"),
@@ -62,6 +62,15 @@ var (
 	fontUI   = "SF Pro Text, .AppleSystemUIFont, Helvetica Neue, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, sans-serif"
 	fontMono = "SF Mono, Menlo, Cascadia Code, JetBrains Mono, Consolas, Noto Sans Mono CJK SC, monospace"
 )
+
+// monoStack is the source editor's font family list: the family chosen in
+// the settings first, the built-in stack as its fallback.
+func (v *View) monoStack() string {
+	if v.App.MonoFont == "" {
+		return fontMono
+	}
+	return v.App.MonoFont + ", " + fontMono
+}
 
 // cardBorder is the hairline rim around a floating card.
 func cardBorder(t *ui.Theme) ui.Color {

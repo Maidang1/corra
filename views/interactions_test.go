@@ -64,10 +64,10 @@ func TestCollapsedSidebar(t *testing.T) {
 	if v.App.Sidebar {
 		t.Fatal("sidebar did not collapse")
 	}
-	if tt.HasText("全部备忘录") || tt.HasText("搜索备忘录") {
+	if tt.HasText("全部文档") || tt.HasText("搜索文档") {
 		t.Fatal("collapsed sidebar still renders navigation or search")
 	}
-	for _, label := range []string{"新建备忘录 (Cmd+N)", "文本格式", "插入表格", "共享与导出"} {
+	for _, label := range []string{"新建文档 (Cmd+N)", "文本格式", "插入表格", "共享与导出"} {
 		r, ok := tt.Find(label)
 		if !ok || r.X+r.W > 961 || r.W < 25 {
 			t.Fatalf("collapsed toolbar %s out of bounds %+v", label, r)
@@ -84,7 +84,7 @@ func TestCollapsedSidebar(t *testing.T) {
 		f.Close()
 	}
 	click(t, tt, "切换边栏")
-	if !v.App.Sidebar || !tt.HasText("全部备忘录") {
+	if !v.App.Sidebar || !tt.HasText("全部文档") {
 		t.Fatal("sidebar did not expand back")
 	}
 }
@@ -176,10 +176,10 @@ func TestEmptyFolderClearsEditorAndTrashRestores(t *testing.T) {
 	}
 	tt.Frame()
 	click(t, tt, "文件夹：Empty")
-	if v.App.Path != "" || !tt.HasText("未选择备忘录") {
+	if v.App.Path != "" || !tt.HasText("未选择文档") {
 		t.Fatal("empty folder shows unrelated note")
 	}
-	click(t, tt, "文件夹：全部备忘录")
+	click(t, tt, "文件夹：全部文档")
 	if err := v.App.DeleteSelectedNote(); err != nil {
 		t.Fatal(err)
 	}
@@ -188,8 +188,8 @@ func TestEmptyFolderClearsEditorAndTrashRestores(t *testing.T) {
 	if len(v.App.VisibleNotes()) != 1 || v.App.Path == "" {
 		t.Fatal("trash note not loaded")
 	}
-	click(t, tt, "备忘录选项")
-	if err := tt.ChooseMenuItem("恢复备忘录"); err != nil {
+	click(t, tt, "文档选项")
+	if err := tt.ChooseMenuItem("恢复文档"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(path); err != nil {
@@ -235,7 +235,7 @@ func TestNotesShellSizes(t *testing.T) {
 				v.App.ThemeMode = app.ThemeDark
 			}
 			tt.SetSize(width, 820)
-			for _, label := range []string{"新建备忘录 (Cmd+N)", "文本格式", "插入表格", "共享与导出", "搜索备忘录"} {
+			for _, label := range []string{"新建文档 (Cmd+N)", "文本格式", "插入表格", "共享与导出", "搜索文档"} {
 				r, ok := tt.Find(label)
 				if !ok || r.X < 0 || r.X+r.W > float32(width)+1 || r.W < 25 {
 					t.Fatalf("%s outside %d: %+v", label, width, r)
@@ -261,8 +261,8 @@ func TestNotesShellSizes(t *testing.T) {
 
 func TestTypingAutosavesOnUIFrame(t *testing.T) {
 	v, tt := notesFixture(t)
-	click(t, tt, "新建备忘录 (Cmd+N)")
-	click(t, tt, "备忘录正文")
+	click(t, tt, "新建文档 (Cmd+N)")
+	click(t, tt, "文档正文")
 	tt.Type("keyboard edit")
 	if !strings.Contains(v.App.Source, "keyboard edit") {
 		t.Fatalf("typing did not reach source: %q", v.App.Source)
@@ -289,7 +289,7 @@ func TestFolderDialogAndFullTextSearch(t *testing.T) {
 		t.Fatal(v.SaveError)
 	}
 	tt.Frame()
-	click(t, tt, "搜索备忘录")
+	click(t, tt, "搜索文档")
 	tt.Type("needleXYZ")
 	if len(v.App.VisibleNotes()) != 1 {
 		t.Fatal("full body search returned nothing")
@@ -299,16 +299,16 @@ func TestFolderDialogAndFullTextSearch(t *testing.T) {
 func TestDeleteConfirmationAndRestoreClicks(t *testing.T) {
 	v, tt := notesFixture(t)
 	path := v.App.Path
-	click(t, tt, "备忘录选项")
-	if err := tt.ChooseMenuItem("删除备忘录…"); err != nil {
+	click(t, tt, "文档选项")
+	if err := tt.ChooseMenuItem("删除文档…"); err != nil {
 		t.Fatal(err)
 	}
 	click(t, tt, "取消")
 	if _, err := os.Stat(path); err != nil {
 		t.Fatal("cancel deleted note")
 	}
-	click(t, tt, "备忘录选项")
-	if err := tt.ChooseMenuItem("删除备忘录…"); err != nil {
+	click(t, tt, "文档选项")
+	if err := tt.ChooseMenuItem("删除文档…"); err != nil {
 		t.Fatal(err)
 	}
 	click(t, tt, "删除")
@@ -316,8 +316,8 @@ func TestDeleteConfirmationAndRestoreClicks(t *testing.T) {
 		t.Fatal("delete did not move note")
 	}
 	click(t, tt, "文件夹：最近删除")
-	click(t, tt, "备忘录选项")
-	if err := tt.ChooseMenuItem("恢复备忘录"); err != nil {
+	click(t, tt, "文档选项")
+	if err := tt.ChooseMenuItem("恢复文档"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(path); err != nil {
@@ -355,7 +355,7 @@ func TestCompactToolbar(t *testing.T) {
 	if _, ok := tt.Find("文本格式"); ok {
 		t.Fatal("formatting group still in a narrow toolbar")
 	}
-	for _, label := range []string{"新建备忘录 (Cmd+N)", "共享与导出", "备忘录选项"} {
+	for _, label := range []string{"新建文档 (Cmd+N)", "共享与导出", "文档选项"} {
 		r, ok := tt.Find(label)
 		if !ok || r.X+r.W > 861 {
 			t.Fatalf("narrow toolbar %s out of bounds %+v", label, r)

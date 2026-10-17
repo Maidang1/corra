@@ -30,6 +30,7 @@ func (e *fakeRichEditor) InsertMarkdown(s string)                    { e.source 
 func (e *fakeRichEditor) SetFrame(x, y, w, h float64)                { e.x, e.y, e.width, e.height = x, y, w, h }
 func (e *fakeRichEditor) SetVisible(v bool)                          { e.visible = v }
 func (e *fakeRichEditor) SetStyle(zoom float64, dark, editable bool) {}
+func (e *fakeRichEditor) SetFont(body, mono string)                  {}
 func (e *fakeRichEditor) SetSpellcheck(bool)                         {}
 func (e *fakeRichEditor) SetFocusMode(bool)                          {}
 func (e *fakeRichEditor) SetTypewriter(bool)                         {}

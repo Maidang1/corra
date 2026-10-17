@@ -57,6 +57,8 @@ extern char *cr_render_math_document(uintptr_t handle, const char *document, int
 @property BOOL suppress;
 @property BOOL dark;
 @property double zoom;
+@property NSString *bodyFont; // settings' body family; nil = system font
+@property NSString *monoFont; // settings' code family; nil = system mono
 @property NSDictionary *emptyParagraph;
 @property NSString *baseDir;
 @property NSMutableDictionary *mathCache;
@@ -310,6 +312,13 @@ static NSDictionary *CRParagraphAt(CREditor *e, NSUInteger location) {
 static CGFloat CRTopInset(CREditor *editor) {
     return (22+(CRKind(CRParagraphAt(editor,0),@"code") ? 20 : 0))*editor.zoom;
 }
+// CRMutedColor is secondary ink for code metadata and raw markup. It mirrors
+// the shell's TextMuted tokens so both editing surfaces share one hierarchy.
+static NSColor *CRMutedColor(BOOL dark) {
+    return dark ? [NSColor colorWithRed:0.780 green:0.800 blue:0.831 alpha:1]
+                : [NSColor colorWithWhite:0.40 alpha:1];
+}
+
 // CRHlColor maps a chroma token class (see render.Highlight) to a theme color.
 // A one-palette-each-mode scheme keeps the code chip legible without a full
 // theme engine; unknown classes inherit the default source color (nil).
@@ -321,7 +330,7 @@ static NSColor *CRHlColor(NSString *cls, BOOL dark) {
             @"string":[NSColor colorWithRed:0.11 green:0.46 blue:0.16 alpha:1],
             @"number":[NSColor colorWithRed:0.11 green:0.30 blue:0.75 alpha:1],
             @"literal":[NSColor colorWithRed:0.11 green:0.30 blue:0.75 alpha:1],
-            @"comment":[NSColor colorWithRed:0.50 green:0.52 blue:0.55 alpha:1],
+            @"comment":CRMutedColor(NO),
             @"operator":[NSColor colorWithRed:0.40 green:0.22 blue:0.56 alpha:1],
             @"type":[NSColor colorWithRed:0.19 green:0.42 blue:0.66 alpha:1],
             @"name":[NSColor colorWithRed:0.47 green:0.30 blue:0.07 alpha:1],
@@ -331,7 +340,7 @@ static NSColor *CRHlColor(NSString *cls, BOOL dark) {
             @"string":[NSColor colorWithRed:0.58 green:0.82 blue:0.52 alpha:1],
             @"number":[NSColor colorWithRed:0.60 green:0.76 blue:0.98 alpha:1],
             @"literal":[NSColor colorWithRed:0.60 green:0.76 blue:0.98 alpha:1],
-            @"comment":[NSColor colorWithRed:0.56 green:0.59 blue:0.63 alpha:1],
+            @"comment":CRMutedColor(YES),
             @"operator":[NSColor colorWithRed:0.80 green:0.68 blue:0.92 alpha:1],
             @"type":[NSColor colorWithRed:0.56 green:0.78 blue:0.96 alpha:1],
             @"name":[NSColor colorWithRed:0.90 green:0.74 blue:0.46 alpha:1],
@@ -499,7 +508,15 @@ static BOOL CRHasFootnote(NSDictionary *paragraph) {
     BOOL note = [p[@"footnoteId"] length] > 0 && !heading && !source;
     if (note) size = 14 * _zoom;
     if (([attrs[CRCode] boolValue] || [attrs[CRKbd] boolValue]) && !heading) size -= 1.5 * _zoom;
-    NSFont *font = ([attrs[CRCode] boolValue] || [attrs[CRKbd] boolValue] || source) ? [NSFont monospacedSystemFontOfSize:size weight:NSFontWeightRegular] : [NSFont systemFontOfSize:size weight:(heading && level > 2) ? NSFontWeightSemibold : NSFontWeightRegular];
+    BOOL mono = [attrs[CRCode] boolValue] || [attrs[CRKbd] boolValue] || source;
+    NSFont *font;
+    if (mono) {
+        font = _monoFont.length ? [NSFont fontWithName:_monoFont size:size] : nil;
+        if (!font) font = [NSFont monospacedSystemFontOfSize:size weight:NSFontWeightRegular];
+    } else {
+        font = _bodyFont.length ? [NSFont fontWithName:_bodyFont size:size] : nil;
+        if (!font) font = [NSFont systemFontOfSize:size weight:(heading && level > 2) ? NSFontWeightSemibold : NSFontWeightRegular];
+    }
     NSFontTraitMask traits = 0;
     if ([attrs[CRBold] boolValue] || (heading && level <= 2) || (cell && cell.startingRow == 0)) traits |= NSBoldFontMask;
     if (traits) font = [[NSFontManager sharedFontManager] convertFont:font toHaveTrait:traits];
@@ -525,7 +542,7 @@ static BOOL CRHasFootnote(NSDictionary *paragraph) {
     if ([attrs[CRHTML] boolValue]) {
         // Raw HTML reads as markup, not prose: quiet and monospaced.
         out[NSFontAttributeName] = [NSFont monospacedSystemFontOfSize:size-2*_zoom weight:NSFontWeightRegular];
-        out[NSForegroundColorAttributeName] = _dark ? [NSColor colorWithWhite:0.55 alpha:1] : [NSColor colorWithWhite:0.55 alpha:1];
+        out[NSForegroundColorAttributeName] = CRMutedColor(_dark);
     } else if (CRKind(p,@"quote") || note || (CRList(p) && CRQuoteOf(p))) out[NSForegroundColorAttributeName] = _dark ? [NSColor colorWithWhite:0.62 alpha:1] : [NSColor colorWithWhite:0.42 alpha:1];
     NSMutableParagraphStyle *style = [NSMutableParagraphStyle new];
     // ~1.55 line height keeps mixed CJK/Latin lines from rubbing shoulders.
@@ -2417,7 +2434,7 @@ static BOOL CRFootnoteAreaStart(CREditor *e, NSUInteger at) {
         NSRect chip=NSIsEmptyRect(group) ? NSZeroRect : chipBounds();
         flush();
         if (groupLang.length) {
-            NSDictionary *attrs=@{NSFontAttributeName:[NSFont systemFontOfSize:10.5*e.zoom],NSForegroundColorAttributeName:e.dark ? [NSColor colorWithWhite:0.55 alpha:1] : [NSColor colorWithWhite:0.6 alpha:1]};
+            NSDictionary *attrs=@{NSFontAttributeName:[NSFont systemFontOfSize:10.5*e.zoom],NSForegroundColorAttributeName:CRMutedColor(e.dark)};
             NSSize size=[groupLang sizeWithAttributes:attrs];
             [groupLang drawAtPoint:NSMakePoint(NSMaxX(chip)-size.width-10*e.zoom,chip.origin.y+6*e.zoom) withAttributes:attrs];
         }
@@ -2938,6 +2955,15 @@ static void CRUpdateInset(CREditor *e) {
 void cr_frame(uintptr_t ptr,double x,double y,double w,double h) { CREditor *e=CRE(ptr); NSView *parent=e.scroll.superview; CGFloat top=parent.isFlipped ? y : parent.bounds.size.height-y-h; NSRect frame=NSMakeRect(x,top,MAX(0,w),MAX(0,h)); if (!NSEqualRects(frame,e.scroll.frame)) { e.scroll.frame=frame; CRUpdateInset(e); } }
 void cr_visible(uintptr_t ptr,int visible) { CREditor *e=CRE(ptr); if (!visible && e.window.firstResponder==e.text) cr_focus(ptr,0); e.scroll.hidden=!visible; }
 void cr_base_dir(uintptr_t ptr,const char *path) { CRE(ptr).baseDir=[NSString stringWithUTF8String:path]; }
+void cr_font(uintptr_t ptr,const char *body,const char *mono) {
+    CREditor *e=CRE(ptr);
+    NSString *bodyName=body&&strlen(body)?[NSString stringWithUTF8String:body]:nil;
+    NSString *monoName=mono&&strlen(mono)?[NSString stringWithUTF8String:mono]:nil;
+    if ((e.bodyFont==bodyName || [e.bodyFont isEqualToString:bodyName]) && (e.monoFont==monoName || [e.monoFont isEqualToString:monoName])) return;
+    e.bodyFont=bodyName; e.monoFont=monoName;
+    [e restyle];
+    e.tocSignature=nil; [e refreshTOC]; // the TOC figure's labels use the body font
+}
 void cr_style(uintptr_t ptr,double zoom,int dark,int editable) {
     CREditor *e=CRE(ptr); zoom=MAX(0.5,MIN(3,zoom));
     if (e.zoom==zoom && e.dark==dark && e.text.editable==editable) return;

@@ -10,6 +10,7 @@ void cr_insert(uintptr_t editor, const char *json);
 void cr_frame(uintptr_t editor, double x, double y, double w, double h);
 void cr_visible(uintptr_t editor, int visible);
 void cr_style(uintptr_t editor, double zoom, int dark, int editable);
+void cr_font(uintptr_t editor, const char *body, const char *mono);
 void cr_base_dir(uintptr_t editor, const char *path);
 char *cr_render_math(char *source, int dark, double zoom, int inlineMath);
 char *cr_render_block(char *language, char *body, int dark, double zoom);

@@ -22,11 +22,11 @@ func TestLayoutShot(t *testing.T) {
 	root := t.TempDir()
 	notes := map[string]string{
 		"hello.md":   "# hello world\n\nthis is a time\n\nbug hello\n",
-		"welcome.md": "# 欢迎使用 Corra\n\n一个用 Go 写的原生 Markdown 备忘录，采用 Apple Notes 风格。\n",
+		"welcome.md": "# 欢迎使用 Corra\n\n一个纯原生 Markdown 桌面编辑器，提供文档库、所见即所得与源码编辑。\n",
 		"工作/周报.md":   "# 本周周报\n\n完成了编辑器性能优化，打字延迟降低一个数量级。\n",
 		"工作/会议纪要.md": "# 会议纪要\n\n讨论 Typora 对齐清单。\n",
 		"生活/购物清单.md": "# 购物清单\n\n- [ ] 牛奶\n- [ ] 面包\n",
-		"empty.md":   "# 空白备忘录\n",
+		"empty.md":   "# 空白文档\n",
 	}
 	i := 0
 	for name, body := range notes {

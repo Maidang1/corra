@@ -163,7 +163,7 @@ func moveNoteWithAttachments(dir *os.Root, root, source, folder string) (string,
 			return "", err
 		}
 		if !os.SameFile(original, current) || original.Size() != current.Size() || !original.ModTime().Equal(current.ModTime()) {
-			return "", fmt.Errorf("note changed during move: %s", source)
+			return "", fmt.Errorf("document changed during move: %s", source)
 		}
 		if err := dir.Remove(source); err != nil {
 			return "", err

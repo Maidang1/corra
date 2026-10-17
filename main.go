@@ -66,6 +66,11 @@ func main() {
 			}
 			editorApp.Hosting = cfg
 		}
+		view.OnSaveSettings = func() {
+			if err := app.SaveSettings(configDir, editorApp.SnapshotSettings()); err != nil {
+				mygo.Dialog.Error("保存设置失败", err.Error())
+			}
+		}
 		view.OnOpenRecent = func(path string) { fileOps.OpenPath(path) }
 		view.OnExportPDF = func() {
 			if view.SyncBuffer() {
@@ -90,6 +95,7 @@ func main() {
 		})
 
 		editorApp.Hosting = app.LoadHosting(configDir)
+		editorApp.ApplySettings(app.LoadSettings(configDir))
 		editorApp.HasSysDark = true
 		editorApp.SysDark = mygo.Theme.IsDark()
 		mygo.Theme.OnUpdated(func() { win.Update(func() { editorApp.SysDark = mygo.Theme.IsDark(); editorApp.InvalidateUI() }) })

@@ -52,11 +52,13 @@ func (v *View) reconcileSelection() {
 	}
 }
 
-func (v *View) folderMenu(m *ui.Menu) {
+// folderMenuItems builds the folder commands of a context menu. folder is
+// the menu's target: the sidebar row's folder, not the selected one, so a
+// right-click acts on the row under the pointer.
+func (v *View) folderMenuItems(m *ui.Menu, folder string) {
 	if m.Item("新建文件夹…").Chosen() {
 		v.openFolderDialog("新建文件夹", "")
 	}
-	folder := v.App.SelFolder
 	normal := folder != "" && folder != app.TrashName
 	if m.Item("重命名文件夹…").Disabled(!normal).Chosen() {
 		v.openFolderDialog("重命名文件夹", folder)
@@ -65,7 +67,7 @@ func (v *View) folderMenu(m *ui.Menu) {
 		v.removeFolder(folder)
 	}
 	m.Separator()
-	if m.Item("刷新备忘录").Chosen() {
+	if m.Item("刷新文档库").Chosen() {
 		if v.flushAutosave() {
 			v.App.ScanLibrary()
 			v.reconcileSelection()
@@ -74,13 +76,13 @@ func (v *View) folderMenu(m *ui.Menu) {
 }
 
 func (v *View) noteMenu(m *ui.Menu) {
-	if m.Item("恢复备忘录").Disabled(v.App.SelFolder != app.TrashName || v.App.SelNote == "").Chosen() {
+	if m.Item("恢复文档").Disabled(v.App.SelFolder != app.TrashName || v.App.SelNote == "").Chosen() {
 		if err := v.App.RestoreSelectedNote(); err != nil {
 			v.SaveError = err.Error()
 		}
 	}
 	m.Submenu("移动到", func(sub *ui.Menu) {
-		if sub.Item("备忘录").Disabled(!v.canEdit() || v.App.SelNote == "").Chosen() {
+		if sub.Item("文档库根目录").Disabled(!v.canEdit() || v.App.SelNote == "").Chosen() {
 			v.moveNote("")
 		}
 		if v.App.Lib != nil {
@@ -91,20 +93,12 @@ func (v *View) noteMenu(m *ui.Menu) {
 			}
 		}
 	})
-	if m.Item("删除备忘录…").Disabled(v.App.SelNote == "").Chosen() {
+	if m.Item("删除文档…").Disabled(v.App.SelNote == "").Chosen() {
 		v.deleteNote()
 	}
 	m.Separator()
-	if m.Item("切换 浅色 / 深色").Chosen() {
-		v.toggleTheme()
-	}
-	if m.Item("跟随系统外观").Checked(v.App.ThemeMode == app.ThemeSystem).Chosen() {
-		v.App.ThemeMode = app.ThemeSystem
-		v.App.InvalidateUI()
-	}
-	if m.Item("图床设置…").Chosen() {
-		v.HostDraft = v.App.Hosting
-		v.HostOpen = true
+	if m.Item("设置…").Chosen() {
+		v.SettingsOpen = true
 	}
 }
 
@@ -205,10 +199,10 @@ func (v *View) deleteDialog(c *ui.Context) {
 	open := true
 	ui.Modal(c, &open, func() {
 		ui.Column(c).Width(360).Padding(22).Gap(14).Radius(16).Background(c.Theme().Surface).Children(func() {
-			ui.Text(c, "删除备忘录？").FontSize(16).Bold()
-			message := "备忘录将移到最近删除，你可以在那里恢复。"
+			ui.Text(c, "删除文档？").FontSize(16).Bold()
+			message := "文档将移到最近删除，你可以在那里恢复。"
 			if v.App.SelFolder == app.TrashName {
-				message = "这会永久删除备忘录，无法恢复。"
+				message = "这会永久删除文档，无法恢复。"
 			}
 			ui.Text(c, message).FontSize(13)
 			ui.Row(c).FillWidth().Gap(8).Children(func() {
