@@ -30,7 +30,7 @@ func saveExistingNote(path string, source io.Reader) error {
 		return err
 	}
 	if !original.Mode().IsRegular() {
-		return fmt.Errorf("cannot save a non-regular note: %s", path)
+		return fmt.Errorf("cannot save a non-regular document: %s", path)
 	}
 	var temp *os.File
 	var tempName string
@@ -70,7 +70,7 @@ func saveExistingNote(path string, source io.Reader) error {
 	}
 	if !current.Mode().IsRegular() || !os.SameFile(original, current) ||
 		!original.ModTime().Equal(current.ModTime()) || original.Size() != current.Size() {
-		return fmt.Errorf("note changed during save: %s", path)
+		return fmt.Errorf("document changed during save: %s", path)
 	}
 	if err := dir.Rename(tempName, name); err != nil {
 		return err
