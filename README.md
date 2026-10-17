@@ -6,21 +6,21 @@
 
 ## English
 
-Corra is a Markdown **notes app** with a **fully native UI**, written in
+Corra is a **Markdown desktop editor** with a **fully native UI**, written in
 Go with the [MyGo](https://mygo.egoist.dev) toolkit. No webview, no HTML,
 no JavaScript. Go draws the shell on the GPU; macOS uses an AppKit
 `NSTextView` for rich-text editing.
 
 ### Highlights
 
-- **Apple Notes-style three-column layout** — folders in the sidebar,
-  notes grouped by date (Today / Yesterday / Previous 7 / 30 days) in
-  the list, a dated editor column on the right
+- **Document library and editing workspace** — folders and a
+  modification-date-grouped document list in the sidebar, with a dated editor
+  and optional outline
 - **Native WYSIWYG on macOS** — edit headings, body text, inline styles and
-  checklists directly, with native selection, clipboard and undo/redo. Notes
+  checklists directly, with native selection, clipboard and undo/redo. Documents
   still autosave as Markdown files. Requires a cgo-enabled macOS build.
 - **Source and reading modes** — `Cmd+E` switches rich text / Markdown source;
-  the note menu also offers a full reading preview. Other platforms retain
+  the document menu also offers a full reading preview. Other platforms retain
   source / preview editing. Source mode has syntax highlighting, multiple
   carets and find & replace (Cmd+F).
 - **GFM complete** — tables, task lists, strikethrough, footnotes
@@ -38,7 +38,7 @@ no JavaScript. Go draws the shell on the GPU; macOS uses an AppKit
 - **Syntax highlighting** — 200+ languages via chroma, themed light & dark
 - **Images like Typora** — insert at the caret, paste from the clipboard,
   drag & drop into the window; size with `=300x200`, `=50%` or `<img width>`;
-  attachments save to an `assets/` folder next to the note
+  attachments save to an `assets/` folder next to the document
 - **GitHub image hosting** — insert an image and it is uploaded to a
   GitHub repo via the Contents API; a CDN link (jsDelivr by default,
   configurable) is inserted. The token never leaves your machine (0600
@@ -57,11 +57,10 @@ no JavaScript. Go draws the shell on the GPU; macOS uses an AppKit
 
 ### Storage
 
-Notes live in a plain folder of Markdown files
-(`<config>/备忘录` by default — one folder of the app per
-subfolder, like Apple Notes' folders). Anything that edits the files on
-disk (Sync, git, other editors) shows up in the app; the app autosaves
-back to the same files.
+Documents live in a plain folder of Markdown files
+(`<config>/备忘录` by default; each subfolder appears as a folder in the sidebar).
+Anything that edits the files on disk (Sync, git, other editors) shows up in
+the app; the app autosaves back to the same files.
 
 ### Build
 
@@ -107,17 +106,17 @@ Windows and Linux in parallel and uploads them to a draft release
 
 ## 中文
 
-Corra 是一个**纯原生 UI** 的 Markdown 备忘录应用，用 Go 基于
+Corra 是一个**纯原生 UI** 的 Markdown 桌面编辑器，用 Go 基于
 [MyGo](https://mygo.egoist.dev) 工具包编写：无 webview、无 HTML、无
 JavaScript。Go 在 GPU 上绘制外壳，macOS 编辑区使用 AppKit 原生富文本控件。
 
 ### 功能
 
-- **类 Apple Notes 三栏布局**：左栏备忘录文件夹，中栏按日期分组
-  （今天/昨天/最近 7 天/最近 30 天）的列表，右栏带日期的编辑区
+- **文档库与编辑工作区**：侧栏提供文件夹和按修改日期分组的文档列表，
+  编辑区显示文档修改时间，并可开启大纲
 - **macOS 原生所见即所得**：直接编辑标题、正文、文字格式和任务清单，
   使用原生选区、剪贴板和撤销重做，自动保存为 Markdown 文件。需启用 cgo。
-- **源码和阅读视图**：`Cmd+E` 切换富文本 / Markdown 源码；备忘录菜单
+- **源码和阅读视图**：`Cmd+E` 切换富文本 / Markdown 源码；文档菜单
   可打开完整阅读预览。其他平台保留源码 / 预览。源码模式仍支持语法高亮、
   多光标和查找替换（Cmd+F）。
 - **GFM 全要素**：表格、任务列表、删除线、脚注
@@ -131,7 +130,7 @@ JavaScript。Go 在 GPU 上绘制外壳，macOS 编辑区使用 AppKit 原生富
 - **数据图表**：` ```chart ` YAML 数据块（折线/柱状/条形/饼图）
 - **语法高亮**：chroma 支持 200+ 语言，深浅色主题
 - **图片体验对齐 Typora**：光标处插入、剪贴板粘贴、拖放入窗即插入；
-  用 `=300x200`、`=50%` 或 `<img width>` 控制尺寸；附件保存到笔记旁
+  用 `=300x200`、`=50%` 或 `<img width>` 控制尺寸；附件保存到当前文档旁
   的 `assets/` 文件夹
 - **GitHub 图床**：插入图片即通过 Contents API 上传到指定仓库并回插
   CDN 链接（默认 jsDelivr，可自定义反代）；token 只存本机（0600 权限）
@@ -147,11 +146,10 @@ JavaScript。Go 在 GPU 上绘制外壳，macOS 编辑区使用 AppKit 原生富
 
 ### 存储
 
-备忘录就是一个普通文件夹里的 Markdown 文件（默认在
-`<config>/备忘录`；库根目录下的每个子文件夹对应左栏一个文件夹，
-与 Apple Notes 一致）。磁盘上的文件被别的工具（同步、git、其他
-编辑器）修改会实时反映到应用里；应用的自动保存也直接写回同一批
-文件。
+文档以普通 Markdown 文件存放在文档库中（默认目录为
+`<config>/备忘录`；库根目录下的每个子文件夹对应侧栏中的一个文件夹）。
+磁盘上的文件被别的工具（同步、git、其他编辑器）修改会实时反映到应用里；
+应用的自动保存也直接写回同一批文件。
 
 ### 构建
 
@@ -193,25 +191,25 @@ Linux 三平台安装包并上传到草稿 Release（见
 
 <p align="center">Made with ❤️ by <a href="https://github.com/Maidang1">Maidang1</a></p>
 
-### Local Notes workflow
+### Local document workflow
 
 The unified toolbar provides format (`Aa`), checklist, table, image attachment,
-copy Markdown and PDF export. The note `...` menu contains edit/preview, move,
+copy Markdown and PDF export. The document `...` menu contains edit/preview, move,
 delete, restore and appearance options; the folder `...` menu creates/renames
 folders and deletes empty ones. Search matches the full Markdown source.
-Deleted notes are read-only until restored. Restore currently places the note
+Deleted documents are read-only until restored. Restore currently places the document
 in the library root, adding a suffix when a filename already exists.
 
-- `Cmd/Ctrl+N`: new note (native rich editor on macOS)
+- `Cmd/Ctrl+N`: new document (native rich editor on macOS)
 - `Cmd/Ctrl+E`: source editor / rich document (preview on other platforms)
 - `Cmd/Ctrl+Shift+P`: full reading preview
-- `Cmd/Ctrl+Shift+F`: search notes; `Cmd/Ctrl+F`: find within the source editor
+- `Cmd/Ctrl+Shift+F`: search documents; `Cmd/Ctrl+F`: find within the source editor
 - `Cmd/Ctrl+Alt+S`: collapse / expand folders
 - `Cmd/Ctrl+B`, `Cmd/Ctrl+I`: bold / italic; `Cmd/Ctrl+Shift+L`: checklist
 - `Cmd/Ctrl+Shift+N`: new folder
 
 Both source edits and preview checkboxes autosave. Save failures are displayed
-above the note and prevent switching/closing; **Save As** remains available to
+above the document and prevent switching/closing; **Save As** remains available to
 recover the current buffer to another location. Existing files are saved via
 same-directory temporary files and atomic replacement, with best-effort external
 change checks (there is no cross-process compare-and-swap guarantee).
@@ -219,12 +217,12 @@ change checks (there is no cross-process compare-and-swap guarantee).
 For an isolated development session, set `CORRA_CONFIG_DIR` to a temporary
 folder before starting the app. This does not migrate or change the normal library.
 
-### 本地备忘录操作
+### 本地文档操作
 
 工具栏提供 `Aa` 格式、清单、表格、图片，以及复制 Markdown / 导出 PDF。
-右侧 `…` 菜单可切换编辑和预览、移动、删除、恢复备忘录及切换外观；
+右侧 `…` 菜单可切换编辑和预览、移动、删除、恢复文档及切换外观；
 文件夹标题旁的 `…` 可新建、重命名和删除空文件夹。搜索覆盖完整正文。
-「最近删除」中的备忘录只读，恢复后放回库根目录，同名时自动添加编号。
+「最近删除」中的文档只读，恢复后放回库根目录，同名时自动添加编号。
 
 编辑和预览勾选均自动保存；保存失败时会显示错误并阻止切换/关闭，
 可用「另存为」将当前内容保存到其他位置。macOS 默认原生富文本编辑，
