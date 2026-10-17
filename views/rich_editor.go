@@ -1,6 +1,7 @@
 package views
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/Maidang1/corra/app"
@@ -78,6 +79,12 @@ func (v *View) syncEditor() bool {
 		return true
 	}
 	source, changed, err := v.rich.Snapshot()
+	var composing interface{ Composing() bool }
+	if errors.As(err, &composing) && composing.Composing() {
+		// Mid-composition the buffer simply has nothing new to save yet;
+		// the commit notifies again and syncs.
+		return false
+	}
 	if err != nil {
 		v.SaveError = err.Error()
 		v.richSnapshotError = true

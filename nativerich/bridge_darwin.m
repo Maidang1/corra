@@ -1805,15 +1805,32 @@ static BOOL CRFootnoteAreaStart(CREditor *e, NSUInteger at) {
     }
 }
 - (NSRect)markerLineRect:(NSRange)range {
-    NSRange glyph=[_text.layoutManager glyphRangeForCharacterRange:CRContent(_text.string,range) actualCharacterRange:NULL];
-    if (!glyph.length) return NSOffsetRect(_text.layoutManager.extraLineFragmentRect,_text.textContainerOrigin.x,_text.textContainerOrigin.y);
-    // Tight glyph bounds of the first line: the fragment rect includes
-    // lineSpacing below the glyphs (markers ride low) and the used rect
-    // starts at the indented first glyph (markers shift right onto text).
-    NSRange lineGlyphs;
-    [_text.layoutManager lineFragmentRectForGlyphAtIndex:glyph.location effectiveRange:&lineGlyphs];
-    NSRect bounds=[_text.layoutManager boundingRectForGlyphRange:lineGlyphs inTextContainer:_text.textContainer];
-    return NSOffsetRect(bounds,_text.textContainerOrigin.x,_text.textContainerOrigin.y);
+    // The first line's box, from its baseline and font: glyph bounds and
+    // fragment rects carry lineSpacing and newline extents that depend on
+    // whether more text follows, so markers jumped as a list grew.
+    NSLayoutManager *layout=_text.layoutManager;
+    NSRange glyph=[layout glyphRangeForCharacterRange:CRContent(_text.string,range) actualCharacterRange:NULL];
+    NSFont *font;
+    NSRect line;
+    CGFloat baseline;
+    if (!glyph.length && !range.length) {
+        // The trailing empty paragraph is the extra line fragment, which only
+        // exists once layout reaches the end.
+        [layout ensureLayoutForCharacterRange:NSMakeRange(_text.string.length,0)];
+        font=_text.typingAttributes[NSFontAttributeName] ?: _text.font;
+        line=layout.extraLineFragmentUsedRect;
+        baseline=font.ascender;
+    } else {
+        NSUInteger index=glyph.length ? glyph.location : [layout glyphIndexForCharacterAtIndex:range.location];
+        font=[_text.textStorage attribute:NSFontAttributeName atIndex:[layout characterIndexForGlyphAtIndex:index] effectiveRange:NULL] ?: _text.font;
+        NSRange lineGlyphs;
+        line=[layout lineFragmentUsedRectForGlyphAtIndex:index effectiveRange:&lineGlyphs];
+        baseline=[layout locationForGlyphAtIndex:index].y;
+        // The used rect starts at the indented first glyph; markers sit left of it.
+        if (glyph.length) line.origin.x=[layout boundingRectForGlyphRange:NSIntersectionRange(lineGlyphs,glyph) inTextContainer:_text.textContainer].origin.x;
+    }
+    NSRect box=NSMakeRect(line.origin.x,line.origin.y+baseline-font.ascender,line.size.width,font.ascender-font.descender);
+    return NSOffsetRect(box,_text.textContainerOrigin.x,_text.textContainerOrigin.y);
 }
 - (NSRect)markerRect:(NSRange)range {
     NSRect line=[self markerLineRect:range];
@@ -3410,3 +3427,12 @@ void cr_typewriter(uintptr_t ptr, int enabled) { [CRE(ptr) setTypewriter:enabled
 void cr_find(uintptr_t ptr) { [CRE(ptr) showFindBar]; }
 void cr_reveal_heading(uintptr_t ptr, int index) { [CRE(ptr) revealHeading:(NSInteger)index]; }
 void cr_print(uintptr_t ptr) { [CRE(ptr) printDocument]; }
+// cr_test_markers reports each list marker's vertical center as drawRect
+// would compute it now, then the same after full layout: "lazy|full".
+char *cr_test_markers(uintptr_t ptr) {
+    CREditor *e=CRE(ptr); NSMutableArray *lazy=[NSMutableArray array], *full=[NSMutableArray array];
+    for (NSValue *v in CRRanges(e.text.string)) if (CRList(CRParagraphAt(e,v.rangeValue.location))) [lazy addObject:[NSString stringWithFormat:@"%.1f",NSMidY([e markerLineRect:v.rangeValue])]];
+    [e.text.layoutManager ensureLayoutForTextContainer:e.text.textContainer];
+    for (NSValue *v in CRRanges(e.text.string)) if (CRList(CRParagraphAt(e,v.rangeValue.location))) [full addObject:[NSString stringWithFormat:@"%.1f",NSMidY([e markerLineRect:v.rangeValue])]];
+    return strdup([NSString stringWithFormat:@"%@|%@",[lazy componentsJoinedByString:@","],[full componentsJoinedByString:@","]].UTF8String);
+}

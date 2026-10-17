@@ -50,3 +50,4 @@ char *cr_parse_inline(char *source, int table);
 char *cr_reveal_inline(char *runs, int table);
 char *cr_fold_inline(char *source, int table);
 char *cr_highlight(char *code, char *language);
+char *cr_test_markers(uintptr_t editor);
