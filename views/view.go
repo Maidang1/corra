@@ -48,6 +48,10 @@ type View struct {
 	HostOpen  bool
 	HostDraft app.HostingConfig
 
+	// windowW is the window's width as of the last frame, for the
+	// toolbar's compact layout.
+	windowW float32
+
 	// invalidate triggers a window redraw (bound at startup).
 	invalidate func()
 
@@ -93,10 +97,10 @@ func (v *View) Serve(c *ui.Context) {
 	v.Build(c)
 }
 
-// Build is the MyGo view function: two floating cards over the window's
-// gray — the navigation sidebar and the writing area — each reaching the
-// top edge, their top rows forming the toolbar the traffic lights land
-// on, plus the modal dialogs.
+// Build is the MyGo view function, laid out the way macOS 26 apps are: the
+// navigation sidebar floats as an inset panel and the writing area runs
+// full-bleed to the window edges under a borderless toolbar, plus the modal
+// dialogs.
 func (v *View) Build(c *ui.Context) {
 	c.SetTheme(v.theme(c))
 	if v.rich != nil && v.richPath != v.App.Path {
@@ -112,31 +116,21 @@ func (v *View) Build(c *ui.Context) {
 
 	t := c.Theme()
 
-	ui.Row(c).Fill().Gap(0).Background(windowBackground(t)).Children(func() {
+	root := ui.Row(c).Key("window").Fill().Gap(0).Background(t.Surface)
+	v.windowW = root.Bounds().W // last frame's width; toggles don't change it
+	root.Children(func() {
 		if v.App.Sidebar {
 			v.foldersSidebar(c)
 		}
-		// The workspace floats next to the sidebar as its own card:
-		// rounded corners, a hairline rim and a soft Apple-style drop
-		// shadow.
-		left := float32(4)
-		if !v.App.Sidebar {
-			left = 8
-		}
-		ui.Box(c).Fill().Padding(8, 8, 8, left).Children(func() {
-			ui.Column(c).Key("workspace").Fill().Gap(0).Radius(20).Clip().
-				Background(t.Surface).
-				Border(1, cardBorder(t)).
-				Shadow(0, 10, 30, 0, cardShadow(t)).Children(func() {
-				v.header(c)
-				ui.Divider(c).FillWidth()
-				ui.Row(c).Fill().Gap(0).Children(func() {
-					v.editorPane(c)
-					if v.App.Outline {
-						ui.Divider(c).FillHeight()
-						v.outlinePanel(c)
-					}
-				})
+		// The writing area is the window itself: no card, rim or shadow,
+		// and no rule under the toolbar — the page simply starts below it.
+		ui.Column(c).Key("workspace").Fill().Gap(0).Background(t.Surface).Children(func() {
+			v.header(c)
+			ui.Row(c).Fill().Gap(0).Children(func() {
+				v.editorPane(c)
+				if v.App.Outline {
+					v.outlinePanel(c)
+				}
 			})
 		})
 	})

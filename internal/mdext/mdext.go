@@ -104,7 +104,12 @@ func (s *tildeParser) Parse(parent ast.Node, block text.Reader, pc parser.Contex
 		return nil
 	}
 	if node.OriginalLength == 1 && node.CanOpen && !spaceFreeCloser(line[1:], '~') {
-		return nil // pandoc rule: ~sub~ contains no spaces
+		// pandoc rule: ~sub~ contains no spaces. The run may still close
+		// one ("H~2~O"), so it only loses the ability to open.
+		if !node.CanClose {
+			return nil
+		}
+		node.CanOpen = false
 	}
 	node.Segment = segment.WithStop(segment.Start + node.OriginalLength)
 	block.Advance(node.OriginalLength)
@@ -138,7 +143,12 @@ func (s *caretParser) Parse(parent ast.Node, block text.Reader, pc parser.Contex
 		return nil
 	}
 	if node.CanOpen && !spaceFreeCloser(line[1:], '^') {
-		return nil // pandoc rule: ^sup^ contains no spaces
+		// pandoc rule: ^sup^ contains no spaces. The caret may still close
+		// one ("x^2^y"), so it only loses the ability to open.
+		if !node.CanClose {
+			return nil
+		}
+		node.CanOpen = false
 	}
 	node.Segment = segment.WithStop(segment.Start + node.OriginalLength)
 	block.Advance(node.OriginalLength)

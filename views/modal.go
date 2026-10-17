@@ -11,13 +11,14 @@ func (v *View) conflictDialog(c *ui.Context) {
 	t := c.Theme()
 	open := true
 	ui.Modal(c, &open, func() {
-		ui.Box(c).Width(440).Background(t.Background).Border(1, t.Border).
-			Padding(18, 20).Children(func() {
+		ui.Box(c).Width(440).Background(t.Surface).Radius(16).Padding(22).Children(func() {
 			ui.Column(c).FillWidth().Gap(10).Children(func() {
 				ui.Text(c, "文件已被外部修改").FontSize(15).Bold()
 				ui.Text(c, "磁盘上的文件发生了变化，而这里也有未保存的编辑。").
 					FontSize(13).TextColor(t.TextMuted).LineHeight(1.5)
+				// macOS puts dialog actions on the trailing edge.
 				ui.Row(c).FillWidth().Gap(8).Children(func() {
+					ui.Spacer(c)
 					ui.Button(c, "保留我的版本").OnClick(func() {
 						v.saveAndReloadConflict(false)
 					})
@@ -54,8 +55,7 @@ func (v *View) hostingDialog(c *ui.Context) {
 	t := c.Theme()
 	open := true
 	ui.Modal(c, &open, func() {
-		ui.Box(c).Width(520).Background(t.Background).Border(1, t.Border).
-			Padding(18, 20).Children(func() {
+		ui.Box(c).Width(520).Background(t.Surface).Radius(16).Padding(22).Children(func() {
 			ui.Column(c).FillWidth().Gap(10).Children(func() {
 				ui.Text(c, "GitHub 图床设置").FontSize(15).Bold()
 				ui.Text(c, "粘贴图片时上传到指定仓库，并插入 CDN 链接。Token 仅存本机（0600 权限）。").

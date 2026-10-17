@@ -1,7 +1,26 @@
 // Included in CREditor's implementation. Fence metadata bounds each block:
 // neighboring code paragraphs can belong to distinct adjacent fences.
-- (NSArray *)codeBlocks {
-    NSArray *ranges=CRRanges(_text.string);
+- (NSArray *)codeBlocks { return [self codeBlocksIn:NSMakeRange(0,_text.string.length)]; }
+// codeBlocksIn: lists the blocks touching within, scanning only from the
+// opening fence of a block it cuts into to the end of the last such block.
+- (NSArray *)codeBlocksIn:(NSRange)within {
+    NSString *string=_text.string;
+    NSUInteger start=[string paragraphRangeForRange:NSMakeRange(MIN(within.location,string.length),0)].location;
+    while (start>0) {
+        NSDictionary *p=CRParagraphAt(self,start);
+        if (!CRKind(p,@"code") || [p[@"open"] length]) break;
+        NSUInteger previous=[string paragraphRangeForRange:NSMakeRange(start-1,0)].location;
+        if (!CRKind(CRParagraphAt(self,previous),@"code")) break;
+        start=previous;
+    }
+    NSUInteger end=MIN(NSMaxRange(within),string.length);
+    if (end>start) end=NSMaxRange([string paragraphRangeForRange:NSMakeRange(end-1,0)]);
+    while (end<string.length) {
+        NSDictionary *p=CRParagraphAt(self,end);
+        if (!CRKind(p,@"code") || [p[@"open"] length]) break;
+        end=NSMaxRange([string paragraphRangeForRange:NSMakeRange(end,0)]);
+    }
+    NSArray *ranges=start==0 && end>=string.length ? CRRanges(string) : CRRangesIn(string,NSMakeRange(start,end>start ? end-start-1 : 0));
     NSMutableArray *blocks=[NSMutableArray array];
     for (NSUInteger i=0;i<ranges.count;) {
         NSRange first=[ranges[i] rangeValue];
@@ -120,12 +139,15 @@
 - (void)highlightCode { [self highlightCodeInRange:NSMakeRange(0,_text.string.length)]; }
 // highlightCodeInRange re-tokenizes only the code blocks touching dirty.
 - (void)highlightCodeInRange:(NSRange)dirty {
-    NSArray *blocks=[self codeBlocks];
+    BOOL whole=dirty.location==0 && dirty.length>=_text.string.length;
+    NSArray *blocks=[self codeBlocksIn:dirty];
     NSUInteger maximum=1;
     for (NSDictionary *block in blocks) maximum=MAX(maximum,[block[@"lines"] count]);
     NSString *label=[NSString stringWithFormat:@"%lu",(unsigned long)maximum];
     NSFont *font=[NSFont monospacedDigitSystemFontOfSize:11.5*_zoom weight:NSFontWeightRegular];
-    _codeGutter=ceil([label sizeWithAttributes:@{NSFontAttributeName:font}].width+24*_zoom);
+    // The gutter fits the longest block; a local edit can only widen it.
+    CGFloat gutter=ceil([label sizeWithAttributes:@{NSFontAttributeName:font}].width+24*_zoom);
+    _codeGutter=whole ? gutter : MAX(_codeGutter,gutter);
     for (NSDictionary *block in blocks) {
         NSRange whole=[block[@"range"] rangeValue];
         if (NSMaxRange(whole)<dirty.location || whole.location>NSMaxRange(dirty)) continue;

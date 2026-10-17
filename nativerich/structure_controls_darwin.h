@@ -14,6 +14,7 @@
         [self.owner continueListParagraph]; return YES;
     }
     if (modifiers==NSEventModifierFlagCommand && [key isEqual:@"\r"] && [self.owner finishSourceEditing]) return YES;
+    if (modifiers==NSEventModifierFlagCommand && [key isEqual:@"\r"] && [self.owner leaveCodeBlock]) return YES;
     if (table && modifiers==NSEventModifierFlagCommand && [key isEqual:@"\r"]) {
         [self.owner tableCommand:@"table:row-below"]; return YES;
     }

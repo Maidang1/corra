@@ -7,8 +7,13 @@ package nativerich
 */
 import "C"
 import (
+	"encoding/json"
+	"fmt"
 	"runtime/cgo"
+	"strings"
 	"unsafe"
+
+	"github.com/Maidang1/corra/richtext"
 )
 
 // The unexported harness operates on real NSTextView instances, without AX or
@@ -97,4 +102,24 @@ func nativeTestClipboardText() string {
 	value := C.cr_test_clipboard_text()
 	defer C.free(unsafe.Pointer(value))
 	return C.GoString(value)
+}
+
+// nativeTestParagraphs lists the native document's paragraphs, one per line,
+// for diagnosing a failed round trip.
+func nativeTestParagraphs(e *Editor) string {
+	var marked C.int
+	p := C.cr_snapshot(e.native, &marked)
+	if p == nil {
+		return fmt.Sprintf("(no snapshot, marked=%d)\n", marked)
+	}
+	defer C.free(unsafe.Pointer(p))
+	var doc richtext.Document
+	if err := json.Unmarshal([]byte(C.GoString(p)), &doc); err != nil {
+		return "(" + err.Error() + ")\n"
+	}
+	var out strings.Builder
+	for _, q := range doc.Paragraphs {
+		fmt.Fprintf(&out, "%s depth=%d quote=%d sep=%q text=%q raw=%q indent=%q\n", q.Kind, q.Depth, q.Quote, q.Separator, richtext.PlainText(q), q.Raw, q.CodeIndent)
+	}
+	return out.String()
 }

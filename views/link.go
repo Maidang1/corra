@@ -56,7 +56,8 @@ func (v *View) applyLink() {
 	if v.rich != nil && v.App.Mode != app.ModeEdit {
 		v.App.Mode = app.ModeRich
 		v.ensureRichEditor()
-		v.rich.Format("link:" + url)
+		// With no selection the native editor inserts the text as a link.
+		v.rich.Format("link:" + url + "\n" + strings.TrimSpace(v.LinkText))
 		v.rich.Focus()
 		v.NativeChanged()
 		return

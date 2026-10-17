@@ -156,3 +156,35 @@ static NSString *CRTOCSignature(NSArray *entries) {
         }
     }
 }
+
+// CRSlug is the GitHub/Typora heading anchor: lowercase, punctuation
+// dropped (except - and _), whitespace runs turned into hyphens.
+static NSString *CRSlug(NSString *text) {
+    NSMutableString *slug=[NSMutableString string];
+    NSString *lower=text.lowercaseString;
+    NSCharacterSet *space=NSCharacterSet.whitespaceCharacterSet, *keep=NSCharacterSet.alphanumericCharacterSet;
+    for (NSUInteger i=0;i<lower.length;) {
+        NSRange composed=[lower rangeOfComposedCharacterSequenceAtIndex:i];
+        unichar c=[lower characterAtIndex:i];
+        if ([space characterIsMember:c]) [slug appendString:@"-"];
+        else if (c=='-' || c=='_' || [keep characterIsMember:c] || composed.length>1) [slug appendString:[lower substringWithRange:composed]];
+        i=NSMaxRange(composed);
+    }
+    return slug;
+}
+
+// jumpToAnchor scrolls to the heading a "#fragment" link names and returns
+// NO when no heading matches.
+- (BOOL)jumpToAnchor:(NSString *)fragment {
+    NSString *wanted=CRSlug([fragment stringByRemovingPercentEncoding] ?: fragment);
+    for (NSValue *value in CRRanges(_text.string)) {
+        NSRange range = value.rangeValue;
+        if (!CRKind(CRParagraphAt(self, range.location), @"heading")) continue;
+        NSString *text=[[_text.string substringWithRange:CRContent(_text.string,range)] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        if (![CRSlug(text) isEqual:wanted] && ![CRSlug(text) isEqual:CRSlug(fragment)]) continue;
+        [_text scrollRangeToVisible:range];
+        if (_text.editable) _text.selectedRange = NSMakeRange(range.location, 0);
+        return YES;
+    }
+    return NO;
+}

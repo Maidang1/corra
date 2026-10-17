@@ -145,6 +145,7 @@ func buildMenu() *mygo.Menu {
 			mygo.Separator(),
 			item("插入链接…", "CmdOrCtrl+K", func() { view.InsertLinkAction() }),
 			imageSizeMenu(view),
+			item("插入表格", "CmdOrCtrl+Alt+T", func() { view.InsertTableAction() }),
 			item("插入代码块", "CmdOrCtrl+Alt+C", func() { view.InsertMarkdown("\n```\n\n```\n") }),
 			item("插入数学公式块", "CmdOrCtrl+Alt+M", func() { view.InsertMarkdown("\n$$\n\n$$\n") }),
 			item("插入水平分割线", "CmdOrCtrl+Shift+_", func() { view.InsertMarkdown("\n---\n") }),
@@ -156,7 +157,7 @@ func buildMenu() *mygo.Menu {
 		Submenu: []*mygo.MenuItem{
 			item("切换源码 / 文稿", "CmdOrCtrl+E", func() { view.ToggleModeAction() }),
 			item("显示 / 隐藏边栏", "CmdOrCtrl+Alt+S", func() { view.ToggleSidebarAction() }),
-			item("大纲", "CmdOrCtrl+Alt+T", func() { view.App.Outline = !view.App.Outline; editorApp.InvalidateUI() }),
+			item("大纲", "CmdOrCtrl+Ctrl+1", func() { view.App.Outline = !view.App.Outline; editorApp.InvalidateUI() }),
 			item("搜索备忘录", "CmdOrCtrl+Shift+F", func() { view.SearchAction() }),
 			mygo.Separator(),
 			checked("字数统计", editorApp.WordCount, func() { editorApp.WordCount = !editorApp.WordCount; editorApp.InvalidateUI() }),

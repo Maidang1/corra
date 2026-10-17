@@ -78,17 +78,37 @@ static BOOL CRRuleActive(CREditor *e, NSRange paragraph) {
         [self updateTypingParagraph];
         return YES;
     }
+    if ([text caseInsensitiveCompare:@"[toc]"]==NSOrderedSame) {
+        // Typora's [toc] line becomes the live table of contents; writing
+        // continues on a body line below it.
+        char *json=cr_parse_markdown("[TOC]");
+        NSDictionary *doc=json ? [NSJSONSerialization JSONObjectWithData:[[NSString stringWithUTF8String:json] dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL] : nil;
+        if (json) free(json);
+        NSArray *ps=doc[@"paragraphs"];
+        if (ps.count!=1 || !CRKind(ps[0],@"toc")) return NO;
+        NSMutableDictionary *toc=[ps[0] mutableCopy]; toc[@"separator"]=@"\n\n";
+        NSDictionary *body=CRBody(), *bodyAttrs=[self visual:@{CRParagraph:body} paragraph:body];
+        NSMutableAttributedString *value=[[self attributedDocument:@{@"paragraphs":@[toc]} replacingRange:paragraph] mutableCopy];
+        if (![value.string hasSuffix:@"\n"]) [value appendAttributedString:[[NSAttributedString alloc] initWithString:@"\n" attributes:[value attributesAtIndex:value.length-1 effectiveRange:NULL]]];
+        NSUInteger caret=paragraph.location+value.length;
+        if (trailing) [value appendAttributedString:[[NSAttributedString alloc] initWithString:@"\n" attributes:bodyAttrs]];
+        [self replace:paragraph with:value selection:NSMakeRange(caret,0)];
+        _text.typingAttributes=bodyAttrs;
+        if (!trailing) _emptyParagraph=body;
+        [self refreshTOC]; [self restyleDirty];
+        return YES;
+    }
     return NO;
 }
 
 // refreshRules hides the spelling of thematic breaks the caret is not on;
 // drawRect paints the rule in their place. Display-only: storage unchanged.
-- (void)refreshRules {
+- (void)refreshRulesIn:(NSRange)within {
     NSLayoutManager *layout=_text.layoutManager;
     NSString *string=_text.string;
     if (!string.length) return;
-    [layout removeTemporaryAttribute:NSForegroundColorAttributeName forCharacterRange:NSMakeRange(0,string.length)];
-    NSRange all=NSMakeRange(0,string.length);
+    NSRange all=[string paragraphRangeForRange:NSIntersectionRange(within,NSMakeRange(0,string.length)).length ? NSIntersectionRange(within,NSMakeRange(0,string.length)) : NSMakeRange(MIN(within.location,string.length),0)];
+    [layout removeTemporaryAttribute:NSForegroundColorAttributeName forCharacterRange:all];
     for (NSValue *v in [self ruleRangesIn:all]) [layout addTemporaryAttribute:NSForegroundColorAttributeName value:NSColor.clearColor forCharacterRange:CRContent(string,v.rangeValue)];
     for (NSDictionary *marker in [self alertMarkersIn:all]) [layout addTemporaryAttribute:NSForegroundColorAttributeName value:NSColor.clearColor forCharacterRange:[marker[@"range"] rangeValue]];
 }
@@ -229,11 +249,12 @@ static BOOL CRFigure(NSDictionary *p) {
         NSDictionary *p=CRParagraphAt(self,v.rangeValue.location);
         NSString *alert=[p[@"alert"] isKindOfClass:NSString.class] ? p[@"alert"] : nil;
         NSRange content=CRContent(_text.string,v.rangeValue);
-        if (!CRKind(p,@"quote") || !alert.length || !content.length) { flush(); continue; }
+        if (!(CRKind(p,@"quote") || (CRList(p) && CRQuoteOf(p)>0)) || !alert.length || !content.length) { flush(); continue; }
         NSRange glyph=[layout glyphRangeForCharacterRange:content actualCharacterRange:NULL];
         NSRect last=[layout lineFragmentUsedRectForGlyphAtIndex:NSMaxRange(glyph)-1 effectiveRange:NULL];
         CGFloat top=NSMinY([layout lineFragmentUsedRectForGlyphAtIndex:glyph.location effectiveRange:NULL]);
-        NSRect r=NSMakeRect(_text.textContainerOrigin.x,top+_text.textContainerOrigin.y-6*_zoom,_text.textContainer.size.width,NSMaxY(last)-top+12*_zoom);
+        CGFloat inset=_text.textContainer.lineFragmentPadding;
+        NSRect r=NSMakeRect(_text.textContainerOrigin.x+inset,top+_text.textContainerOrigin.y-6*_zoom,_text.textContainer.size.width-2*inset,NSMaxY(last)-top+12*_zoom);
         if (!NSIsEmptyRect(panel) && [label isEqual:alert] && NSMinY(r)-NSMaxY(panel)<24*_zoom) panel=NSUnionRect(panel,r);
         else { flush(); panel=r; label=alert; }
     }
@@ -270,4 +291,84 @@ static BOOL CRFigure(NSDictionary *p) {
     [self replace:target with:value selection:NSMakeRange(caret,0)];
     _text.typingAttributes=typing;
     return YES;
+}
+
+// selectFigureBeside: Backspace at the start of the line after a figure, or
+// Delete at the end of the line before one, selects the figure instead of
+// merging prose into it (Typora); a second press then removes it whole.
+- (BOOL)selectFigureBeside:(BOOL)backward {
+    NSRange selection=_text.selectedRange;
+    NSString *string=_text.string;
+    if (selection.length || _text.hasMarkedText || !_text.editable) return NO;
+    NSRange paragraph=[string paragraphRangeForRange:NSMakeRange(selection.location,0)];
+    NSRange neighbour;
+    if (backward) {
+        if (selection.location!=paragraph.location || !paragraph.location) return NO;
+        neighbour=[string paragraphRangeForRange:NSMakeRange(paragraph.location-1,0)];
+    } else {
+        if (selection.location!=NSMaxRange(CRContent(string,paragraph)) || NSMaxRange(paragraph)>=string.length) return NO;
+        neighbour=[string paragraphRangeForRange:NSMakeRange(NSMaxRange(paragraph),0)];
+    }
+    if (!CRFigure(CRParagraphAt(self,neighbour.location))) return NO;
+    NSRange figure=CRContent(string,neighbour);
+    if (!figure.length) return NO;
+    _text.selectedRange=figure;
+    return YES;
+}
+// deleteSelectedFigure removes a selected figure together with its line, so
+// no empty figure paragraph is left to serialize.
+- (BOOL)deleteSelectedFigure {
+    NSRange selection=_text.selectedRange;
+    NSString *string=_text.string;
+    if (!selection.length || _text.hasMarkedText) return NO;
+    NSRange paragraph=[string paragraphRangeForRange:selection];
+    if (!NSEqualRanges(CRContent(string,paragraph),selection) || !CRFigure(CRParagraphAt(self,selection.location))) return NO;
+    // Take the line break that follows (or, at the end, the one before).
+    NSRange removal=paragraph;
+    if (NSMaxRange(paragraph)==NSMaxRange(selection) && paragraph.location) removal=NSMakeRange(paragraph.location-1,paragraph.length+1);
+    NSUInteger caret=removal.location==paragraph.location ? paragraph.location : paragraph.location-1;
+    NSDictionary *ending=_emptyParagraph;
+    [self replace:removal with:[NSAttributedString new] selection:NSMakeRange(MIN(caret,string.length-removal.length),0)];
+    if (removal.location==paragraph.location) _emptyParagraph=ending;
+    [self updateTypingParagraph];
+    return YES;
+}
+
+// insertBlock opens a block the way typing its marker and Enter would: on
+// the current line if it is an empty body line, else on a fresh line after
+// the current block, leaving the caret inside it (Typora's Insert menu).
+- (void)insertBlock:(NSString *)marker {
+    if (!_text.editable || _text.hasMarkedText) return;
+    NSString *string=_text.string;
+    NSUInteger caret=_text.selectedRange.location;
+    if (CRCellAt(self,caret)) { NSBeep(); return; }
+    NSRange paragraph=[string paragraphRangeForRange:NSMakeRange(caret,0)];
+    NSDictionary *p=CRParagraphAt(self,paragraph.location);
+    if ([p[@"footnoteId"] length]) { NSBeep(); return; }
+    NSDictionary *body=CRBody(), *bodyAttrs=[self visual:@{CRParagraph:body} paragraph:body];
+    [_text breakUndoCoalescing];
+    [_undo beginUndoGrouping];
+    BOOL empty=CRKind(p,@"body") && CRContent(string,paragraph).length==0;
+    if (!empty) {
+        // A code block continues over its lines; open the line after all of it.
+        while (CRKind(p,@"code") && NSMaxRange(paragraph)<string.length) {
+            NSRange next=[string paragraphRangeForRange:NSMakeRange(NSMaxRange(paragraph),0)];
+            NSDictionary *q=CRParagraphAt(self,next.location);
+            if (!CRKind(q,@"code") || [q[@"open"] length]) break;
+            paragraph=next; p=q;
+        }
+        NSRange content=CRContent(string,paragraph);
+        BOOL eof=NSMaxRange(paragraph)==string.length && NSMaxRange(content)==NSMaxRange(paragraph);
+        NSMutableDictionary *ending=[[_text.textStorage attributesAtIndex:MIN(content.location,MAX(1,string.length)-1) effectiveRange:NULL] mutableCopy];
+        [ending removeObjectForKey:NSAttachmentAttributeName];
+        if (!string.length) ending=[bodyAttrs mutableCopy];
+        [self replace:NSMakeRange(NSMaxRange(content),0) with:[[NSAttributedString alloc] initWithString:@"\n" attributes:ending] selection:NSMakeRange(NSMaxRange(content)+1,0)];
+        if (!eof && NSMaxRange(content)+1<_text.string.length) [_text.textStorage setAttributes:bodyAttrs range:NSMakeRange(NSMaxRange(content)+1,1)];
+        else _emptyParagraph=body;
+    }
+    NSUInteger at=_text.selectedRange.location;
+    _text.typingAttributes=bodyAttrs;
+    [self replace:NSMakeRange(at,0) with:[[NSAttributedString alloc] initWithString:marker attributes:bodyAttrs] selection:NSMakeRange(at+marker.length,0)];
+    [self newline];
+    [_undo endUndoGrouping];
 }

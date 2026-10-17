@@ -124,7 +124,9 @@ func TestNativeInputRuleUndoCompositionAndLiterals(t *testing.T) {
 				nativeTypeCharacters(editor, source)
 			}
 			got, _, _ := editor.Snapshot()
-			if richtext.PlainText(richtext.Parse(got).Paragraphs[0]) != source {
+			// A typed escape keeps its character as text and drops the slash.
+			want := strings.TrimPrefix(source, `\`)
+			if richtext.PlainText(richtext.Parse(got).Paragraphs[0]) != want {
 				t.Errorf("literal input changed: %q -> %q", source, got)
 			}
 		}
@@ -174,7 +176,7 @@ func TestNativeTableNavigationClipboardAndBoundaries(t *testing.T) {
 		}
 		nativeTestAction(editor, "backtab", "")
 		start, _ := nativeTestSelection(editor)
-		if start != 12 {
+		if start != 19 { // after "new row", ready to keep typing
 			t.Errorf("Shift+Tab target: %d", start)
 		}
 		editor.Load(got)

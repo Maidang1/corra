@@ -132,8 +132,8 @@ func TestNewMixedNestedListsSerializeAsOneTree(t *testing.T) {
 func TestUnsupportedNestedListKeepsEntireSource(t *testing.T) {
 	for _, source := range []string{
 		"- parent\n  - child\n\n        indented code\n- sibling",
-		"- parent\n  > quote\n- sibling",
-		"- parent\n  - ![image](image.png)\n- sibling",
+		"- parent\n  <div>\n  html\n  </div>\n- sibling",
+		"- parent\n  - **![image](image.png)**\n- sibling",
 		"- parent\n  - \n  - next\n- end",
 	} {
 		t.Run(source, func(t *testing.T) {
@@ -319,5 +319,16 @@ func TestNestedListContainersRemainDistinct(t *testing.T) {
 	again := Parse(got)
 	if len(again.Paragraphs) != 6 || again.Paragraphs[3].Ordinal != 7 || again.Paragraphs[4].Ordinal != 8 {
 		t.Fatalf("container numbering changed after edit: %+v", again)
+	}
+}
+
+func TestListStartingAtDepthOneKeepsSiblings(t *testing.T) {
+	doc := Parse("1. a\n2. b\n")
+	for i := range doc.Paragraphs {
+		doc.Paragraphs[i].Depth = 1
+		doc.Paragraphs[i].Raw, doc.Paragraphs[i].Baseline, doc.Paragraphs[i].ListBaseline = "", "", ""
+	}
+	if saved := Serialize(doc); saved != "1. a\n2. b\n" {
+		t.Fatalf("saved %q", saved)
 	}
 }

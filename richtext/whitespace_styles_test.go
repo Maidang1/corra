@@ -2,9 +2,11 @@ package richtext
 
 import "testing"
 
+// Bold and italic whitespace is invisible; it moves outside the delimiters
+// instead (TestSerializeHoistsEmphasisSpace). Visible styles keep it.
 func TestEditedInlineStylesKeepBoundaryWhitespaceWhenSaved(t *testing.T) {
 	for _, whitespace := range []string{" ", "\u00a0", "\u2003", "\t"} {
-		for _, style := range []Run{{Bold: true}, {Italic: true}, {Underline: true}, {Highlight: true}, {Link: "https://example.com"}, {Code: true, Bold: true}} {
+		for _, style := range []Run{{Underline: true}, {Highlight: true}, {Link: "https://example.com"}, {Code: true, Bold: true}} {
 			style.Text = whitespace + "edited" + whitespace
 			runs := []Run{{Text: "before "}, style, {Text: " after"}}
 			for _, table := range []bool{false, true} {

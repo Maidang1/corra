@@ -19,12 +19,13 @@ var (
 	iconSearch    = ui.MustParseSVG([]byte(`<svg ` + iconStroke + `><circle cx="11" cy="11" r="6.3"/><path d="M20 20l-3.9-3.9"/></svg>`))
 	iconSidebar   = ui.MustParseSVG([]byte(`<svg ` + iconStroke + `><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M9.6 4.5v15"/></svg>`))
 
-	iconFolder    = ui.MustParseSVG([]byte(`<svg ` + iconStroke + `><path d="M3.5 6.6A1.6 1.6 0 0 1 5.1 5h3.9l2 2.4h7.4a1.6 1.6 0 0 1 1.6 1.6v7.4a1.6 1.6 0 0 1-1.6 1.6H5.1a1.6 1.6 0 0 1-1.6-1.6Z"/></svg>`))
-	iconTrash     = ui.MustParseSVG([]byte(`<svg ` + iconStroke + `><path d="M4.5 6.6h15M9.5 6V4.5A1.4 1.4 0 0 1 10.9 3h2.2a1.4 1.4 0 0 1 1.4 1.5V6"/><path d="M6.7 6.6l.8 11.4a1.5 1.5 0 0 0 1.5 1.4h6a1.5 1.5 0 0 0 1.5-1.4l.8-11.4"/><path d="M10.2 10.7v5.8M13.8 10.7v5.8"/></svg>`))
-	iconMoon      = ui.MustParseSVG([]byte(`<svg ` + iconStroke + `><path d="M20 14.2A8.2 8.2 0 0 1 9.8 4a8.2 8.2 0 1 0 10.2 10.2Z"/></svg>`))
-	iconSun       = ui.MustParseSVG([]byte(`<svg ` + iconStroke + `><circle cx="12" cy="12" r="4"/><path d="M12 2.8v2M12 19.2v2M2.8 12h2M19.2 12h2M5.2 5.2l1.4 1.4M17.4 17.4l1.4 1.4M18.8 5.2l-1.4 1.4M6.6 17.4l-1.4 1.4"/></svg>`))
-	iconCode      = ui.MustParseSVG([]byte(`<svg ` + iconStroke + `><path d="m8.5 7-5 5 5 5M15.5 7l5 5-5 5"/></svg>`))
-	iconDoc       = ui.MustParseSVG([]byte(`<svg ` + iconStroke + `><rect x="5" y="3.5" width="14" height="17" rx="2"/><path d="M9 8.5h6M9 12h6M9 15.5h4"/></svg>`))
+	iconPlusCircle = ui.MustParseSVG([]byte(`<svg ` + iconStroke + `><circle cx="12" cy="12" r="8.5"/><path d="M12 8v8M8 12h8"/></svg>`))
+	iconFolder     = ui.MustParseSVG([]byte(`<svg ` + iconStroke + `><path d="M3.5 6.6A1.6 1.6 0 0 1 5.1 5h3.9l2 2.4h7.4a1.6 1.6 0 0 1 1.6 1.6v7.4a1.6 1.6 0 0 1-1.6 1.6H5.1a1.6 1.6 0 0 1-1.6-1.6Z"/></svg>`))
+	iconTrash      = ui.MustParseSVG([]byte(`<svg ` + iconStroke + `><path d="M4.5 6.6h15M9.5 6V4.5A1.4 1.4 0 0 1 10.9 3h2.2a1.4 1.4 0 0 1 1.4 1.5V6"/><path d="M6.7 6.6l.8 11.4a1.5 1.5 0 0 0 1.5 1.4h6a1.5 1.5 0 0 0 1.5-1.4l.8-11.4"/><path d="M10.2 10.7v5.8M13.8 10.7v5.8"/></svg>`))
+	iconMoon       = ui.MustParseSVG([]byte(`<svg ` + iconStroke + `><path d="M20 14.2A8.2 8.2 0 0 1 9.8 4a8.2 8.2 0 1 0 10.2 10.2Z"/></svg>`))
+	iconSun        = ui.MustParseSVG([]byte(`<svg ` + iconStroke + `><circle cx="12" cy="12" r="4"/><path d="M12 2.8v2M12 19.2v2M2.8 12h2M19.2 12h2M5.2 5.2l1.4 1.4M17.4 17.4l1.4 1.4M18.8 5.2l-1.4 1.4M6.6 17.4l-1.4 1.4"/></svg>`))
+	iconCode       = ui.MustParseSVG([]byte(`<svg ` + iconStroke + `><path d="m8.5 7-5 5 5 5M15.5 7l5 5-5 5"/></svg>`))
+	iconDoc        = ui.MustParseSVG([]byte(`<svg ` + iconStroke + `><rect x="5" y="3.5" width="14" height="17" rx="2"/><path d="M9 8.5h6M9 12h6M9 15.5h4"/></svg>`))
 )
 
 // iconButton is a header toolbar button: a quiet rounded square holding

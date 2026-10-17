@@ -21,12 +21,21 @@ func folderLabel(folder string) string {
 	return folder
 }
 
-// sidebarBackground is the translucent gray of Apple Notes' sidebar.
+// sidebarBackground is the neutral gray of a macOS sidebar panel, a step
+// off the page so the floating panel reads against it.
 func sidebarBackground(t *ui.Theme) ui.Color {
 	if t.Dark {
-		return ui.Hex("#26262b")
+		return ui.Hex("#2c2d32")
 	}
-	return ui.Hex("#f6f7f8")
+	return ui.Hex("#f4f4f6")
+}
+
+// fieldFill is the translucent fill of a borderless macOS search field.
+func fieldFill(t *ui.Theme) ui.Color {
+	if t.Dark {
+		return ui.Hex("#ffffff12")
+	}
+	return ui.Hex("#0000000b")
 }
 
 // foldersSidebar renders the left floating card below the toolbar: the
@@ -38,8 +47,8 @@ func (v *View) foldersSidebar(c *ui.Context) {
 	t := c.Theme()
 	ui.Box(c).Width(sidebarW).FillHeight().Padding(8, 4, 8, 8).Children(func() {
 		ui.Column(c).Fill().Gap(0).Radius(20).Clip().
-			LinearGradient(ui.LinearGradient{From: sidebarBackground(t), To: sidebarBottom(t), Angle: 170}).
-			Border(1, cardBorder(t)).Shadow(0, 10, 30, 0, cardShadow(t)).Children(func() {
+			Background(sidebarBackground(t)).
+			Border(1, cardBorder(t)).Shadow(0, 8, 24, 0, cardShadow(t)).Children(func() {
 			// The card's top row is the sidebar's toolbar: the traffic
 			// lights land on it, the toggle right of them, on the same
 			// center line as the workspace card's header.
@@ -69,22 +78,16 @@ func (v *View) foldersSidebar(c *ui.Context) {
 				} else if btn.Hovered() {
 					btn.Background(sidebarHover(t))
 				}
+				// Leading-aligned "⊕ 新建文件夹", like Notes' sidebar footer.
 				btn.Children(func() {
-					ui.Row(c).Gap(8).Center().Children(func() {
-						ui.Icon(c, iconFolder).Size(17, 17).TextColor(t.TextMuted)
-						ui.Text(c, "新建文件夹").FontSize(12).TextColor(t.TextMuted)
+					ui.Row(c).FillWidth().Gap(7).AlignItems(ui.Center).Children(func() {
+						ui.Icon(c, iconPlusCircle).Size(18, 18).TextColor(t.TextMuted)
+						ui.Text(c, "新建文件夹").FontSize(13).TextColor(t.TextMuted)
 					})
 				}).OnClick(func() { v.openFolderDialog("新建文件夹", "") })
 			})
 		})
 	})
-}
-
-func sidebarBottom(t *ui.Theme) ui.Color {
-	if t.Dark {
-		return ui.Hex("#282d2c")
-	}
-	return ui.Hex("#edf5f1")
 }
 
 // sidebarHover and sidebarPressed darken rows over the sidebar's light
@@ -154,8 +157,8 @@ func (v *View) searchBox(c *ui.Context) {
 	// The filter field lives inside the sidebar, directly above the notes
 	// list it filters — the way Apple Notes scopes search to its list.
 	ui.Box(c).FillWidth().Padding(4, 8, 6, 8).Children(func() {
-		ui.Row(c).Key("search").FillWidth().Height(32).Gap(7).Padding(0, 10).Radius(16).
-			Background(t.SurfaceHover).Border(1, t.Border).Children(func() {
+		ui.Row(c).Key("search").FillWidth().Height(30).Gap(6).Padding(0, 10).Radius(15).
+			Background(fieldFill(t)).Children(func() {
 			ui.Icon(c, iconSearch).Size(15, 15).TextColor(t.TextMuted)
 			field := ui.TextInputBase(c, &v.App.Query).Label("搜索备忘录").Placeholder("搜索").FillWidth().FontSize(13).
 				OnChange(func() { v.reconcileSelection() })
@@ -171,14 +174,15 @@ func (v *View) sidebarNotes(c *ui.Context) {
 	t := c.Theme()
 	notes := v.App.VisibleNotes()
 	if len(notes) == 0 {
-		ui.Box(c).FillWidth().Padding(18, 14).Children(func() {
+		// Fill like the list would, so the footer stays at the bottom.
+		ui.Column(c).Fill().Center().Padding(18, 14).Children(func() {
 			hint := "无备忘录"
 			if v.App.SelFolder == app.TrashName {
 				hint = "最近删除为空"
 			} else if v.App.Query != "" {
 				hint = "无匹配的备忘录"
 			}
-			ui.Text(c, hint).FontSize(12.5).TextColor(t.TextMuted)
+			ui.Text(c, hint).FontSize(13).TextColor(t.TextMuted)
 		})
 		return
 	}
@@ -194,9 +198,9 @@ func (v *View) sidebarNotes(c *ui.Context) {
 	})
 }
 
-// noteRow renders one note of the sidebar list as a compact row: title and
-// modification time. The selected note is a filled accent-colored rounded
-// pill with white text, the way Apple Notes marks the current note.
+// noteRow renders one note of the sidebar list the way Apple Notes does:
+// the bold title, then the time followed by a one-line preview. The
+// selected note is a filled accent-colored rounded pill with white text.
 func (v *View) noteRow(c *ui.Context, n app.Note) {
 	t := c.Theme()
 	selected := n.Path == v.App.SelNote
@@ -205,7 +209,7 @@ func (v *View) noteRow(c *ui.Context, n app.Note) {
 	if selected {
 		fg, sub = t.AccentText, t.AccentText
 	}
-	row := ui.ButtonBase(c).Key(n.Path).Label("备忘录："+n.Title).FillWidth().Padding(6, 9).Radius(8)
+	row := ui.ButtonBase(c).Key(n.Path).Label("备忘录："+n.Title).FillWidth().Padding(7, 10).Radius(10)
 	if selected {
 		row = row.Background(t.Accent)
 	} else if row.Pressed() {
@@ -214,9 +218,16 @@ func (v *View) noteRow(c *ui.Context, n app.Note) {
 		row = row.Background(sidebarHover(t))
 	}
 	row.Children(func() {
-		ui.Row(c).FillWidth().Gap(8).Center().Children(func() {
-			ui.Text(c, n.Title).FontSize(13).TextColor(fg).Bold().NoWrap().Clip().Grow(1)
-			ui.Text(c, noteTime(n.ModTime)).FontSize(11).TextColor(sub).NoWrap()
+		ui.Column(c).FillWidth().MinWidth(0).Gap(2).Children(func() {
+			ui.Text(c, n.Title).FontSize(13).TextColor(fg).Bold().SingleLine().Ellipsis("…").FillWidth().MinWidth(0)
+			preview := n.Snippet
+			if preview == "" {
+				preview = "无附加文本"
+			}
+			ui.Row(c).FillWidth().MinWidth(0).Gap(6).Children(func() {
+				ui.Text(c, noteTime(n.ModTime)).FontSize(11.5).TextColor(fg).NoWrap().Shrink(0)
+				ui.Text(c, preview).FontSize(11.5).TextColor(sub).SingleLine().Ellipsis("…").Grow(1).Shrink(1).MinWidth(0)
+			})
 		})
 	}).OnClick(func() { v.openNote(n.Path) }).ContextMenu(func(m *ui.Menu) {
 		if n.Path != v.App.SelNote {

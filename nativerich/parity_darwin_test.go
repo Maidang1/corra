@@ -144,11 +144,11 @@ func TestNativeParityLinkCommand(t *testing.T) {
 		if got != "click here" {
 			t.Errorf("link undo: %q", got)
 		}
-		// Empty selection is a no-op.
+		// With no selection the link is inserted at the caret, its URL as text.
 		nativeTestSelect(e, 0, 0)
 		e.Format("link:https://example.com")
 		got, _, _ = e.Snapshot()
-		if got != "click here" {
+		if got != "https://example.comclick here" && got != "[https://example.com](https://example.com)click here" {
 			t.Errorf("link empty selection: %q", got)
 		}
 	})
@@ -249,7 +249,7 @@ func TestNativeParityAutoPair(t *testing.T) {
 		nativeTestSelect(e, 0, 5)
 		nativeTestAction(e, "type", "*")
 		got, _, _ = e.Snapshot()
-		if got != "_hello_" {
+		if got != "*hello*" {
 			t.Errorf("format selection: %q", got)
 		}
 		if start, length := nativeTestSelection(e); start != 0 || length != 5 {
@@ -258,7 +258,7 @@ func TestNativeParityAutoPair(t *testing.T) {
 		nativeTestSelect(e, 0, 5)
 		nativeTestAction(e, "type", "[")
 		got, _, _ = e.Snapshot()
-		if got != "_[hello]_" {
+		if got != "*[hello]*" {
 			t.Errorf("wrap with bracket: %q", got)
 		}
 		// Quotes pair on a boundary, type over, and stay single after a word.
@@ -663,4 +663,3 @@ func TestNativeParityDiagramRender(t *testing.T) {
 		}
 	})
 }
-

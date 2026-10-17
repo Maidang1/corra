@@ -24,6 +24,39 @@ func TestEditingProbe(t *testing.T) {
 	end := func(s string) string { return "sel:" + strconv.Itoa(len([]rune(s))) + ",0" }
 	_ = end
 	cases := []scenario{
+		{"ime in list", "", []string{"- ", "ime:zhong|中文", "⏎", "ime:wen|字"}, "- 中文\n- 字"},
+		{"ime in heading", "", []string{"## ", "ime:biao|标题", "⏎", "x"}, "## 标题\n\nx"},
+		{"ime bold rule", "", []string{"**", "ime:cu|粗", "**", " x"}, "**粗** x"},
+		{"ime in table cell", "| a | b |\n|---|---|\n| 1 | 2 |", []string{"sel:5,0", "ime:x|中"}, "| a | b |\n| --- | --- |\n| 1中 | 2 |"},
+		{"ime empty doc", "", []string{"ime:ni|你好"}, "你好"},
+		{"ime then enter", "", []string{"ime:a|啊", "⏎", "ime:b|吧"}, "啊\n\n吧"},
+		{"ime in quote", "", []string{"> ", "ime:yin|引用"}, "> 引用"},
+		{"fullwidth paren pair", "", []string{"（"}, "（"},
+		{"chinese quote pair", "", []string{"“"}, "“"},
+		{"ime replace selection", "abc", []string{"sel:0,3", "ime:x|中"}, "中"},
+		{"fmt bullet on ordered", "1. a\n2. b", []string{"sel:0,3", "fmt:bullet"}, "- a\n- b"},
+		{"fmt ordered on bullets", "- a\n- b", []string{"sel:0,3", "fmt:ordered"}, "1. a\n2. b"},
+		{"fmt checklist on bullet", "- a", []string{"sel:0,0", "fmt:checklist"}, "- [ ] a"},
+		{"fmt quote on two paras", "a\n\nb", []string{"sel:0,3", "fmt:quote"}, "> a\n>\n> b"},
+		{"fmt heading on bullet", "- a", []string{"sel:0,0", "fmt:heading1"}, "# a"},
+		{"fmt body on quote", "> a", []string{"sel:0,0", "fmt:body"}, "a"},
+		{"fmt bullet on 3 paras", "a\n\nb\n\nc", []string{"sel:0,5", "fmt:bullet"}, "- a\n- b\n- c"},
+		{"fmt bullet toggles off", "- a\n- b", []string{"sel:0,3", "fmt:bullet"}, "a\n\nb"},
+		{"fmt clear inline", "**a** b", []string{"sel:0,3", "fmt:clear"}, "a b"},
+		{"fmt highlight sel", "abc", []string{"sel:0,3", "fmt:highlight"}, "==abc=="},
+		{"fmt strike sel", "abc", []string{"sel:0,3", "fmt:strike"}, "~~abc~~"},
+		{"table tab next cell", "| a | b |\n|---|---|\n| 1 | 2 |", []string{"sel:0,0", "⇥", "x"}, "| a | bx |\n| --- | --- |\n| 1 | 2 |"},
+		{"table tab adds row", "| a | b |\n|---|---|\n| 1 | 2 |", []string{"sel:6,0", "⇥", "z"}, "| a | b |\n| --- | --- |\n| 1 | 2 |\n| z |  |"},
+		{"table bs empty cell stays", "| a | b |\n|---|---|\n|  | 2 |", []string{"sel:4,0", "⌫", "⌫"}, "| a | b |\n| --- | --- |\n|  | 2 |?"},
+		{"link via command", "see here", []string{"sel:4,4", "fmt:link:https://x.com"}, "see [here](https://x.com)"},
+		{"italic wrap with star", "hello", []string{"sel:0,5", "*"}, "*hello*"},
+		{"bold wrap selection twice", "hello", []string{"sel:0,5", "fmt:bold", "fmt:bold"}, "hello"},
+		{"code wrap backtick", "hello", []string{"sel:0,5", "`"}, "`hello`"},
+		{"enter in empty heading", "# ", []string{"sel:0,0", "⏎", "x"}, "?"},
+		{"type after link no leak", "[l](http://x.com)", []string{"sel:1,0", " more"}, "[l](http://x.com) more"},
+		{"paste url over selection makes link", "see here", []string{"sel:4,4", "paste:https://x.com"}, "see [here](https://x.com)"},
+		{"bs after heading merge into list", "- a\n\n# b", []string{"sel:2,0", "⌫"}, "?"},
+		{"checklist enter keeps unchecked", "- [x] done", []string{"sel:4,0", "⏎", "n"}, "- [x] done\n- [ ] n"},
 		{"html loaded edit", "<kbd>x</kbd> y", []string{"sel:3,0", "z"}, "<kbd>x</kbd> yz"},
 		{"autolink loaded edit", "see https://a.com now", []string{"sel:21,0", "!"}, "see https://a.com now!"},
 		{"html typed", "", []string{"<kbd>x</kbd> y"}, "<kbd>x</kbd> y"},
@@ -186,6 +219,9 @@ func TestTypingLatency(t *testing.T) {
 		var b strings.Builder
 		for i := 0; i < sections; i++ {
 			formula := ""
+			if os.Getenv("CORRA_PERF_TABLE") != "" {
+				formula = "\n\n| 列 1 | 列 2 | 列 3 |\n|---|---|---|\n| a | b | c |\n| d | e | f |\n\n"
+			}
 			if os.Getenv("CORRA_PERF_MATH") != "" {
 				formula = "行内公式 $x^2+y_" + strconv.Itoa(i) + "$ 与 "
 			}
@@ -202,6 +238,9 @@ func TestTypingLatency(t *testing.T) {
 			start := time.Now()
 			e.Load(doc)
 			load := time.Since(start)
+			// The app lays out in the background while the user reads; time
+			// edits against a settled layout.
+			nativeTestAction(e, "layout", "")
 			mid := len([]rune(nativeTestText(e))) / 2
 			nativeTestSelect(e, mid, 0)
 			start = time.Now()
@@ -248,7 +287,7 @@ func TestScrolledShot(t *testing.T) {
 	}
 	var b strings.Builder
 	for i := 0; i < 40; i++ {
-		b.WriteString("## 第 " + strconv.Itoa(i) + " 节\n\n正文段落。\n\n- 列表项\n\n> 引用一行\n> 引用第二行\n\n> [!TIP]\n> 提示内容\n\n---\n\n```go\nfunc a() {}\nfunc b() {}\nfunc c() {}\nfunc d() {}\n```\n\n")
+		b.WriteString("## 第 " + strconv.Itoa(i) + " 节\n\n正文段落，按 <kbd>⌘</kbd> <kbd>K</kbd> 插入`链接`与 ==高亮==。\n\n- 列表项\n- [ ] 任务\n\n> 引用一行\n> 引用第二行\n\n> [!TIP]\n> 提示内容\n\n> [!WARNING]\n> 警告内容\n\n---\n\n```go\nfunc a() {}\nfunc b() {}\nfunc c() {}\nfunc d() {}\n```\n\n| 名称 | 值 |\n|---|---|\n| a | 1 |\n\n")
 	}
 	nativeTestMain(func() {
 		window := nativeTestWindow()
@@ -258,12 +297,172 @@ func TestScrolledShot(t *testing.T) {
 		e.SetFrame(0, 0, 900, 700)
 		e.SetVisible(true)
 		e.Load(b.String())
-		e.SetStyle(1, false, true)
+		e.SetStyle(1, os.Getenv("CORRA_DARK") != "", true)
 		text := []rune(nativeTestText(e))
 		// Land the viewport inside a code block so its chip starts above.
 		target := strings.LastIndex(string(text), "func c")
 		nativeTestSelect(e, len([]rune(string(text)[:target])), 0)
 		nativeTestAction(e, "display", "")
+		if !nativeTestScreenshot(e, path) {
+			t.Errorf("screenshot failed: %s", path)
+		}
+	})
+}
+
+func TestImageProbe(t *testing.T) {
+	if os.Getenv("CORRA_PROBE") == "" {
+		t.Skip("set CORRA_PROBE=1")
+	}
+	img := writeTestPNG(t, 40, 30, "probe")
+	md := "![a](" + img + ")"
+	cases := []struct {
+		name, load string
+		ops        []string
+	}{
+		{"bs after image", "x\n\n" + md + "\n\ny", []string{"sel:4,0", "⌫"}},
+		{"bs at start of para after image", "x\n\n" + md + "\n\ny", []string{"sel:5,0", "⌫"}},
+		{"enter after image", md, []string{"sel:1,0", "⏎", "t"}},
+		{"type before image", md, []string{"sel:0,0", "t"}},
+		{"delete fwd image", "x\n\n" + md, []string{"sel:1,0", "⌦", "⌦"}},
+		{"bs after math", "x\n\n$$\nm\n$$\n\ny", []string{"sel:4,0", "⌫"}},
+		{"bs after table", "| a |\n|---|\n| 1 |\n\ny", []string{"sel:4,0", "⌫"}},
+		{"del before table", "x\n\n| a |\n|---|\n| 1 |", []string{"sel:1,0", "⌦"}},
+		{"bs after code", "```\nc\n```\n\ny", []string{"sel:2,0", "⌫"}},
+		{"bs twice after image", "x\n\n" + md + "\n\ny", []string{"sel:4,0", "⌫", "⌫"}},
+		{"bs once selects image", "x\n\n" + md + "\n\ny", []string{"sel:4,0", "⌫", "z"}},
+		{"del fwd once keeps", "x\n\n" + md, []string{"sel:1,0", "⌦"}},
+	}
+	nativeTestMain(func() {
+		window := nativeTestWindow()
+		defer nativeTestCloseWindow(window)
+		e := New(window, nil, nil)
+		defer e.Close()
+		for _, c := range cases {
+			e.Load(c.load)
+			probeRun(e, c.ops)
+			got, _, err := e.Snapshot()
+			got = strings.ReplaceAll(got, img, "IMG")
+			t.Logf("%-34s got=%q text=%q err=%v", c.name, got, strings.ReplaceAll(nativeTestText(e), "￼", "▣"), err)
+		}
+	})
+}
+
+func TestInsertBlockProbe(t *testing.T) {
+	if os.Getenv("CORRA_PROBE") == "" {
+		t.Skip("set CORRA_PROBE=1")
+	}
+	nativeTestMain(func() {
+		window := nativeTestWindow()
+		defer nativeTestCloseWindow(window)
+		e := New(window, nil, nil)
+		defer e.Close()
+		for _, c := range []struct{ name, load, insert string }{
+			{"code block", "a", "\n```\n\n```\n"},
+			{"math block", "a", "\n$$\n\n$$\n"},
+			{"hr", "a", "\n---\n"},
+			{"task", "a", "\n- [ ] "},
+			{"code block empty doc", "", "\n```\n\n```\n"},
+			{"table snippet", "a", "\n| 列 1 | 列 2 | 列 3 |\n| --- | --- | --- |\n|  |  |  |\n"},
+			{"toc", "# h\n\na", "\n[TOC]\n"},
+			{"table snippet mid", "a\n\nb", "\n| 列 1 | 列 2 |\n| --- | --- |\n|  |  |\n"},
+		} {
+			e.Load(c.load)
+			nativeTestSelect(e, len([]rune(c.load)), 0)
+			switch strings.TrimSpace(c.insert) {
+			case "```\n\n```":
+				e.Format("insert:```")
+			case "$$\n\n$$":
+				e.Format("insert:$$")
+			case "---":
+				e.Format("insert:---")
+			default:
+				e.InsertMarkdown(strings.TrimSpace(c.insert))
+			}
+			nativeTypeCharacters(e, "X")
+			got, _, _ := e.Snapshot()
+			t.Logf("%-22s got=%q", c.name, got)
+		}
+	})
+}
+
+func TestLoadLatency(t *testing.T) {
+	if os.Getenv("CORRA_PERF") == "" {
+		t.Skip("set CORRA_PERF=1")
+	}
+	var b strings.Builder
+	for i := 0; i < 300; i++ {
+		b.WriteString("## 第 " + strconv.Itoa(i) + " 节\n\n正文 $x^2+y_{" + strconv.Itoa(i) + "}$ 与 $\\frac{a}{b}$ 公式。\n\n$$\n\\int_0^1 f(x)\\,dx\n$$\n\n")
+	}
+	doc := b.String()
+	nativeTestMain(func() {
+		window := nativeTestWindow()
+		defer nativeTestCloseWindow(window)
+		e := New(window, func() {}, func() {})
+		defer e.Close()
+		e.SetFrame(0, 0, 900, 900)
+		e.SetVisible(true)
+		n := 2
+		if os.Getenv("CORRA_STYLE_LOG") != "" {
+			n = 1
+		}
+		if os.Getenv("CORRA_PERF") == "sample" {
+			n = 12
+		}
+		start := time.Now()
+		for i := 0; i < n; i++ {
+			e.Load(doc)
+		}
+		t.Logf("load=%v", time.Since(start)/time.Duration(n))
+	})
+}
+
+func TestUndoLatency(t *testing.T) {
+	if os.Getenv("CORRA_PERF") == "" {
+		t.Skip("set CORRA_PERF=1")
+	}
+	var b strings.Builder
+	for i := 0; i < 300; i++ {
+		b.WriteString("## 第 " + strconv.Itoa(i) + " 节\n\n这是一段比较长的正文，混合 English words 与 **粗体**、`code` 和 [链接](https://a.com)。\n\n- 列表项一\n- 列表项二\n\n> 引用一行\n\n")
+	}
+	nativeTestMain(func() {
+		window := nativeTestWindow()
+		defer nativeTestCloseWindow(window)
+		e := New(window, func() {}, func() {})
+		defer e.Close()
+		e.SetFrame(0, 0, 900, 900)
+		e.SetVisible(true)
+		e.Load(b.String())
+		nativeTestSelect(e, 5000, 0)
+		n := 5
+		if os.Getenv("CORRA_PERF") == "sample" {
+			n = 60
+		}
+		var total time.Duration
+		for i := 0; i < n; i++ {
+			nativeTestAction(e, "type", "字")
+			start := time.Now()
+			nativeTestAction(e, "undo", "")
+			total += time.Since(start)
+		}
+		t.Logf("undo=%v", total/time.Duration(n))
+	})
+}
+
+// Run: CORRA_TYPO_SHOT=/tmp/x.png go test ./nativerich -run TestInlineShot
+func TestInlineShot(t *testing.T) {
+	path := os.Getenv("CORRA_TYPO_SHOT")
+	if path == "" {
+		t.Skip("set CORRA_TYPO_SHOT=path.png")
+	}
+	nativeTestMain(func() {
+		window := nativeTestWindow()
+		defer nativeTestCloseWindow(window)
+		e := New(window, func() {}, func() {})
+		defer e.Close()
+		e.SetFrame(0, 0, 760, 900)
+		e.SetVisible(true)
+		e.Load(os.Getenv("CORRA_SHOT_DOC"))
+		e.SetStyle(1, os.Getenv("CORRA_DARK") != "", true)
 		if !nativeTestScreenshot(e, path) {
 			t.Errorf("screenshot failed: %s", path)
 		}

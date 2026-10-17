@@ -1,7 +1,54 @@
 // Included in CREditor's implementation. Rebuild the active fenced body when
 // paragraph edges change so hidden fences survive selected text replacement.
+// listContinuationAfterCode: leaving a code block that belongs to a list
+// item continues that item with a paragraph (Typora), instead of ending the
+// list. nil when the code is not inside a list.
+- (NSDictionary *)listContinuationAfterCode:(NSDictionary *)code before:(NSUInteger)location {
+    NSString *item=code[@"listItem"];
+    if (!item.length) return nil;
+    NSUInteger at=location;
+    for (int guard=0; at>0 && guard<500; guard++) {
+        NSRange previous=[_text.string paragraphRangeForRange:NSMakeRange(at-1,0)];
+        NSDictionary *p=CRParagraphAt(self,previous.location);
+        if (![p[@"listItem"] isEqual:item]) { if (!CRKind(p,@"code")) break; }
+        else if (CRList(p)) {
+            NSMutableDictionary *next=[p mutableCopy];
+            for (NSString *key in @[@"id",@"nextId",@"baseline",@"raw",@"listBaseline",@"listIndent",@"separator"]) [next removeObjectForKey:key];
+            next[@"listContinuation"]=@YES; next[@"runs"]=@[];
+            return next;
+        }
+        at=previous.location;
+    }
+    return nil;
+}
+// leaveCodeBlock: Cmd+Return anywhere in a code block continues below it
+// (Typora), by the same path as Return on its empty last line.
+- (BOOL)leaveCodeBlock {
+    NSRange selection=_text.selectedRange;
+    NSString *string=_text.string;
+    if (!_text.editable || _text.hasMarkedText || !CRKind(CRParagraphAt(self,selection.location),@"code")) return NO;
+    NSRange line=[string paragraphRangeForRange:NSMakeRange(selection.location,0)];
+    while (NSMaxRange(line)<string.length) {
+        NSDictionary *next=CRParagraphAt(self,NSMaxRange(line));
+        if (!CRKind(next,@"code") || [next[@"open"] length]) break;
+        line=[string paragraphRangeForRange:NSMakeRange(NSMaxRange(line),0)];
+    }
+    NSRange content=CRContent(string,line);
+    _text.selectedRange=NSMakeRange(NSMaxRange(content),0);
+    if (content.length) [self codeNewline];
+    [self codeNewline];
+    return YES;
+}
 - (void)codeNewline {
-    [self replaceCodeRange:_text.selectedRange withText:@"\n" newlineCommand:YES];
+    // A new code line keeps the indentation of the line it splits.
+    NSRange selection=_text.selectedRange;
+    NSRange line=[_text.string paragraphRangeForRange:NSMakeRange(selection.location,0)];
+    NSUInteger end=line.location;
+    while (end<selection.location && ([_text.string characterAtIndex:end]==' ' || [_text.string characterAtIndex:end]=='\t')) end++;
+    NSString *indent=[_text.string substringWithRange:NSMakeRange(line.location,end-line.location)];
+    // A whitespace-only line gets no indent, so a second Enter can leave.
+    if (end==NSMaxRange(CRContent(_text.string,line))) indent=@"";
+    [self replaceCodeRange:selection withText:[@"\n" stringByAppendingString:indent] newlineCommand:YES];
 }
 - (BOOL)replaceCodeRange:(NSRange)selection withText:(NSString *)text {
     return [self replaceCodeRange:selection withText:text newlineCommand:NO];
@@ -56,7 +103,8 @@
         NSUInteger codeCount=exit ? parts.count-1 : parts.count;
         for (NSUInteger i=0;i<parts.count;i++) {
             BOOL code=i<codeCount;
-            NSMutableDictionary *p=[(code ? first : CRInFootnote(CRBody(),first)) mutableCopy];
+            NSDictionary *exitParagraph=code ? nil : [self listContinuationAfterCode:first before:range.location];
+            NSMutableDictionary *p=[(code ? first : exitParagraph ?: CRInFootnote(CRBody(),first)) mutableCopy];
             for (NSString *key in @[@"id",@"nextId",@"baseline",@"raw",@"open",@"close"]) [p removeObjectForKey:key];
             if (code) {
                 // A boxed C "||" expression is an int, which would serialize
