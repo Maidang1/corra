@@ -81,7 +81,7 @@ func (v *View) foldersSidebar(c *ui.Context) {
 				// Leading-aligned "⊕ 新建文件夹", like Notes' sidebar footer.
 				btn.Children(func() {
 					ui.Row(c).FillWidth().Gap(7).AlignItems(ui.Center).Children(func() {
-						ui.Icon(c, iconPlusCircle).Size(18, 18).TextColor(t.TextMuted)
+						ui.Icon(c, iconPlusCircle).Size(16, 16).TextColor(t.TextMuted)
 						ui.Text(c, "新建文件夹").FontSize(13).TextColor(t.TextMuted)
 					})
 				}).OnClick(func() { v.openFolderDialog("新建文件夹", "") })
@@ -113,7 +113,7 @@ func sidebarPressed(t *ui.Theme) ui.Color {
 func (v *View) folderRow(c *ui.Context, label string, icon *ui.SVG, folder string, count int) {
 	t := c.Theme()
 	selected := v.App.SelFolder == folder
-	row := ui.ButtonBase(c).Key(folder).Label("文件夹："+label).FillWidth().Padding(7, 7).Radius(9)
+	row := ui.ButtonBase(c).Key(folder).Label("文件夹："+label).FillWidth().Padding(7, 7).Radius(7)
 	if selected {
 		row = row.Background(t.SurfacePressed)
 	} else if row.Pressed() {
@@ -123,7 +123,7 @@ func (v *View) folderRow(c *ui.Context, label string, icon *ui.SVG, folder strin
 	}
 	row.Children(func() {
 		ui.Row(c).FillWidth().Gap(7).Center().Children(func() {
-			ic := ui.Icon(c, icon).Size(20, 20)
+			ic := ui.Icon(c, icon).Size(17, 17)
 			if selected {
 				ic.TextColor(t.Accent)
 			}
@@ -157,9 +157,9 @@ func (v *View) searchBox(c *ui.Context) {
 	// The filter field lives inside the sidebar, directly above the notes
 	// list it filters — the way Apple Notes scopes search to its list.
 	ui.Box(c).FillWidth().Padding(4, 8, 6, 8).Children(func() {
-		ui.Row(c).Key("search").FillWidth().Height(30).Gap(6).Padding(0, 10).Radius(15).
+		ui.Row(c).Key("search").FillWidth().Height(28).Gap(6).Padding(0, 10).Radius(14).
 			Background(fieldFill(t)).Children(func() {
-			ui.Icon(c, iconSearch).Size(15, 15).TextColor(t.TextMuted)
+			ui.Icon(c, iconSearch).Size(14, 14).TextColor(t.TextMuted)
 			field := ui.TextInputBase(c, &v.App.Query).Label("搜索备忘录").Placeholder("搜索").FillWidth().FontSize(13).
 				OnChange(func() { v.reconcileSelection() })
 			if v.focusSearch {
@@ -189,7 +189,7 @@ func (v *View) sidebarNotes(c *ui.Context) {
 	ui.Scroll(c).Fill().Children(func() {
 		ui.Column(c).FillWidth().Gap(1).Padding(0, 4, 0, 8).Children(func() {
 			for _, g := range v.App.NoteGroups() {
-				ui.Text(c, g.Label).FontSize(12).Bold().TextColor(t.TextMuted).Padding(10, 8, 3, 8)
+				ui.Text(c, g.Label).FontSize(11).Bold().TextColor(t.TextMuted).Padding(12, 10, 4, 10)
 				for _, n := range g.Notes {
 					v.noteRow(c, n)
 				}
@@ -209,7 +209,7 @@ func (v *View) noteRow(c *ui.Context, n app.Note) {
 	if selected {
 		fg, sub = t.AccentText, t.AccentText
 	}
-	row := ui.ButtonBase(c).Key(n.Path).Label("备忘录："+n.Title).FillWidth().Padding(7, 10).Radius(10)
+	row := ui.ButtonBase(c).Key(n.Path).Label("备忘录："+n.Title).FillWidth().Padding(6, 10).Radius(7)
 	if selected {
 		row = row.Background(t.Accent)
 	} else if row.Pressed() {
@@ -218,15 +218,15 @@ func (v *View) noteRow(c *ui.Context, n app.Note) {
 		row = row.Background(sidebarHover(t))
 	}
 	row.Children(func() {
-		ui.Column(c).FillWidth().MinWidth(0).Gap(2).Children(func() {
+		ui.Column(c).FillWidth().MinWidth(0).Gap(3).Children(func() {
 			ui.Text(c, n.Title).FontSize(13).TextColor(fg).Bold().SingleLine().Ellipsis("…").FillWidth().MinWidth(0)
 			preview := n.Snippet
 			if preview == "" {
 				preview = "无附加文本"
 			}
 			ui.Row(c).FillWidth().MinWidth(0).Gap(6).Children(func() {
-				ui.Text(c, noteTime(n.ModTime)).FontSize(11.5).TextColor(fg).NoWrap().Shrink(0)
-				ui.Text(c, preview).FontSize(11.5).TextColor(sub).SingleLine().Ellipsis("…").Grow(1).Shrink(1).MinWidth(0)
+				ui.Text(c, noteTime(n.ModTime)).FontSize(11).TextColor(fg).NoWrap().Shrink(0)
+				ui.Text(c, preview).FontSize(11).TextColor(sub).SingleLine().Ellipsis("…").Grow(1).Shrink(1).MinWidth(0)
 			})
 		})
 	}).OnClick(func() { v.openNote(n.Path) }).ContextMenu(func(m *ui.Menu) {

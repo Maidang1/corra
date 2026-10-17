@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	sidebarW = 280.0
+	sidebarW = 268.0
 	// topRowH is the height of both cards' top rows: the toolbar line the
 	// window's traffic lights land on (they sit at y=26, center y=32, the
 	// rows' center at 8+24).
@@ -23,7 +23,7 @@ func (v *View) header(c *ui.Context) {
 	t := c.Theme()
 	// The row starts at the window's top edge; the inset keeps its center
 	// on the traffic lights' line, level with the sidebar panel's toolbar.
-	bar := ui.Row(c).FillWidth().Height(topRowH+8).Gap(10).AlignItems(ui.Center).DragWindow().
+	bar := ui.Row(c).FillWidth().Height(topRowH+8).Gap(8).AlignItems(ui.Center).DragWindow().
 		Padding(8, max(12, c.TitleBar().Right), 0, 16)
 	// Like a macOS toolbar, a narrow window folds the formatting group into
 	// the trailing menu, then drops the folder title. The width derives from
@@ -60,11 +60,11 @@ func (v *View) header(c *ui.Context) {
 		}
 		ui.Spacer(c)
 		v.modeSwitcher(c)
-		toolbarCapsule(c).Children(func() { iconButton(c, iconCompose, "新建备忘录 (Cmd+N)", v.newNote) })
 		if !compact {
 			v.formatCapsule(c)
 		}
 		toolbarCapsule(c).Children(func() {
+			iconButton(c, iconCompose, "新建备忘录 (Cmd+N)", v.newNote)
 			iconButton(c, iconShare, "共享与导出", nil).Disabled(v.App.Path == "").Menu(func(m *ui.Menu) {
 				if m.Item("复制 Markdown").Chosen() {
 					if v.syncEditor() {
@@ -107,8 +107,8 @@ const tableSnippet = "\n| 列 1 | 列 2 | 列 3 |\n| --- | --- | --- |\n|  |  | 
 func (v *View) formatCapsule(c *ui.Context) {
 	t := c.Theme()
 	toolbarCapsule(c).Children(func() {
-		ui.ButtonBase(c).Key("format").Label("文本格式").Tooltip("文本格式").Size(36, 36).Radius(18).
-			Disabled(!v.canEdit()).Children(func() { ui.Text(c, "Aa").FontSize(18).TextColor(t.TextMuted) }).Menu(v.formatMenu)
+		ui.ButtonBase(c).Key("format").Label("文本格式").Tooltip("文本格式").Size(28, 28).Radius(14).
+			Disabled(!v.canEdit()).Children(func() { ui.Text(c, "Aa").FontSize(15).TextColor(t.TextMuted) }).Menu(v.formatMenu)
 		iconButton(c, iconChecklist, "插入任务列表", func() { v.insertSnippet("- [ ] ") }).Disabled(!v.canEdit())
 		iconButton(c, iconTable, "插入表格", func() { v.insertSnippet(tableSnippet) }).Disabled(!v.canEdit())
 		iconButton(c, iconPaperclip, "插入图片（可上传图床）", func() {
@@ -119,17 +119,16 @@ func (v *View) formatCapsule(c *ui.Context) {
 	})
 }
 
-// toolbarCapsule groups toolbar buttons into one floating pill: a lifted
-// white (or graphite) lozenge with a hairline rim and a faint shadow, the
-// way macOS clusters toolbar controls.
+// toolbarCapsule groups toolbar buttons into one floating pill: a quiet,
+// flat lozenge with a hairline rim and no shadow, the way macOS 26 clusters
+// toolbar controls without lifting them off the bar.
 func toolbarCapsule(c *ui.Context) ui.Element {
 	t := c.Theme()
-	bg, rim := ui.Hex("#fbfbfb"), ui.Hex("#00000014")
+	bg, rim := ui.Hex("#f7f7f8"), ui.Hex("#0000000d")
 	if t.Dark {
-		bg, rim = ui.Hex("#303034"), ui.Hex("#ffffff20")
+		bg, rim = ui.Hex("#303034"), ui.Hex("#ffffff17")
 	}
-	return ui.Row(c).Gap(2).Padding(2, 4).Radius(20).Background(bg).Border(1, rim).
-		Shadow(0, 2, 6, 0, ui.Hex("#0000000d"))
+	return ui.Row(c).Gap(2).Padding(2, 3).Radius(16).Background(bg).Border(1, rim)
 }
 
 // modeSwitcher is the header's segmented control for the two editing
@@ -152,26 +151,26 @@ func (v *View) modeSwitcher(c *ui.Context) {
 }
 
 // modeSegment is one segment of the switcher: a small icon-plus-label
-// lozenge, lifted with a hairline rim when it is the current mode.
+// lozenge, raised with a hairline rim when it is the current mode.
 func (v *View) modeSegment(c *ui.Context, label string, icon *ui.SVG, active, enabled bool, fn func()) {
 	t := c.Theme()
 	fg := t.TextMuted
 	if active {
 		fg = t.Text
 	}
-	seg := ui.ButtonBase(c).Key(label).Label("切换到"+label).Tooltip(label).Padding(6, 10).Radius(16).
+	seg := ui.ButtonBase(c).Key(label).Label("切换到"+label).Tooltip(label).Padding(4, 9).Radius(12).
 		Disabled(!enabled)
 	if active {
 		bg, rim := ui.Hex("#ffffff"), ui.Hex("#00000010")
 		if t.Dark {
 			bg, rim = ui.Hex("#4a4a4f"), ui.Hex("#ffffff24")
 		}
-		seg = seg.Background(bg).Border(1, rim).Shadow(0, 1, 3, 0, ui.Hex("#00000014"))
+		seg = seg.Background(bg).Border(1, rim).Shadow(0, 1, 2, 0, ui.Hex("#00000012"))
 	}
 	seg.Children(func() {
-		ui.Row(c).Gap(5).AlignItems(ui.Center).Children(func() {
-			ui.Icon(c, icon).Size(15, 15).TextColor(fg)
-			ui.Text(c, label).FontSize(12.5).TextColor(fg)
+		ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
+			ui.Icon(c, icon).Size(13, 13).TextColor(fg)
+			ui.Text(c, label).FontSize(12).TextColor(fg)
 		})
 	}).OnClick(fn)
 }
