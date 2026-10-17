@@ -91,6 +91,13 @@ func (e *Editor) Load(source string) {
 	e.source, e.dirty = source, false
 }
 
+// errComposing reports IME marked text: the buffer is not serializable until
+// the composition commits, which is routine while typing, not a failure.
+type errComposing struct{}
+
+func (errComposing) Error() string   { return "请先完成输入法组词，再保存或切换模式" }
+func (errComposing) Composing() bool { return true }
+
 func (e *Editor) Snapshot() (string, bool, error) {
 	if e == nil || e.native == 0 {
 		return "", false, errors.New("native editor is closed")
@@ -98,7 +105,7 @@ func (e *Editor) Snapshot() (string, bool, error) {
 	var marked C.int
 	p := C.cr_snapshot(e.native, &marked)
 	if marked != 0 {
-		return e.source, e.dirty, errors.New("请先完成输入法组词，再保存或切换模式")
+		return e.source, e.dirty, errComposing{}
 	}
 	if p == nil {
 		return e.source, e.dirty, errors.New("native editor serialization failed")

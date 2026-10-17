@@ -168,6 +168,37 @@ func TestRichSnapshotFailureBlocksNavigationAndSave(t *testing.T) {
 	}
 }
 
+type composingErr struct{}
+
+func (composingErr) Error() string   { return "composing" }
+func (composingErr) Composing() bool { return true }
+
+// IME composition is routine typing: it holds the save back without
+// flashing an "unsaved" error under the date while the user types.
+func TestRichCompositionDefersSaveSilently(t *testing.T) {
+	v, tt := notesFixture(t)
+	e := &fakeRichEditor{}
+	v.AttachRichEditor(e)
+	tt.Frame()
+	e.err = composingErr{}
+	v.NativeChanged()
+	tt.Frame()
+	if !v.App.Dirty {
+		t.Fatal("watcher can replace uncommitted native input")
+	}
+	if v.FlushAutosave() {
+		t.Fatal("pending composition reported saved")
+	}
+	if v.SaveError != "" {
+		t.Fatalf("composition shown as save error: %q", v.SaveError)
+	}
+	e.err = nil
+	v.NativeChanged()
+	if !v.FlushAutosave() {
+		t.Fatal("committed composition not saved")
+	}
+}
+
 func TestRichNewNoteAndTrash(t *testing.T) {
 	v, tt := notesFixture(t)
 	e := &fakeRichEditor{}

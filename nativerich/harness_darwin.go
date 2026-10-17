@@ -123,3 +123,9 @@ func nativeTestParagraphs(e *Editor) string {
 	}
 	return out.String()
 }
+
+func nativeTestMarkers(e *Editor) string {
+	value := C.cr_test_markers(e.native)
+	defer C.free(unsafe.Pointer(value))
+	return C.GoString(value)
+}
