@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -229,7 +230,7 @@ func TestNoteMeta(t *testing.T) {
 	}
 
 	title, _ = NoteMeta("")
-	if title != "新备忘录" {
+	if title != "未命名文档" {
 		t.Fatalf("empty title = %q", title)
 	}
 
@@ -253,8 +254,19 @@ func TestCreateAndDeleteNote(t *testing.T) {
 	if _, err := os.Stat(p); err != nil {
 		t.Fatalf("note not created: %v", err)
 	}
+	namePattern := regexp.MustCompile(`^文档 \d{4}-\d{2}-\d{2} \d{2}\.\d{2}\.\d{2}\.md$`)
+	if got := filepath.Base(p); !namePattern.MatchString(got) {
+		t.Fatalf("new document name = %q", got)
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(data), "# 新文档\n\n"; got != want {
+		t.Fatalf("new document content = %q, want %q", got, want)
+	}
 	lib := ScanLibrary(root)
-	if len(lib.Notes) != 1 || lib.Notes[0].Title != "新备忘录" {
+	if len(lib.Notes) != 1 || lib.Notes[0].Title != "新文档" {
 		t.Fatalf("notes = %+v", lib.Notes)
 	}
 	// In a folder.
