@@ -13,3 +13,8 @@ build:
 
 test:
 	go test ./...
+
+# AI-friendly file read/write CLI (no cgo needed).
+.PHONY: aitool
+aitool:
+	CGO_ENABLED=0 go build -o bin/aitool ./cmd/aitool
