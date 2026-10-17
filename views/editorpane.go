@@ -22,8 +22,8 @@ func (v *View) editorPane(c *ui.Context) {
 	t := c.Theme()
 	if v.App.Path == "" && v.App.Source == "" {
 		ui.Column(c).Fill().Center().Gap(12).Children(func() {
-			ui.Text(c, "未选择备忘录").FontSize(20).TextColor(t.TextMuted)
-			ui.Button(c, "新建备忘录").OnClick(v.newNote)
+			ui.Text(c, "未选择文档").FontSize(20).TextColor(t.TextMuted)
+			ui.Button(c, "新建文档").OnClick(v.newNote)
 		})
 		return
 	}
@@ -106,7 +106,7 @@ func (v *View) dateHeader(c *ui.Context) {
 			ui.Text(c, "未保存："+v.SaveError).FontSize(11).TextColor(t.Danger)
 		}
 		if v.App.SelFolder == app.TrashName {
-			ui.Text(c, "已删除的备忘录 · 恢复后可编辑").FontSize(11).TextColor(t.TextMuted)
+			ui.Text(c, "已删除的文档 · 恢复后可编辑").FontSize(11).TextColor(t.TextMuted)
 		}
 	})
 }
@@ -155,7 +155,7 @@ func (v *View) ensureEditor() {
 		NoScrollPastEnd: true,
 		LineNumbers:     editor.LineNumbersOff,
 		Placeholder:     "开始输入 Markdown…",
-		Label:           "备忘录正文",
+		Label:           "文档正文",
 	}
 	if caret > 0 {
 		v.edState.Select(caret, caret)
@@ -241,7 +241,7 @@ func (v *View) autosave() bool {
 	}
 	path := v.App.CurrentPath()
 	if path == "" || !v.canEdit() {
-		v.SaveError = "当前备忘录无法保存"
+		v.SaveError = "当前文档无法保存"
 		return false
 	}
 	src := v.App.CurrentSource()

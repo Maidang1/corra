@@ -13,7 +13,7 @@ import (
 // folderLabel maps a folder key to its sidebar display name.
 func folderLabel(folder string) string {
 	if folder == "" {
-		return "全部备忘录"
+		return "全部文档"
 	}
 	if folder == app.TrashName {
 		return "最近删除"
@@ -57,9 +57,9 @@ func (v *View) foldersSidebar(c *ui.Context) {
 				iconButton(c, iconSidebar, "切换边栏", v.toggleSidebar)
 			})
 			ui.Column(c).FillWidth().Gap(1).Padding(2, 4, 8, 6).Children(func() {
-				ui.Text(c, "在我的 Mac 上").FontSize(12).Bold().TextColor(t.TextMuted).Padding(0, 7, 5, 7)
+				ui.Text(c, "本地文档库").FontSize(12).Bold().TextColor(t.TextMuted).Padding(0, 7, 5, 7)
 				if v.App.Lib != nil {
-					v.folderRow(c, "全部备忘录", iconFolder, "", len(v.App.Lib.Notes))
+					v.folderRow(c, "全部文档", iconFolder, "", len(v.App.Lib.Notes))
 					for _, f := range v.App.Lib.Folders() {
 						v.folderRow(c, f, iconFolder, f, len(v.App.Lib.Filter(f, "")))
 					}
@@ -160,7 +160,7 @@ func (v *View) searchBox(c *ui.Context) {
 		ui.Row(c).Key("search").FillWidth().Height(28).Gap(6).Padding(0, 10).Radius(14).
 			Background(fieldFill(t)).Children(func() {
 			ui.Icon(c, iconSearch).Size(14, 14).TextColor(t.TextMuted)
-			field := ui.TextInputBase(c, &v.App.Query).Label("搜索备忘录").Placeholder("搜索").FillWidth().FontSize(13).
+			field := ui.TextInputBase(c, &v.App.Query).Label("搜索文档").Placeholder("搜索").FillWidth().FontSize(13).
 				OnChange(func() { v.reconcileSelection() })
 			if v.focusSearch {
 				field.Focus()
@@ -176,11 +176,11 @@ func (v *View) sidebarNotes(c *ui.Context) {
 	if len(notes) == 0 {
 		// Fill like the list would, so the footer stays at the bottom.
 		ui.Column(c).Fill().Center().Padding(18, 14).Children(func() {
-			hint := "无备忘录"
+			hint := "暂无文档"
 			if v.App.SelFolder == app.TrashName {
 				hint = "最近删除为空"
 			} else if v.App.Query != "" {
-				hint = "无匹配的备忘录"
+				hint = "没有找到匹配的文档"
 			}
 			ui.Text(c, hint).FontSize(13).TextColor(t.TextMuted)
 		})
@@ -209,7 +209,7 @@ func (v *View) noteRow(c *ui.Context, n app.Note) {
 	if selected {
 		fg, sub = t.AccentText, t.AccentText
 	}
-	row := ui.ButtonBase(c).Key(n.Path).Label("备忘录："+n.Title).FillWidth().Padding(6, 10).Radius(7)
+	row := ui.ButtonBase(c).Key(n.Path).Label("文档："+n.Title).FillWidth().Padding(6, 10).Radius(7)
 	if selected {
 		row = row.Background(t.Accent)
 	} else if row.Pressed() {
@@ -222,7 +222,7 @@ func (v *View) noteRow(c *ui.Context, n app.Note) {
 			ui.Text(c, n.Title).FontSize(13).TextColor(fg).Bold().SingleLine().Ellipsis("…").FillWidth().MinWidth(0)
 			preview := n.Snippet
 			if preview == "" {
-				preview = "无附加文本"
+				preview = "暂无正文"
 			}
 			ui.Row(c).FillWidth().MinWidth(0).Gap(6).Children(func() {
 				ui.Text(c, noteTime(n.ModTime)).FontSize(11).TextColor(fg).NoWrap().Shrink(0)
@@ -234,7 +234,7 @@ func (v *View) noteRow(c *ui.Context, n app.Note) {
 			v.openNote(n.Path)
 		}
 		if n.Path != v.App.SelNote {
-			m.Item("请先保存当前备忘录").Disabled(true)
+			m.Item("请先保存当前文档").Disabled(true)
 			return
 		}
 		v.noteMenu(m)
@@ -261,7 +261,7 @@ func (v *View) newNote() {
 	}
 	v.SaveError = ""
 	if err := v.App.NewNote(); err != nil {
-		mygo.Dialog.Error("新建备忘录失败", err.Error())
+		mygo.Dialog.Error("新建文档失败", err.Error())
 	} else {
 		v.edState = nil
 		if v.rich != nil {
