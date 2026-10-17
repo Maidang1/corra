@@ -98,7 +98,7 @@ func (v *View) dateHeader(c *ui.Context) {
 	} else if v.App.Path != "" {
 		label = "尚未保存"
 	}
-	ui.Column(c).FillWidth().Padding(8, 0, 6, 0).Center().Children(func() {
+	ui.Column(c).FillWidth().Padding(6, 0, 4, 0).Center().Children(func() {
 		if label != "" {
 			ui.Text(c, label).FontSize(12).TextColor(t.TextMuted).NoWrap()
 		}

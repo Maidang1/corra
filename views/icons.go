@@ -29,17 +29,17 @@ var (
 )
 
 // iconButton is a header toolbar button: a quiet rounded square holding
-// a 18-DIP icon, without the theme button chrome — the way Apple Notes'
+// a 17-DIP icon, without the theme button chrome — the way Apple Notes'
 // borderless toolbar icons read.
 func iconButton(c *ui.Context, icon *ui.SVG, tip string, fn func()) ui.Element {
-	btn := ui.ButtonBase(c).Key(tip).Label(tip).Tooltip(tip).Size(36, 36).Radius(18)
+	btn := ui.ButtonBase(c).Key(tip).Label(tip).Tooltip(tip).Size(28, 28).Radius(14)
 	if btn.Pressed() {
 		btn.Background(c.Theme().SurfacePressed)
 	} else if btn.Hovered() {
 		btn.Background(c.Theme().SurfaceHover)
 	}
 	btn.Children(func() {
-		ui.Icon(c, icon).Size(21, 21)
+		ui.Icon(c, icon).Size(17, 17)
 	})
 	return btn.OnClick(fn)
 }
