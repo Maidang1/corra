@@ -310,6 +310,13 @@ static NSDictionary *CRParagraphAt(CREditor *e, NSUInteger location) {
 static CGFloat CRTopInset(CREditor *editor) {
     return (22+(CRKind(CRParagraphAt(editor,0),@"code") ? 20 : 0))*editor.zoom;
 }
+// CRMutedColor is secondary ink for code metadata and raw markup. It mirrors
+// the shell's TextMuted tokens so both editing surfaces share one hierarchy.
+static NSColor *CRMutedColor(BOOL dark) {
+    return dark ? [NSColor colorWithRed:0.780 green:0.800 blue:0.831 alpha:1]
+                : [NSColor colorWithWhite:0.40 alpha:1];
+}
+
 // CRHlColor maps a chroma token class (see render.Highlight) to a theme color.
 // A one-palette-each-mode scheme keeps the code chip legible without a full
 // theme engine; unknown classes inherit the default source color (nil).
@@ -321,7 +328,7 @@ static NSColor *CRHlColor(NSString *cls, BOOL dark) {
             @"string":[NSColor colorWithRed:0.11 green:0.46 blue:0.16 alpha:1],
             @"number":[NSColor colorWithRed:0.11 green:0.30 blue:0.75 alpha:1],
             @"literal":[NSColor colorWithRed:0.11 green:0.30 blue:0.75 alpha:1],
-            @"comment":[NSColor colorWithRed:0.50 green:0.52 blue:0.55 alpha:1],
+            @"comment":CRMutedColor(NO),
             @"operator":[NSColor colorWithRed:0.40 green:0.22 blue:0.56 alpha:1],
             @"type":[NSColor colorWithRed:0.19 green:0.42 blue:0.66 alpha:1],
             @"name":[NSColor colorWithRed:0.47 green:0.30 blue:0.07 alpha:1],
@@ -331,7 +338,7 @@ static NSColor *CRHlColor(NSString *cls, BOOL dark) {
             @"string":[NSColor colorWithRed:0.58 green:0.82 blue:0.52 alpha:1],
             @"number":[NSColor colorWithRed:0.60 green:0.76 blue:0.98 alpha:1],
             @"literal":[NSColor colorWithRed:0.60 green:0.76 blue:0.98 alpha:1],
-            @"comment":[NSColor colorWithRed:0.56 green:0.59 blue:0.63 alpha:1],
+            @"comment":CRMutedColor(YES),
             @"operator":[NSColor colorWithRed:0.80 green:0.68 blue:0.92 alpha:1],
             @"type":[NSColor colorWithRed:0.56 green:0.78 blue:0.96 alpha:1],
             @"name":[NSColor colorWithRed:0.90 green:0.74 blue:0.46 alpha:1],
@@ -525,7 +532,7 @@ static BOOL CRHasFootnote(NSDictionary *paragraph) {
     if ([attrs[CRHTML] boolValue]) {
         // Raw HTML reads as markup, not prose: quiet and monospaced.
         out[NSFontAttributeName] = [NSFont monospacedSystemFontOfSize:size-2*_zoom weight:NSFontWeightRegular];
-        out[NSForegroundColorAttributeName] = _dark ? [NSColor colorWithWhite:0.55 alpha:1] : [NSColor colorWithWhite:0.55 alpha:1];
+        out[NSForegroundColorAttributeName] = CRMutedColor(_dark);
     } else if (CRKind(p,@"quote") || note || (CRList(p) && CRQuoteOf(p))) out[NSForegroundColorAttributeName] = _dark ? [NSColor colorWithWhite:0.62 alpha:1] : [NSColor colorWithWhite:0.42 alpha:1];
     NSMutableParagraphStyle *style = [NSMutableParagraphStyle new];
     // ~1.55 line height keeps mixed CJK/Latin lines from rubbing shoulders.
@@ -2417,7 +2424,7 @@ static BOOL CRFootnoteAreaStart(CREditor *e, NSUInteger at) {
         NSRect chip=NSIsEmptyRect(group) ? NSZeroRect : chipBounds();
         flush();
         if (groupLang.length) {
-            NSDictionary *attrs=@{NSFontAttributeName:[NSFont systemFontOfSize:10.5*e.zoom],NSForegroundColorAttributeName:e.dark ? [NSColor colorWithWhite:0.55 alpha:1] : [NSColor colorWithWhite:0.6 alpha:1]};
+            NSDictionary *attrs=@{NSFontAttributeName:[NSFont systemFontOfSize:10.5*e.zoom],NSForegroundColorAttributeName:CRMutedColor(e.dark)};
             NSSize size=[groupLang sizeWithAttributes:attrs];
             [groupLang drawAtPoint:NSMakePoint(NSMaxX(chip)-size.width-10*e.zoom,chip.origin.y+6*e.zoom) withAttributes:attrs];
         }

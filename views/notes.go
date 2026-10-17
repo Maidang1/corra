@@ -129,7 +129,7 @@ func (v *View) folderRow(c *ui.Context, label string, icon *ui.SVG, folder strin
 			}
 			txt := ui.Text(c, label).FontSize(14)
 			if selected {
-				txt.TextColor(t.Accent)
+				txt.TextColor(t.Text)
 			}
 			ui.Spacer(c)
 			ui.Text(c, fmt.Sprint(count)).FontSize(12).TextColor(t.TextMuted)
@@ -211,7 +211,7 @@ func (v *View) noteRow(c *ui.Context, n app.Note) {
 	}
 	row := ui.ButtonBase(c).Key(n.Path).Label("文档："+n.Title).FillWidth().Padding(6, 10).Radius(7)
 	if selected {
-		row = row.Background(t.Accent)
+		row = row.Background(t.AccentPressed)
 	} else if row.Pressed() {
 		row = row.Background(sidebarPressed(t))
 	} else if row.Hovered() {
