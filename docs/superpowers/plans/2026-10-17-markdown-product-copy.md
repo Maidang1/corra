@@ -489,8 +489,8 @@ no JavaScript. Go draws the shell on the GPU; macOS uses an AppKit
 
 ```markdown
 - **Document library and editing workspace** — folders and a
-  modification-date-grouped document list in the sidebar, with a dated editor
-  and optional outline
+  document list grouped by modification date in the sidebar, with an editor
+  showing the document's modification date and an optional outline
 ```
 
 在英文 README 中按语境完成以下精确调整，不做跨文件全局替换：
