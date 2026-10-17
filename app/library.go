@@ -287,7 +287,7 @@ func NoteMeta(src string) (title, snippet string) {
 		}
 	}
 	if title == "" {
-		title = "新备忘录"
+		title = "未命名文档"
 	}
 	snippet = strings.Join(body, " ")
 	r := []rune(snippet)
@@ -316,7 +316,7 @@ func CreateNote(root, folder string) (string, error) {
 	if err := dir.MkdirAll(rel, 0o755); err != nil {
 		return "", err
 	}
-	name := fmt.Sprintf("备忘录 %s.md", time.Now().Format("2006-01-02 15.04.05"))
+	name := fmt.Sprintf("文档 %s.md", time.Now().Format("2006-01-02 15.04.05"))
 	for i := 1; ; i++ {
 		path := filepath.Join(rel, numberedName(name, i))
 		f, err := dir.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
@@ -326,7 +326,7 @@ func CreateNote(root, folder string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		_, writeErr := f.WriteString("# 新备忘录\n\n")
+		_, writeErr := f.WriteString("# 新文档\n\n")
 		closeErr := f.Close()
 		if writeErr != nil {
 			_ = dir.Remove(path)
