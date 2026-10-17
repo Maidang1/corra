@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"image/color"
 	"image/png"
+	"sync"
 
 	"github.com/Maidang1/corra/render"
 	"github.com/Maidang1/corra/richtext"
@@ -116,7 +118,22 @@ func (e *Editor) documentMathContext(doc, before, after richtext.Document, dark 
 		if dark {
 			fg = color.RGBA{R: 231, G: 233, B: 238, A: 255}
 		}
-		results, err = render.RenderMathBatch(expressions, render.MathOptions{Numbering: numbering}, 15*zoom, fg)
+		batchKey, _ := json.Marshal(struct {
+			Expressions []render.MathExpression
+			Dark        bool
+			Zoom        float64
+			Numbering   string
+		}{expressions, dark, zoom, numbering})
+		// The same document is rendered once per visible chunk with only the
+		// Visible flags differing; MathJax output does not depend on them.
+		if string(batchKey) == e.mathBatchKey {
+			results = e.mathBatch
+		} else {
+			results, err = render.RenderMathBatch(expressions, render.MathOptions{Numbering: numbering}, 15*zoom, fg)
+			if err == nil {
+				e.mathBatchKey, e.mathBatch = string(batchKey), results
+			}
+		}
 	}
 	visible := make([]nativeMathResult, 0, len(slots))
 	for i, slot := range slots {
@@ -131,11 +148,11 @@ func (e *Editor) documentMathContext(doc, before, after richtext.Document, dark 
 			result.Error = results[i].Error.Error()
 		default:
 			result.Number = results[i].Number
-			var buf bytes.Buffer
-			if encodeErr := png.Encode(&buf, results[i].Image); encodeErr != nil {
+			encoded, encodeErr := cachedMathPNG(results[i], dark, zoom)
+			if encodeErr != nil {
 				result.Error = encodeErr.Error()
 			} else {
-				result.Image = base64.StdEncoding.EncodeToString(buf.Bytes())
+				result.Image = encoded
 			}
 		}
 		visible = append(visible, result)
@@ -143,4 +160,38 @@ func (e *Editor) documentMathContext(doc, before, after richtext.Document, dark 
 	data, _ := json.Marshal(visible)
 	e.mathKey, e.mathResult = string(key), string(data)
 	return e.mathResult
+}
+
+// mathPNGCache holds the base64 PNG of each rendered formula (by its SVG and
+// presentation), so a reload does not re-encode every image.
+var mathPNGCache = struct {
+	sync.Mutex
+	entries map[string]string
+	order   []string
+}{entries: map[string]string{}}
+
+func cachedMathPNG(result render.MathResult, dark bool, zoom float64) (string, error) {
+	key := fmt.Sprintf("%t|%g|%s", dark, zoom, result.SVG)
+	mathPNGCache.Lock()
+	hit, ok := mathPNGCache.entries[key]
+	mathPNGCache.Unlock()
+	if ok {
+		return hit, nil
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, result.Image); err != nil {
+		return "", err
+	}
+	encoded := base64.StdEncoding.EncodeToString(buf.Bytes())
+	mathPNGCache.Lock()
+	if _, ok := mathPNGCache.entries[key]; !ok {
+		mathPNGCache.entries[key] = encoded
+		mathPNGCache.order = append(mathPNGCache.order, key)
+		for len(mathPNGCache.order) > 1024 {
+			delete(mathPNGCache.entries, mathPNGCache.order[0])
+			mathPNGCache.order = mathPNGCache.order[1:]
+		}
+	}
+	mathPNGCache.Unlock()
+	return encoded, nil
 }

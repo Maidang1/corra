@@ -133,29 +133,33 @@ func TestNativeEmptyTableStructureAndPaste(t *testing.T) {
 		e := New(window, nil, nil)
 		defer e.Close()
 		for _, prefix := range []string{"", "before\n\n"} {
-		original := prefix+"| | |\n| --- | --- |\n| | |"
-		for _, command := range []string{"table:row-below", "table:column-right", "table:align-center", "paste"} {
-			e.Load(original)
-			location:=2
-			if prefix!="" { location+=7 }
-			nativeTestSelect(e, location, 0)
-			if command == "paste" {
-				nativeTestAction(e, "paste", "x\ty")
-			} else {
-				e.Format(command)
+			original := prefix + "| | |\n| --- | --- |\n| | |"
+			for _, command := range []string{"table:row-below", "table:column-right", "table:align-center", "paste"} {
+				e.Load(original)
+				location := 2
+				if prefix != "" {
+					location += 7
+				}
+				nativeTestSelect(e, location, 0)
+				if command == "paste" {
+					nativeTestAction(e, "paste", "x\ty")
+				} else {
+					e.Format(command)
+				}
+				got, changed, err := e.Snapshot()
+				tableIndex := 0
+				if prefix != "" {
+					tableIndex = 1
+				}
+				if err != nil || !changed || richtext.Parse(got).Paragraphs[tableIndex].Kind != "table" {
+					t.Errorf("empty grid %s: %q %v", command, got, err)
+				}
+				nativeTestAction(e, "undo", "")
+				got, _, _ = e.Snapshot()
+				if got != original {
+					t.Errorf("empty grid undo %s: %q", command, got)
+				}
 			}
-			got, changed, err := e.Snapshot()
-			tableIndex:=0
-			if prefix!="" { tableIndex=1 }
-			if err != nil || !changed || richtext.Parse(got).Paragraphs[tableIndex].Kind != "table" {
-				t.Errorf("empty grid %s: %q %v", command, got, err)
-			}
-			nativeTestAction(e, "undo", "")
-			got, _, _ = e.Snapshot()
-			if got != original {
-				t.Errorf("empty grid undo %s: %q", command, got)
-			}
-		}
 		}
 	})
 }
@@ -337,20 +341,22 @@ func TestNativeIndependentNestedOrderedLists(t *testing.T) {
 
 func TestNativeCopyNestedSiblingsThenContinue(t *testing.T) {
 	nativeTestMain(func() {
-		window:=nativeTestWindow()
+		window := nativeTestWindow()
 		defer nativeTestCloseWindow(window)
-		e:=New(window,nil,nil)
+		e := New(window, nil, nil)
 		defer e.Close()
 		e.Load("- parent\n  - one\n  - two")
-		nativeTestSelect(e,7,7)
-		nativeTestAction(e,"copy","")
+		nativeTestSelect(e, 7, 7)
+		nativeTestAction(e, "copy", "")
 		e.Load("")
-		nativeTestAction(e,"pasteboard","")
-		nativeTestSelect(e,3,0)
-		nativeTestAction(e,"newline","")
-		nativeTypeCharacters(e,"inserted")
-		got,_,_:=e.Snapshot()
-		if got!="- one\n- inserted\n- two" { t.Errorf("pasted siblings changed hierarchy: %q",got) }
+		nativeTestAction(e, "pasteboard", "")
+		nativeTestSelect(e, 3, 0)
+		nativeTestAction(e, "newline", "")
+		nativeTypeCharacters(e, "inserted")
+		got, _, _ := e.Snapshot()
+		if got != "- one\n- inserted\n- two" {
+			t.Errorf("pasted siblings changed hierarchy: %q", got)
+		}
 	})
 }
 

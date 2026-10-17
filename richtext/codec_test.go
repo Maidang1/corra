@@ -75,10 +75,10 @@ func TestEditOneParagraphPreservesEveryOtherByte(t *testing.T) {
 
 func TestUnsupportedMarkdownIsEditableSource(t *testing.T) {
 	for name, source := range map[string]string{
-		"reference_definition": "[ref]: /url", "html": "hello <b>world</b>", "image": "before ![alt](image.png)",
-		"complex_table": "| a | b |\n|---|---|\n| ![image](x.png) | 2 |",
+		"reference_definition": "[ref]: /url", "html": "<div>\nhello\n</div>", "image": "before **![alt](image.png)**",
+		"complex_table": "| a | b |\n|---|---|\n| *![image](x.png)* | 2 |",
 		"indent_code":   "    code", "nested_list": "- outer\n  - inner\n\n        indented code",
-		"complex_quote": "> - nested", "image_link": "[![alt](image.png)](/url)",
+		"complex_quote": "> ```\n> code\n> ```", "image_link": "[**![alt](image.png)**](/url)",
 	} {
 		t.Run(name, func(t *testing.T) {
 			// Untouched source lines round-trip byte-exact.
@@ -194,7 +194,7 @@ func TestSerializeNewParagraphsAndChecklistChange(t *testing.T) {
 		{Kind: "checklist", Checked: true, Runs: []Run{{Text: "done"}}},
 		{Kind: "quote", Runs: []Run{{Text: "quoted"}}},
 	}}
-	if got, want := Serialize(doc), "## Title\n\n**bold** and _italic_\n\n- [x] done\n\n> quoted"; got != want {
+	if got, want := Serialize(doc), "## Title\n\n**bold** and *italic*\n\n- [x] done\n\n> quoted"; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
 	doc = Parse("- [ ] todo\r\n- [X] keep\r\n")
@@ -500,7 +500,7 @@ func TestDeletingParagraphRetainsCRLFBoundaryAfterJSON(t *testing.T) {
 
 func TestFootnotesKeepEditableDefinitionContinuations(t *testing.T) {
 	doc := Parse("text[^1]\n\n[^1]: first\n\n    second\n\nafter")
-	for _, p := range doc.Paragraphs[1:len(doc.Paragraphs)-1] {
+	for _, p := range doc.Paragraphs[1 : len(doc.Paragraphs)-1] {
 		if p.Kind != "body" || p.FootnoteID != "1" {
 			t.Fatalf("footnote not kept editable: %+v", p)
 		}
@@ -756,5 +756,12 @@ func TestSizedImageIsAFigureThatRoundTrips(t *testing.T) {
 		if doc := Parse(text); doc.Paragraphs[0].Kind == "image" {
 			t.Errorf("%q became a figure: %+v", text, doc.Paragraphs[0])
 		}
+	}
+}
+
+func TestSerializeHoistsEmphasisSpace(t *testing.T) {
+	doc := Document{Paragraphs: []Paragraph{{Kind: "body", Runs: []Run{{Text: "x"}, {Text: " text ", Bold: true}, {Text: "y"}}}}}
+	if got := Serialize(doc); got != "x **text** y" {
+		t.Fatalf("got %q", got)
 	}
 }

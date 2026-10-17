@@ -48,7 +48,20 @@ func (v *View) editorPane(c *ui.Context) {
 		v.edState.Theme = &editor.Theme{Background: t.Surface}
 		v.edState.ReadOnly = !v.canEdit()
 		v.edState.Font = ui.Font{Family: fontMono, Size: 14 * v.App.Zoom}
-		ui.Box(c).Fill().Padding(2, 22, 12, 22).Children(func() {
+		// The same centered reading column as the rich editor (Typora keeps
+		// one measure in both modes).
+		side := float32(22)
+		pane := v.windowW
+		if v.App.Sidebar {
+			pane -= sidebarW
+		}
+		if v.App.Outline {
+			pane -= 236
+		}
+		if measure := 760 * float32(v.App.Zoom); pane-measure > 2*side {
+			side = (pane - measure) / 2
+		}
+		ui.Box(c).Fill().Padding(2, side, 12, side).Children(func() {
 			e := editor.View(c, v.edState).Fill()
 			if v.focusEditor {
 				e.Focus()
@@ -249,4 +262,3 @@ func (v *View) autosave() bool {
 	}
 	return true
 }
-

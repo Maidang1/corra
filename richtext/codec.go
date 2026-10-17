@@ -40,22 +40,31 @@ type Paragraph struct {
 	// untouched alert still round-trips byte for byte.
 	Alert string `json:"alert,omitempty"`
 	// List metadata preserves original indentation until the tree is changed.
-	ListIndent       string   `json:"listIndent,omitempty"`
-	ListID           string   `json:"listId,omitempty"`
-	ListContainer    string   `json:"listContainer,omitempty"`
-	ListMarker       string   `json:"listMarker,omitempty"`
-	ListBaseline     string   `json:"listBaseline,omitempty"`
-	ListItem         string   `json:"listItem,omitempty"`
-	ListContinuation bool     `json:"listContinuation,omitempty"`
-	Runs             []Run    `json:"runs"`
-	Raw              string   `json:"raw,omitempty"`
-	RawBase64        string   `json:"rawBase64,omitempty"`
-	Prefix           string   `json:"prefix,omitempty"`
-	Separator        string   `json:"separator,omitempty"`
-	Baseline         string   `json:"baseline,omitempty"`
-	NextID           string   `json:"nextId,omitempty"`
-	Rows             [][]Cell `json:"rows,omitempty"`
-	Alignments       []string `json:"alignments,omitempty"`
+	ListIndent       string `json:"listIndent,omitempty"`
+	ListID           string `json:"listId,omitempty"`
+	ListContainer    string `json:"listContainer,omitempty"`
+	ListMarker       string `json:"listMarker,omitempty"`
+	ListBaseline     string `json:"listBaseline,omitempty"`
+	ListItem         string `json:"listItem,omitempty"`
+	ListContinuation bool   `json:"listContinuation,omitempty"`
+	// Quote is the number of blockquotes enclosing a list paragraph
+	// ("> - item" is 1); quote paragraphs use Depth instead.
+	Quote int `json:"quote,omitempty"`
+	// CodeIndent is the list content column a code line sits in ("1. step"
+	// then an indented fence); every non-blank line saves with it.
+	CodeIndent string `json:"codeIndent,omitempty"`
+	// ItemDepth is the list depth of the item a quote sits in ("- a" then
+	// an indented "> q"); the quote's own nesting stays in Depth.
+	ItemDepth  int      `json:"itemDepth,omitempty"`
+	Runs       []Run    `json:"runs"`
+	Raw        string   `json:"raw,omitempty"`
+	RawBase64  string   `json:"rawBase64,omitempty"`
+	Prefix     string   `json:"prefix,omitempty"`
+	Separator  string   `json:"separator,omitempty"`
+	Baseline   string   `json:"baseline,omitempty"`
+	NextID     string   `json:"nextId,omitempty"`
+	Rows       [][]Cell `json:"rows,omitempty"`
+	Alignments []string `json:"alignments,omitempty"`
 	// Open and Close hold a code block's fences so the lines between them can
 	// be edited without the fences on screen (Typora-style).
 	Open          string `json:"open,omitempty"`
@@ -63,6 +72,9 @@ type Paragraph struct {
 	CodeNewline   string `json:"codeNewline,omitempty"`
 	CodeClose     string `json:"codeClose,omitempty"`
 	CodeSeparator string `json:"codeSeparator,omitempty"`
+	// BlankLine marks a block whose one line is a real blank line
+	// ("```\n\n```"); an empty line otherwise stands for an empty block.
+	BlankLine bool `json:"blankLine,omitempty"`
 	// Definitions retain their inner kind. Group distinguishes repeated labels;
 	// marker and indent on every child recover the container after deletions.
 	FootnoteID           string `json:"footnoteId,omitempty"`
@@ -105,6 +117,12 @@ type Run struct {
 	// Soft marks a Break that was a plain source newline: it shows as its own
 	// line and saves back as a bare newline instead of a hard break.
 	Soft bool `json:"soft,omitempty"`
+	// HTML is a raw inline HTML tag other than the ones Corra styles
+	// (<u>, <kbd>, ...). It shows as its source and saves verbatim.
+	HTML bool `json:"html,omitempty"`
+	// Image is the destination of an inline image; Text keeps its exact
+	// ![alt](src) source.
+	Image string `json:"image,omitempty"`
 }
 
 // Parse retains each block's exact source and boundary whitespace. Baseline is
@@ -156,6 +174,7 @@ func Parse(source string) Document {
 		marker       string
 		item         string
 		continuation bool
+		codeIndent   string
 	}
 	var blocks []block
 	var flattenList func(*ast.List, int, string)
@@ -171,12 +190,24 @@ func Parse(source string) Document {
 			}
 			itemID := fmt.Sprintf("item%d", item.Pos())
 			first := true
-			if item.FirstChild() == nil {
-				blocks = append(blocks, block{node: item, start: lineStart(source, item.Pos()), kind: kind, ordinal: ordinal, depth: depth, listID: id, container: fmt.Sprintf("list%d", list.Pos()), marker: string(list.Marker), item: itemID})
+			nestedFirst := false
+			switch item.FirstChild().(type) {
+			case *ast.List, *ast.Blockquote, *ast.FencedCodeBlock:
+				nestedFirst = true // the item's own line is empty
+			}
+			if item.FirstChild() == nil || nestedFirst {
+				// An empty item ("- "), possibly holding only a nested list.
+				blocks = append(blocks, block{node: emptyItem{item}, start: lineStart(source, item.Pos()), kind: kind, ordinal: ordinal, depth: depth, listID: id, container: fmt.Sprintf("list%d", list.Pos()), marker: string(list.Marker), item: itemID})
 			}
 			for child := item.FirstChild(); child != nil; child = child.NextSibling() {
 				if nested, ok := child.(*ast.List); ok {
 					flattenList(nested, depth+1, id)
+				} else if quote, ok := child.(*ast.Blockquote); ok {
+					start, indent, _ := listQuoteSpan(quote, src)
+					blocks = append(blocks, block{node: child, start: start, kind: "quote", depth: depth, listID: id, container: fmt.Sprintf("list%d", list.Pos()), marker: string(list.Marker), item: itemID, continuation: true, codeIndent: indent})
+				} else if code, ok := child.(*ast.FencedCodeBlock); ok {
+					start, indent, _ := listCodeSpan(code, src)
+					blocks = append(blocks, block{node: child, start: start, kind: "code", depth: depth, listID: id, container: fmt.Sprintf("list%d", list.Pos()), marker: string(list.Marker), item: itemID, continuation: true, codeIndent: indent})
 				} else {
 					blocks = append(blocks, block{node: child, start: lineStart(source, child.Pos()), kind: kind, ordinal: ordinal, depth: depth, listID: id, container: fmt.Sprintf("list%d", list.Pos()), marker: string(list.Marker), item: itemID, continuation: !first})
 					first = false
@@ -221,8 +252,23 @@ func Parse(source string) Document {
 			doc.Paragraphs = append(doc.Paragraphs, p)
 			continue
 		}
-		ps := convertBlock(b.node, src, raw)
-		if b.kind != "" && len(ps) == 1 && ps[0].Kind != "opaque" && ps[0].Kind != "source" {
+		var ps []Paragraph
+		if b.kind == "quote" {
+			ps = listQuoteParagraphs(raw, b.codeIndent)
+			for j := range ps {
+				ps[j].ItemDepth, ps[j].ListID, ps[j].ListContainer, ps[j].ListMarker = b.depth, b.listID, b.container, b.marker
+				ps[j].ListItem, ps[j].ListContinuation, ps[j].CodeIndent = b.item, true, b.codeIndent
+			}
+		} else if b.kind == "code" {
+			ps = listCodeLines(raw, b.codeIndent)
+			for j := range ps {
+				ps[j].Depth, ps[j].ListID, ps[j].ListContainer, ps[j].ListMarker = b.depth, b.listID, b.container, b.marker
+				ps[j].ListItem, ps[j].ListContinuation, ps[j].CodeIndent = b.item, true, b.codeIndent
+			}
+		} else {
+			ps = convertBlock(b.node, src, raw)
+		}
+		if b.kind != "" && b.kind != "code" && b.kind != "quote" && len(ps) == 1 && ps[0].Kind != "opaque" && ps[0].Kind != "source" {
 			ps[0].Kind = b.kind
 			if ps[0].Checked || isTask(b.node) {
 				ps[0].Kind = "checklist"
@@ -236,7 +282,7 @@ func Parse(source string) Document {
 			ps[0].ListIndent = raw[:len(raw)-len(strings.TrimLeft(raw, " \t"))]
 			ps[0].ListBaseline = listFingerprint(ps[0])
 		}
-		if len(ps) == 1 && ps[0].Kind != "code" && ps[0].FootnoteID == "" {
+		if len(ps) == 1 && ps[0].Kind != "code" && ps[0].FootnoteID == "" && b.kind != "code" && b.kind != "quote" {
 			// codeLines already set Raw per content line.
 			ps[0].Raw = raw
 		}
@@ -362,17 +408,37 @@ func editableList(list *ast.List, src []byte) bool {
 			continue // an empty item ("- ") is an empty editable paragraph
 		}
 		child := item.FirstChild()
-		if child.Kind() != ast.KindTextBlock && child.Kind() != ast.KindParagraph {
-			return false
+		nested := false
+		switch child.(type) {
+		case *ast.List, *ast.Blockquote, *ast.FencedCodeBlock:
+			nested = true
 		}
-		p := Paragraph{}
-		if !collectRuns(child, src, Run{}, &p) {
-			return false
+		if !nested {
+			if child.Kind() != ast.KindTextBlock && child.Kind() != ast.KindParagraph {
+				return false
+			}
+			p := Paragraph{}
+			if !collectRuns(child, src, Run{}, &p) {
+				return false
+			}
+			child = child.NextSibling()
 		}
-		for child = child.NextSibling(); child != nil; child = child.NextSibling() {
+		for ; child != nil; child = child.NextSibling() {
 			nested, ok := child.(*ast.List)
 			if ok {
 				if !editableList(nested, src) {
+					return false
+				}
+				continue
+			}
+			if code, ok := child.(*ast.FencedCodeBlock); ok {
+				if _, _, clean := listCodeSpan(code, src); !clean {
+					return false
+				}
+				continue
+			}
+			if quote, ok := child.(*ast.Blockquote); ok {
+				if _, _, clean := listQuoteSpan(quote, src); !clean {
 					return false
 				}
 				continue
@@ -387,6 +453,90 @@ func editableList(list *ast.List, src []byte) bool {
 		}
 	}
 	return true
+}
+
+// listCodeSpan finds where a fenced block inside a list item starts (its
+// fence line) and the indentation it sits at. clean reports whether every
+// line carries exactly that indentation (blank lines none) and the block
+// closes with a fence, which is what lets it round-trip after edits.
+func listCodeSpan(code *ast.FencedCodeBlock, src []byte) (start int, indent string, clean bool) {
+	source := string(src)
+	switch {
+	case code.Lines().Len() > 0:
+		first := lineStart(source, code.Lines().At(0).Start)
+		if first == 0 {
+			return 0, "", false
+		}
+		start = lineStart(source, first-1)
+	case code.Info != nil:
+		start = lineStart(source, code.Info.Segment.Start)
+	case code.Pos() >= 0:
+		start = lineStart(source, code.Pos()) // an empty block: its opening fence
+	default:
+		return 0, "", false
+	}
+	line := source[start:]
+	if i := strings.IndexByte(line, '\n'); i >= 0 {
+		line = line[:i]
+	}
+	indent = line[:len(line)-len(strings.TrimLeft(line, " "))]
+	// A fence on the item's own line ("  - ```js") sits at the item's text
+	// column: the marker counts as indentation.
+	if m := listMarkerPrefix.FindString(line[len(indent):]); m != "" && (strings.HasPrefix(line[len(indent)+len(m):], "```") || strings.HasPrefix(line[len(indent)+len(m):], "~~~")) {
+		indent = strings.Repeat(" ", len(indent)+len(m))
+	}
+	if indent == "" {
+		return start, indent, false
+	}
+	// The closing fence is the line after the last content line (or after
+	// the opening fence when the block is empty).
+	end := start + len(line)
+	if n := code.Lines().Len(); n > 0 {
+		end = code.Lines().At(n - 1).Stop
+		if end > 0 && source[end-1] == '\n' {
+			end--
+		}
+	}
+	if end >= len(source) {
+		return start, indent, false
+	}
+	rest := source[end+1:]
+	if i := strings.IndexByte(rest, '\n'); i >= 0 {
+		rest = rest[:i]
+	}
+	fence := strings.TrimSpace(rest)
+	if !strings.HasPrefix(fence, "```") && !strings.HasPrefix(fence, "~~~") {
+		return start, indent, false
+	}
+	for _, l := range strings.Split(source[start:end+1+len(rest)], "\n") {
+		l = strings.TrimSuffix(l, "\r")
+		if strings.TrimSpace(l) == "" {
+			if l != "" && !strings.HasPrefix(l, indent) {
+				return start, indent, false
+			}
+			continue
+		}
+		if !strings.HasPrefix(l, indent) && (l != line || !listMarkerPrefix.MatchString(strings.TrimLeft(l, " "))) {
+			return start, indent, false
+		}
+	}
+	return start, indent, true
+}
+
+// listCodeLines splits a list item's fenced block into code lines without
+// the item's indentation.
+var listMarkerPrefix = regexp.MustCompile(`^([-+*]|[0-9]{1,9}[.)])[ ]+`)
+
+func listCodeLines(raw, indent string) []Paragraph {
+	lines := strings.Split(raw, "\n")
+	for i, line := range lines {
+		if !strings.HasPrefix(line, indent) && len(line) >= len(indent) && listMarkerPrefix.MatchString(strings.TrimLeft(line[:len(indent)], " ")) {
+			lines[i] = line[len(indent):] // the fence line still carries the marker
+			continue
+		}
+		lines[i] = strings.TrimPrefix(line, indent)
+	}
+	return codeLines(strings.Join(lines, "\n"))
 }
 
 func isTask(node ast.Node) bool {
@@ -449,7 +599,8 @@ func codeLines(raw string) []Paragraph {
 	} else {
 		return sourceLines(raw)
 	}
-	if len(body) == 0 {
+	empty := len(body) == 0
+	if empty {
 		body = []string{""}
 	}
 	out := make([]Paragraph, len(body))
@@ -457,6 +608,7 @@ func codeLines(raw string) []Paragraph {
 		out[i] = Paragraph{Kind: "code", Runs: []Run{{Text: line}}, Raw: line, Separator: nl, CodeNewline: nl}
 	}
 	out[0].Open = open
+	out[0].BlankLine = !empty && len(body) == 1 && body[0] == ""
 	out[len(out)-1].Close = close
 	out[len(out)-1].Separator = ""
 	return out
@@ -503,6 +655,8 @@ func convertBlock(node ast.Node, src []byte, raw string) []Paragraph {
 			// so it keeps its own kind like math and diagrams do.
 			return []Paragraph{{Kind: "toc", Raw: raw, Runs: []Run{{Text: raw}}}}
 		}
+	case emptyItem:
+		return []Paragraph{p}
 	case *ast.ListItem:
 		if n.FirstChild() == nil {
 			return []Paragraph{p}
@@ -627,6 +781,13 @@ func collectRuns(parent ast.Node, src []byte, style Run, p *Paragraph) bool {
 			}
 			run.Text = strings.ReplaceAll(strings.ReplaceAll(value.String(), "\r\n", " "), "\n", " ")
 			appendRun(p, run)
+		case *ast.Image:
+			// Only a link may wrap an image; emphasis around one would be lost.
+			if bare := (Run{Link: style.Link, LinkTitle: style.LinkTitle}); style != bare {
+				return false
+			}
+			flush()
+			appendRun(p, Run{Text: imageSource(n, src), Image: string(decodeText(n.Destination)), Link: style.Link, LinkTitle: style.LinkTitle})
 		case *ast.Link:
 			flush()
 			run.Link = string(decodeText(n.Destination))
@@ -685,10 +846,12 @@ func collectRuns(parent ast.Node, src []byte, style Run, p *Paragraph) bool {
 				seg := n.Segments.At(i)
 				tag.Write(seg.Value(src))
 			}
-			if !isLineBreakTag(tag.String()) {
-				return false
-			}
 			flush()
+			if !isLineBreakTag(tag.String()) {
+				// A tag inside a link ("[<img ...>](url)") keeps the link.
+				p.Runs = append(p.Runs, Run{Text: tag.String(), HTML: true, Link: run.Link, LinkTitle: run.LinkTitle})
+				continue
+			}
 			p.Runs = append(p.Runs, Run{Break: true})
 		default:
 			return false
@@ -729,6 +892,51 @@ func decodeText(source []byte) []byte {
 		out.WriteByte(source[i])
 	}
 	return []byte(out.String())
+}
+
+// hoistEmphasisSpace moves whitespace at the edges of bold/italic runs
+// outside the delimiters: "** text**" is not bold in Markdown, so splitting a
+// bold run after a space (Enter mid-word, a selection that took the space)
+// would otherwise save as entity-escaped text. Bold or italic whitespace looks
+// like plain whitespace; visible styles (strike, highlight, links) keep theirs.
+func hoistEmphasisSpace(runs []Run) []Run {
+	out := make([]Run, 0, len(runs))
+	for _, run := range runs {
+		emphasis := (run.Bold || run.Italic || run.Sup || run.Sub) && !run.Strike && !run.Highlight && !run.Underline && run.Link == "" && !run.Kbd
+		if !emphasis || run.Code || run.Source || run.Math != "" || run.Footnote != "" || run.Break {
+			out = append(out, run)
+			continue
+		}
+		core := strings.TrimFunc(run.Text, unicode.IsSpace)
+		if core == "" {
+			// Emphasis on spaces alone is invisible; delimiters there would
+			// collide with the neighbours' ("*****").
+			run.Bold, run.Italic, run.Sup, run.Sub = false, false, false, false
+			out = append(out, run)
+			continue
+		}
+		if core == run.Text {
+			out = append(out, run)
+			continue
+		}
+		plain := run
+		plain.Bold, plain.Italic, plain.Sup, plain.Sub = false, false, false, false
+		start := strings.Index(run.Text, core)
+		if start > 0 {
+			lead := plain
+			lead.Text = run.Text[:start]
+			out = append(out, lead)
+		}
+		inner := run
+		inner.Text = core
+		out = append(out, inner)
+		if end := start + len(core); end < len(run.Text) {
+			trail := plain
+			trail.Text = run.Text[end:]
+			out = append(out, trail)
+		}
+	}
+	return out
 }
 
 func appendRun(p *Paragraph, run Run) {
@@ -781,17 +989,62 @@ func fingerprint(p Paragraph) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// openMathDraftsAsText writes a typed "$$" block that has no closing "$$"
+// yet as text: saved raw, it would turn the rest of the note into math.
+func openMathDraftsAsText(doc Document) Document {
+	copied := false
+	for i := 0; i < len(doc.Paragraphs); i++ {
+		p := doc.Paragraphs[i]
+		text := strings.TrimSpace(PlainText(p))
+		if p.Kind != "source" || p.Raw == PlainText(p) || !strings.HasPrefix(text, "$$") {
+			continue
+		}
+		end, closed := i+1, len(text) > 4 && strings.HasSuffix(text, "$$")
+		for ; end < len(doc.Paragraphs) && doc.Paragraphs[end].Kind == "source" && !closed; end++ {
+			closed = strings.HasSuffix(strings.TrimSpace(PlainText(doc.Paragraphs[end])), "$$")
+		}
+		if closed {
+			i = end - 1
+			continue
+		}
+		if !copied {
+			doc.Paragraphs, copied = append([]Paragraph(nil), doc.Paragraphs...), true
+		}
+		for j := i; j < end; j++ {
+			doc.Paragraphs[j].Kind, doc.Paragraphs[j].Raw = "body", ""
+		}
+		i = end - 1
+	}
+	return doc
+}
+
 // Serialize reuses original blocks when possible. Opaque blocks are protected
 // even if a native text system accidentally changes their visible label.
 func serializeDocument(doc Document) string {
+	doc = dropEmptyQuoteLines(doc)
+	doc = openMathDraftsAsText(doc)
 	var out strings.Builder
-	lists := listSources(doc)
+	lists, columns := listSources(doc)
 	for i, p := range doc.Paragraphs {
 		out.WriteString(p.Prefix)
+		// Code or a quote inside an item sits at the item's content column
+		// as it is written now; one whose item is gone stands alone again.
+		itemIndent := ""
+		if p.CodeIndent != "" {
+			// The nearest list paragraph above owns it, as a parser will
+			// read it back.
+			owner := i - 1
+			for owner >= 0 && (listCode(doc.Paragraphs[owner]) || doc.Paragraphs[owner].Kind == "code" || emptyParagraph(doc.Paragraphs[owner])) {
+				owner--
+			}
+			if column, ok := columns[owner]; ok && column > 0 {
+				itemIndent = strings.Repeat(" ", column)
+			}
+		}
 		if line, ok := lists[i]; ok {
 			out.WriteString(line)
 		} else if p.Kind == "code" {
-			out.WriteString(codeLineSource(doc, i))
+			out.WriteString(indentLines(codeLineSource(doc, i), itemIndent))
 		} else if p.Kind == "opaque" || (p.Baseline != "" && p.Baseline == fingerprint(p)) {
 			raw := p.Raw
 			if p.RawBase64 != "" {
@@ -799,9 +1052,9 @@ func serializeDocument(doc Document) string {
 					raw = string(decoded)
 				}
 			}
-			out.WriteString(raw)
+			out.WriteString(indentLines(raw, itemIndent))
 		} else {
-			out.WriteString(serializeParagraph(p))
+			out.WriteString(indentLines(serializeParagraph(p), itemIndent))
 		}
 		separator := p.Separator
 		if p.Kind == "code" && p.CodeClose != "" && (i+1 == len(doc.Paragraphs) || doc.Paragraphs[i+1].Kind != "code" || doc.Paragraphs[i+1].Open != "") {
@@ -819,7 +1072,7 @@ func serializeDocument(doc Document) string {
 			nextLine := doc.Paragraphs[i+1].Kind == p.Kind
 			if emptyParagraph(p) || (line && nextLine) || sameList(p, doc.Paragraphs[i+1]) {
 				separator = "\n"
-			} else if p.Kind == "quote" && doc.Paragraphs[i+1].Kind == "quote" {
+			} else if quoteLevel(p) > 0 && quoteLevel(doc.Paragraphs[i+1]) > 0 {
 				// A new paragraph inside the same quote, the way Typora writes it.
 				separator = "\n>\n"
 			}
@@ -829,7 +1082,7 @@ func serializeDocument(doc Document) string {
 				separator += newlineStyle(separator)
 			}
 		}
-		if i+1 < len(doc.Paragraphs) && strings.Contains(separator, ">") && (p.Kind != "quote" || doc.Paragraphs[i+1].Kind != "quote") {
+		if i+1 < len(doc.Paragraphs) && strings.Contains(separator, ">") && (quoteLevel(p) == 0 || quoteLevel(doc.Paragraphs[i+1]) == 0) {
 			// The quote's ">" line no longer joins two quote paragraphs.
 			separator = newlineStyle(separator) + newlineStyle(separator)
 		}
@@ -854,7 +1107,9 @@ func serializeDocument(doc Document) string {
 		}
 		if i+1 < len(doc.Paragraphs) {
 			next := doc.Paragraphs[i+1]
-			if next.ListContinuation && isList(p) && p.ListID == next.ListID {
+			// A fence interrupts the item's text by itself; a paragraph needs
+			// the blank line.
+			if next.ListContinuation && next.Kind != "code" && next.Kind != "quote" && isList(p) && p.ListID == next.ListID {
 				for strings.Count(separator, "\n") < 2 {
 					separator += newlineStyle(separator)
 				}
@@ -868,10 +1123,92 @@ func serializeDocument(doc Document) string {
 					separator += newlineStyle(separator)
 				}
 			}
+			// A table touching text is read as more of that text, and text
+			// right under a table becomes another row.
+			if (next.Kind == "table" || p.Kind == "table") && p.Kind != next.Kind && !emptyParagraph(p) && !emptyParagraph(next) {
+				for strings.Count(separator, "\n") < 2 {
+					separator += newlineStyle(separator)
+				}
+			}
+			// A footnote definition right under text or a quote is read as
+			// more of it.
+			if next.FootnoteID != "" && p.FootnoteID == "" && !emptyParagraph(p) {
+				for strings.Count(separator, "\n") < 2 {
+					separator += newlineStyle(separator)
+				}
+			}
+			// "---" or "===" right under text would make it a Setext heading.
+			if p.Kind == "body" && !emptyParagraph(p) && next.Kind == "source" && setextUnderline(PlainText(next)) {
+				for strings.Count(separator, "\n") < 2 {
+					separator += newlineStyle(separator)
+				}
+			}
+			// Only "1." or a non-empty bullet can interrupt a paragraph; any
+			// other list after text needs the blank line or it is read as
+			// more of that text.
+			flowing := p.Kind == "body" || p.Kind == "quote" || (isList(p) && p.ListContinuation)
+			if flowing && !emptyParagraph(p) && isList(next) && next.Quote == quoteLevel(p) && !(isList(p) && p.ListID == next.ListID && sameList(p, next)) && ((ordered && next.Ordinal != 1) || emptyItem) {
+				for strings.Count(separator, "\n") < 2 {
+					separator += newlineStyle(separator)
+				}
+			}
+		}
+		if i+1 < len(doc.Paragraphs) {
+			separator = quoteSeparator(p, doc.Paragraphs[i+1], separator)
+			// An empty item ends at a blank line; its quote, code or nested
+			// list must start on the very next line to stay inside it.
+			if next := doc.Paragraphs[i+1]; isList(p) && PlainText(p) == "" && (listCode(next) || (isList(next) && next.Depth > p.Depth && next.Quote == p.Quote)) {
+				separator = newlineStyle(separator)
+			}
+		}
+		if p.Kind == "quote" && i+1 < len(doc.Paragraphs) && doc.Paragraphs[i+1].Kind == "quote" && doc.Paragraphs[i+1].CodeIndent != "" {
+			separator = indentLines(separator, itemIndent) // the quote's ">" lines stay in the item
 		}
 		out.WriteString(separator)
 	}
 	return out.String()
+}
+
+// setextUnderline reports whether line would underline the text above it.
+func setextUnderline(line string) bool {
+	line = strings.TrimRight(line, " \t")
+	if indent := len(line) - len(strings.TrimLeft(line, " ")); indent > 3 || indent == len(line) {
+		return false
+	}
+	line = strings.TrimLeft(line, " ")
+	return strings.Trim(line, "-") == "" || strings.Trim(line, "=") == ""
+}
+
+// quoteLevel is how many blockquotes enclose p.
+func quoteLevel(p Paragraph) int {
+	if p.Kind == "quote" {
+		return p.Depth + 1
+	}
+	if isList(p) {
+		return p.Quote
+	}
+	return 0
+}
+
+// quoteSeparator writes the gap between two quoted blocks. The source
+// separator records whether they share one quote.
+func quoteSeparator(p, next Paragraph, separator string) string {
+	// A quote inside a list item and one outside it are different
+	// blockquotes: a ">" line between them would join them.
+	if quoteLevel(p) > 0 && quoteLevel(next) > 0 && p.CodeIndent != next.CodeIndent {
+		nl := newlineStyle(separator)
+		return nl + nl
+	}
+	// Items of one list share their quote: a bare blank line between them
+	// (left by editing) would end it, so it becomes a ">" line.
+	if level := min(quoteLevel(p), quoteLevel(next)); level > 0 && isList(p) && isList(next) && p.ListID == next.ListID && !strings.Contains(separator, ">") && strings.Count(separator, "\n") >= 2 {
+		nl := newlineStyle(separator)
+		marker := strings.TrimSpace(strings.Repeat("> ", level))
+		return nl + strings.Repeat(marker+nl, strings.Count(separator, "\n")-1)
+	}
+	// Otherwise the source separator already says whether the quotes
+	// join (a ">" line) or stay apart (a blank line).
+	return separator
 }
 
 // codeLineSource writes one code line with its fences at the group edges.
@@ -883,21 +1220,26 @@ func codeLineSource(doc Document, i int) string {
 	if p.CodeNewline != "" {
 		nl = p.CodeNewline
 	}
-	start := p.Open != "" || i == 0 || doc.Paragraphs[i-1].Kind != "code"
-	end := i+1 == len(doc.Paragraphs) || doc.Paragraphs[i+1].Kind != "code" || doc.Paragraphs[i+1].Open != ""
+	// Code in a list item and code outside it are separate blocks.
+	start := p.Open != "" || i == 0 || doc.Paragraphs[i-1].Kind != "code" || doc.Paragraphs[i-1].CodeIndent != p.CodeIndent
+	end := i+1 == len(doc.Paragraphs) || doc.Paragraphs[i+1].Kind != "code" || doc.Paragraphs[i+1].Open != "" || doc.Paragraphs[i+1].CodeIndent != p.CodeIndent
 	line := p.Raw
 	if p.Baseline == "" || p.Baseline != fingerprint(p) {
 		line = PlainText(p)
 	}
 	var b strings.Builder
+	grow := 0
+	if start || end {
+		grow = codeFenceGrowth(doc, i)
+	}
 	if start {
 		open := p.Open
 		if open == "" {
 			open = "```"
 		}
-		b.WriteString(open)
+		b.WriteString(lengthenFence(open, grow))
 		// An untouched empty block has no content line: "```go\n```".
-		if end && p.Close != "" && line == "" {
+		if end && p.Close != "" && line == "" && !p.BlankLine {
 			b.WriteString(nl + p.Close)
 			return b.String()
 		}
@@ -918,14 +1260,69 @@ func codeLineSource(doc Document, i int) string {
 		if close == "" {
 			close = "```"
 		}
-		b.WriteString(nl + close)
+		b.WriteString(nl + lengthenFence(close, grow))
 	}
 	return b.String()
+}
+
+// codeFenceGrowth is how many fence characters the block holding line i
+// needs to add so that no content line (pasted Markdown, say) closes it.
+func codeFenceGrowth(doc Document, i int) int {
+	start, end := i, i
+	indent := doc.Paragraphs[i].CodeIndent
+	for start > 0 && doc.Paragraphs[start].Open == "" && doc.Paragraphs[start-1].Kind == "code" && doc.Paragraphs[start-1].CodeIndent == indent {
+		start--
+	}
+	for end+1 < len(doc.Paragraphs) && doc.Paragraphs[end+1].Kind == "code" && doc.Paragraphs[end+1].Open == "" && doc.Paragraphs[end+1].CodeIndent == indent {
+		end++
+	}
+	open := doc.Paragraphs[start].Open
+	if open == "" {
+		open = "```"
+	}
+	trimmed := strings.TrimLeft(open, " ")
+	if trimmed == "" {
+		return 0
+	}
+	char := trimmed[0]
+	length := len(trimmed) - len(strings.TrimLeft(trimmed, string(char)))
+	longest := 0
+	for j := start; j <= end; j++ {
+		p := doc.Paragraphs[j]
+		line := p.Raw
+		if p.Baseline == "" || p.Baseline != fingerprint(p) {
+			line = PlainText(p)
+		}
+		line = strings.TrimLeft(line, " ")
+		if run := len(line) - len(strings.TrimLeft(line, string(char))); run > longest {
+			longest = run
+		}
+	}
+	if longest < length {
+		return 0
+	}
+	return longest + 1 - length
+}
+
+// lengthenFence adds n fence characters to a ``` or ~~~ fence line.
+func lengthenFence(fence string, n int) string {
+	if n <= 0 {
+		return fence
+	}
+	indent := len(fence) - len(strings.TrimLeft(fence, " "))
+	trimmed := fence[indent:]
+	if trimmed == "" {
+		return fence
+	}
+	return fence[:indent] + strings.Repeat(string(trimmed[0]), n) + trimmed
 }
 
 // sameList reports whether two adjacent items belong to one tight list, so
 // they are written on consecutive lines instead of as separate lists.
 func sameList(p, next Paragraph) bool {
+	if p.Quote != next.Quote {
+		return false
+	}
 	if isList(p) && isList(next) && p.Depth == next.Depth && p.ListContainer != "" && next.ListContainer != "" && p.ListContainer != next.ListContainer {
 		return false
 	}
@@ -947,7 +1344,7 @@ func newlineStyle(separator string) string {
 }
 
 func serializeParagraph(p Paragraph) string {
-	if p.ListContinuation {
+	if p.ListContinuation && p.Kind != "quote" && p.Kind != "code" {
 		body := p
 		body.Kind = "body"
 		body.Depth = 0
@@ -961,8 +1358,24 @@ func serializeParagraph(p Paragraph) string {
 		return PlainText(p)
 	}
 	normalized := Paragraph{}
-	for _, run := range p.Runs {
+	for _, run := range hoistEmphasisSpace(trimEdgeBreaks(lineBreaks(p))) {
+		if run.Code {
+			run.HTML = false // a tag formatted as code is code text
+		}
 		appendRun(&normalized, run)
+	}
+	// Source written verbatim at the start of a block must not open another
+	// block ("- a" inside an item would nest a list): escape its marker.
+	if len(normalized.Runs) > 0 && (normalized.Runs[0].Source || normalized.Runs[0].HTML) && blockMarkerStart.MatchString(normalized.Runs[0].Text) {
+		normalized.Runs[0].Text = "\\" + normalized.Runs[0].Text
+	}
+	// Raw HTML is written raw only as a whole tag; an edited fragment
+	// ("</span" without its ">") is text, or it would swallow what follows.
+	for i := range normalized.Runs {
+		r := &normalized.Runs[i]
+		if r.HTML && !(strings.HasPrefix(r.Text, "<") && strings.HasSuffix(r.Text, ">") && wholeTag(r.Text)) {
+			r.HTML = false
+		}
 	}
 	// Escape only as much as the text needs, like Typora: try the plain
 	// spelling first and fall back to stricter escaping (then entities)
@@ -970,7 +1383,13 @@ func serializeParagraph(p Paragraph) string {
 	var value string
 	for _, level := range []escapeLevel{escapeNone, escapeInline, escapeAll, escapeEntities, escapeReveal} {
 		value = protectIndentation(serializeRuns(normalized.Runs, level))
-		if sameParagraphSemantics(blockPrefix(p, value), p, normalized.Runs) {
+		candidate := blockPrefix(p, value)
+		if isList(p) {
+			// Item lines are written under the item's text: check them there,
+			// where "==" after a break would underline a heading.
+			candidate = strings.ReplaceAll(candidate, "\n", "\n"+strings.Repeat(" ", originalMarkerWidth(candidate)))
+		}
+		if sameParagraphSemantics(candidate, p, normalized.Runs) {
 			break
 		}
 	}
@@ -981,7 +1400,7 @@ func serializeParagraph(p Paragraph) string {
 // start at the inline level, which escapes it.
 func serializeCell(runs []Run) string {
 	normalized := Paragraph{}
-	for _, run := range runs {
+	for _, run := range hoistEmphasisSpace(runs) {
 		if run.Math != "" {
 			delimiter := "$"
 			if strings.HasPrefix(run.Text, "$$") {
@@ -997,6 +1416,10 @@ func serializeCell(runs []Run) string {
 			// GFM consumes one slash before every code-span pipe, even
 			// when the code already contains a literal slash before it.
 			encoded[i].Text = strings.ReplaceAll(encoded[i].Text, "|", `\|`)
+		}
+		if encoded[i].Break {
+			// A newline would end the row; GFM cells break lines with <br>.
+			encoded[i] = Run{Text: "<br>", HTML: true}
 		}
 	}
 	var value string
@@ -1053,21 +1476,53 @@ func serializeRunsObserved(runs []Run, level escapeLevel, emitted func(int, int,
 	for i := 0; i < len(runs); i++ {
 		run := runs[i]
 		start := text.Len()
-		italic := "_"
-		if level == escapeEntities {
-			italic = "*"
+		// Typora writes emphasis with asterisks; "*" also works inside
+		// words, where "_" would not.
+		italic := "*"
+		if strings.HasSuffix(text.String(), "*") && (run.Bold || run.Italic) {
+			// Right after a closing "*", another "*" would merge into one
+			// delimiter run ("*****"); underscores keep the two apart.
+			italic = "_"
 		}
-		if i > 0 {
-			last, _ := utf8.DecodeLastRuneInString(runs[i-1].Text)
-			if unicode.IsLetter(last) || unicode.IsNumber(last) {
-				italic = "*"
+		// Runs sharing an emphasis but differing otherwise ("H" "~2~" "O",
+		// all bold) take one pair of delimiters around them all; separate
+		// pairs would meet as "****", which Markdown reads differently.
+		end, flag := sharedEmphasis(runs, i)
+		if flag == "strike" {
+			// A subscript at the group's edge would put its "~" against the
+			// "~~" ("H~2~~~"): it leaves the group and takes the tag form.
+			for end > i+1 && runs[end-1].Sub {
+				end--
+			}
+			if runs[i].Sub {
+				end = i + 1
 			}
 		}
-		if i+1 < len(runs) {
-			first, _ := utf8.DecodeRuneInString(runs[i+1].Text)
-			if unicode.IsLetter(first) || unicode.IsNumber(first) {
-				italic = "*"
+		if end > i+1 {
+			delimiter := map[string]string{"bold": italic + italic, "italic": italic, "strike": "~~", "highlight": "=="}[flag]
+			inner := append([]Run(nil), runs[i:end]...)
+			for k := range inner {
+				switch flag {
+				case "bold":
+					inner[k].Bold = false
+				case "italic":
+					inner[k].Italic = false
+				case "strike":
+					inner[k].Strike = false
+				case "highlight":
+					inner[k].Highlight = false
+				}
 			}
+			text.WriteString(delimiter)
+			offset, first := text.Len(), i
+			text.WriteString(serializeRunsObserved(inner, level, func(k, a, b int) {
+				if emitted != nil {
+					emitted(first+k, offset+a, offset+b)
+				}
+			}))
+			text.WriteString(delimiter)
+			i = end - 1
+			continue
 		}
 		// A reference attachment splits a native style range. Emit its shared
 		// delimiters once so adjacent emphasis delimiters cannot become text.
@@ -1088,6 +1543,22 @@ func serializeRunsObserved(runs []Run, level escapeLevel, emitted func(int, int,
 			}
 			text.WriteString(formatInlineRun(style, value.String(), italic))
 			i = end - 1
+		} else if run.Break && (text.Len() == 0 || strings.HasSuffix(text.String(), "\n")) {
+			// "  " alone on a line is blank and would end the paragraph; a
+			// backslash keeps the empty line.
+			text.WriteString("\\\n")
+			if emitted != nil {
+				emitted(i, start, text.Len())
+			}
+		} else if run.Sub && run.Link == "" && !run.Code && !run.Source && (run.Strike || (!run.Bold && !run.Italic && !run.Highlight && !run.Underline && (strings.HasSuffix(text.String(), "~") || (i+1 < len(runs) && (runs[i+1].Strike || runs[i+1].Sub))))) {
+			// "~2~" touching another "~" (or struck through itself) would
+			// merge into one tilde run ("~~删~~~2~"); the tag form keeps it.
+			plain := run
+			plain.Sub = false
+			text.WriteString("<sub>" + serializeRun(plain, italic, level) + "</sub>")
+			if emitted != nil {
+				emitted(i, start, text.Len())
+			}
 		} else {
 			text.WriteString(serializeRun(run, italic, level))
 			if emitted != nil {
@@ -1241,8 +1712,24 @@ func serializeRun(run Run, italic string, level escapeLevel) string {
 	if run.Break {
 		return "  \n"
 	}
-	if run.Math != "" || run.Source {
-		return run.Text // the exact $...$ source
+	if run.Image != "" && run.Link != "" {
+		// A linked image (README badge): the image source is the link text.
+		linked := Run{Text: "", Link: run.Link, LinkTitle: run.LinkTitle}
+		wrapped := serializeRun(Run{Text: "\x00", Link: linked.Link, LinkTitle: linked.LinkTitle}, italic, escapeInline)
+		return strings.Replace(wrapped, "\x00", run.Text, 1)
+	}
+	if run.Sup && run.Link != "" && run.Math == "" && !run.Source {
+		// "[^1^](#1)" would read as a footnote reference: the tag goes
+		// outside the link instead.
+		inner := run
+		inner.Sup = false
+		return "<sup>" + serializeRun(inner, italic, level) + "</sup>"
+	}
+	if run.HTML && run.Link != "" {
+		return wrapLink(run, run.Text) // a linked tag ("[<img ...>](url)")
+	}
+	if run.Math != "" || run.Source || run.HTML || run.Image != "" {
+		return run.Text // the exact $...$ (or tag) source
 	}
 	if level == escapeNone && run.Link != "" && run.LinkTitle == "" && !run.Code && (run.Link == run.Text || run.Link == "http://"+run.Text || run.Link == "mailto:"+run.Text) {
 		// A bare URL re-links itself (GFM autolink); the caller verifies.
@@ -1253,6 +1740,7 @@ func serializeRun(run Run, italic string, level escapeLevel) string {
 	value := escapeText(run.Text, level)
 	if run.Footnote != "" {
 		value = run.Text
+		run.Code = false // inside backticks "[^1]" would stop being a reference
 	}
 	if (level == escapeEntities || level == escapeReveal) && !run.Code && run.Footnote == "" {
 		var encoded strings.Builder
@@ -1310,7 +1798,7 @@ func formatInlineRun(run Run, value, italic string) string {
 		value = "<u>" + value + "</u>"
 	}
 	if run.Bold {
-		value = "**" + value + "**"
+		value = italic + italic + value + italic + italic
 	}
 	if run.Italic {
 		value = italic + value + italic
@@ -1320,17 +1808,21 @@ func formatInlineRun(run Run, value, italic string) string {
 	}
 	value = before + value + after
 	if run.Link != "" {
-		destination := linkDestination(run.Link)
-		title := ""
-		if run.LinkTitle != "" {
-			escaped := strings.NewReplacer("\\", "\\\\", "\"", "\\\"", "&", "\\&", "\n", "&#10;", "\r", "&#13;").Replace(run.LinkTitle)
-			title = " \"" + escaped + "\""
-		}
-		// Edited reference links use resolved inline destinations and titles;
-		// untouched paragraphs and definition blocks retain their exact Raw.
-		value = "[" + value + "](" + destination + title + ")"
+		value = wrapLink(run, value)
 	}
 	return value
+}
+
+// wrapLink writes value as the text of run's link. Edited reference links use
+// resolved inline destinations and titles; untouched paragraphs and
+// definition blocks retain their exact Raw.
+func wrapLink(run Run, value string) string {
+	title := ""
+	if run.LinkTitle != "" {
+		escaped := strings.NewReplacer("\\", "\\\\", "\"", "\\\"", "&", "\\&", "\n", "&#10;", "\r", "&#13;").Replace(run.LinkTitle)
+		title = " \"" + escaped + "\""
+	}
+	return "[" + value + "](" + linkDestination(run.Link) + title + ")"
 }
 
 var entityLike = regexp.MustCompile(`&[A-Za-z0-9#]+;`)
@@ -1372,7 +1864,7 @@ func escapeText(value string, level escapeLevel) string {
 	}
 	var out strings.Builder
 	for _, r := range value {
-		if strings.ContainsRune(special, r) || (escapeEq && r == '=') || (escapeCaret && r == '^') {
+		if strings.ContainsRune(special, r) || ((escapeEq || level != escapeInline) && r == '=') || (escapeCaret && r == '^') {
 			out.WriteByte('\\')
 		}
 		out.WriteRune(r)
@@ -1445,3 +1937,281 @@ func hasCaretPair(value string) bool {
 	}
 	return false
 }
+
+// imageSource spells an inline image as Markdown: the alt keeps its own
+// source, the destination is bracketed when it would not survive bare.
+func imageSource(n *ast.Image, src []byte) string {
+	var alt strings.Builder
+	start, stop := -1, -1
+	var walk func(ast.Node)
+	walk = func(node ast.Node) {
+		for c := node.FirstChild(); c != nil; c = c.NextSibling() {
+			if t, ok := c.(*ast.Text); ok {
+				if start < 0 {
+					start = t.Segment.Start
+				}
+				stop = t.Segment.Stop
+			}
+			walk(c)
+		}
+	}
+	walk(n)
+	if start >= 0 && stop >= start && stop <= len(src) {
+		// Closing emphasis delimiters follow the last text segment; the alt
+		// source runs up to its "]" (a reference image has no "](" at all).
+		if end := strings.IndexByte(string(src[stop:]), ']'); end >= 0 {
+			stop += end
+		}
+		alt.Write(src[start:stop])
+	}
+	// Destination and title are written the way links write theirs, from
+	// their decoded values: the raw bytes still hold the source's escapes.
+	dest := linkDestination(string(decodeText(n.Destination)))
+	if dest == "" {
+		dest = "<>"
+	}
+	title := ""
+	if len(n.Title) > 0 {
+		title = ` "` + strings.NewReplacer("\\", "\\\\", "\"", "\\\"", "&", "\\&", "\n", "&#10;", "\r", "&#13;").Replace(string(decodeText(n.Title))) + `"`
+	}
+	return "![" + alt.String() + "](" + dest + title + ")"
+}
+
+// trimEdgeBreaks drops line breaks at the start or end of a paragraph:
+// Markdown has no spelling for an empty first or last line inside a block,
+// and writing one anyway escapes the whole paragraph into entities.
+func trimEdgeBreaks(runs []Run) []Run {
+	start, end := 0, len(runs)
+	for start < end && runs[start].Break {
+		start++
+	}
+	for end > start && runs[end-1].Break {
+		end--
+	}
+	return runs[start:end]
+}
+
+// dropEmptyQuoteLines removes empty paragraphs inside a quote before saving:
+// a quote cannot hold an empty paragraph in Markdown (a bare ">" only joins
+// its neighbours), so writing one would not survive a reload. One between two
+// quotes keeps them one blockquote, as the editor showed them.
+func dropEmptyQuoteLines(doc Document) Document {
+	keep := doc.Paragraphs[:0:0]
+	for i, p := range doc.Paragraphs {
+		empty := p.Kind == "quote" && len(trimEdgeBreaks(p.Runs)) == 0 && PlainText(p) == ""
+		if empty && len(doc.Paragraphs) > 1 {
+			if i > 0 && len(keep) > 0 && i+1 < len(doc.Paragraphs) && quoteLevel(doc.Paragraphs[i+1]) > 0 && quoteLevel(keep[len(keep)-1]) > 0 {
+				last := &keep[len(keep)-1]
+				last.Separator = "\n" + strings.TrimSpace(strings.Repeat("> ", min(quoteLevel(*last), quoteLevel(doc.Paragraphs[i+1])))) + "\n"
+				last.NextID = doc.Paragraphs[i+1].ID
+			}
+			continue
+		}
+		keep = append(keep, p)
+	}
+	doc.Paragraphs = keep
+	return doc
+}
+
+// lineBreaks spells line breaks the paragraph can hold. A U+2028 typed into
+// revealed source is a hard break inside that source; a heading is one line
+// in Markdown, so its breaks become spaces.
+func lineBreaks(p Paragraph) []Run {
+	out := make([]Run, 0, len(p.Runs))
+	inTag := false // inside an HTML tag split by a typed break
+	for _, run := range p.Runs {
+		if run.Break && run.Soft && len(out) > 0 && out[len(out)-1].Break {
+			// A soft break right after a line break ("<br>" then a newline)
+			// shows as nothing; written out, it would leave a blank line.
+			continue
+		}
+		if run.Break && inTag {
+			out = append(out, Run{Text: " ", HTML: true})
+			continue
+		}
+		if run.HTML {
+			if i := strings.LastIndexAny(run.Text, "<>"); i >= 0 {
+				inTag = run.Text[i] == '<'
+			}
+			// The tail of a tag split by editing ("an>") is text up to the
+			// next real tag; written raw, a leading ">" would start a quote.
+			if !inTag && !strings.HasPrefix(run.Text, "<") {
+				cut := strings.IndexByte(run.Text, '<')
+				if cut < 0 {
+					cut = len(run.Text)
+				}
+				out = append(out, Run{Text: run.Text[:cut]})
+				if run.Text = run.Text[cut:]; run.Text == "" {
+					continue
+				}
+			}
+		} else if !run.Break {
+			inTag = false
+		}
+		if p.Kind == "heading" {
+			if run.Break {
+				out = append(out, Run{Text: " "})
+				continue
+			}
+			run.Text = strings.NewReplacer("\u2028", " ", "\n", " ").Replace(run.Text) // a heading is one line
+		} else if run.Source && strings.Contains(run.Text, "\u2028") {
+			run.Text = sourceBreaks(run.Text)
+		} else if run.HTML && strings.Contains(run.Text, "\n") && !wholeTag(run.Text) {
+			// A break typed inside a tag is not the tag's own newline: a
+			// space keeps the tag (or its text) on one logical line.
+			run.Text = strings.ReplaceAll(run.Text, "\n", " ")
+		}
+		out = append(out, run)
+	}
+	return out
+}
+
+// wholeTag reports whether text reads back as exactly one inline HTML tag.
+func wholeTag(text string) bool {
+	doc := Parse("a " + text)
+	if len(doc.Paragraphs) != 1 {
+		return false
+	}
+	runs := doc.Paragraphs[0].Runs
+	return len(runs) == 2 && runs[1].HTML && runs[1].Text == text
+}
+
+// sourceBreaks writes U+2028 in revealed source as a hard break, except
+// inside an unfinished "<tag", where a break would split the tag.
+func sourceBreaks(text string) string {
+	var out strings.Builder
+	open := false
+	for _, r := range text {
+		switch {
+		case r == '<':
+			open = true
+		case r == '>':
+			open = false
+		case r == '\u2028':
+			if open {
+				out.WriteRune(' ')
+			} else if out.Len() == 0 || strings.HasSuffix(out.String(), "\n") {
+				out.WriteString("\\\n") // a line of only spaces would be blank
+			} else {
+				out.WriteString("  \n")
+			}
+			continue
+		}
+		out.WriteRune(r)
+	}
+	return out.String()
+}
+
+// sharedEmphasis finds the longest stretch from i of two or more runs that
+// share an emphasis flag, preferring the outermost spelling.
+func sharedEmphasis(runs []Run, i int) (int, string) {
+	plain := func(r Run) bool { return r.Break || r.Source || r.HTML || r.Image != "" || r.Math != "" }
+	if i+1 >= len(runs) || plain(runs[i]) || plain(runs[i+1]) {
+		return i, ""
+	}
+	has := map[string]func(Run) bool{
+		"bold":      func(r Run) bool { return r.Bold },
+		"strike":    func(r Run) bool { return r.Strike },
+		"highlight": func(r Run) bool { return r.Highlight },
+		"italic":    func(r Run) bool { return r.Italic },
+	}
+	for _, flag := range []string{"bold", "strike", "highlight", "italic"} {
+		if !has[flag](runs[i]) || !has[flag](runs[i+1]) {
+			continue
+		}
+		end := i + 2
+		for end < len(runs) && !plain(runs[end]) && has[flag](runs[end]) {
+			end++
+		}
+		return end, flag
+	}
+	return i, ""
+}
+
+// emptyItem stands for a list item's own (empty) line when its children are
+// only a nested list, which is converted separately.
+type emptyItem struct{ ast.Node }
+
+func (emptyItem) FirstChild() ast.Node { return nil }
+func (emptyItem) ChildCount() int      { return 0 }
+
+// listQuoteSpan finds where a blockquote inside a list item starts and the
+// indentation it sits at. clean reports whether every line carries exactly
+// that indentation and the quote reads back as plain quote paragraphs, so it
+// can be edited and written back in place.
+func listQuoteSpan(quote *ast.Blockquote, src []byte) (start int, indent string, clean bool) {
+	source := string(src)
+	first := -1
+	_ = ast.Walk(quote, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+		if entering && n.Type() == ast.TypeBlock && n.Lines().Len() > 0 {
+			first = n.Lines().At(0).Start
+			return ast.WalkStop, nil
+		}
+		return ast.WalkContinue, nil
+	})
+	if first < 0 {
+		return 0, "", false
+	}
+	start = lineStart(source, first)
+	line := source[start:]
+	if i := strings.IndexByte(line, '\n'); i >= 0 {
+		line = line[:i]
+	}
+	indent = line[:len(line)-len(strings.TrimLeft(line, " "))]
+	if indent == "" || !strings.HasPrefix(line[len(indent):], ">") {
+		return start, indent, false
+	}
+	// The quote runs over consecutive lines that keep its indentation.
+	var lines []string
+	for at := start; at < len(source); {
+		next := strings.IndexByte(source[at:], '\n')
+		l := source[at:]
+		if next >= 0 {
+			l = source[at : at+next]
+		}
+		if !strings.HasPrefix(l, indent+">") {
+			break
+		}
+		lines = append(lines, l[len(indent):])
+		if next < 0 {
+			break
+		}
+		at += next + 1
+	}
+	for _, p := range Parse(strings.Join(lines, "\n")).Paragraphs {
+		if p.Kind != "quote" {
+			return start, indent, false
+		}
+	}
+	return start, indent, len(lines) > 0
+}
+
+// listQuoteParagraphs reads a list item's blockquote without the item's
+// indentation.
+func listQuoteParagraphs(raw, indent string) []Paragraph {
+	lines := strings.Split(raw, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimPrefix(line, indent)
+	}
+	ps := Parse(strings.Join(lines, "\n")).Paragraphs
+	for i := range ps {
+		ps[i].ID, ps[i].NextID, ps[i].Prefix = "", "", ""
+	}
+	return ps
+}
+
+// indentLines prefixes every non-blank line of text with indent.
+func indentLines(text, indent string) string {
+	if indent == "" {
+		return text
+	}
+	parts := strings.Split(text, "\n")
+	for j, part := range parts {
+		if strings.TrimSuffix(part, "\r") != "" {
+			parts[j] = indent + part
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+var blockMarkerStart = regexp.MustCompile(`^([-+*>]|#{1,6}|[0-9]{1,9}[.)])(\s|$)`)

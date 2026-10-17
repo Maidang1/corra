@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/Maidang1/corra/internal/mathjax"
 	"github.com/srwiley/oksvg"
@@ -64,7 +65,7 @@ func RenderMathBatchContext(ctx context.Context, expressions []MathExpression, o
 	for i := range normalized {
 		normalized[i].TeX = stripMathDelimiters(normalized[i].TeX)
 	}
-	rendered, err := mathjax.Render(ctx, normalized, options)
+	rendered, err := cachedMathJax(ctx, normalized, options)
 	if err != nil {
 		return nil, err
 	}
@@ -83,12 +84,7 @@ func RenderMathBatchContext(ctx context.Context, expressions []MathExpression, o
 		if normalized[i].Display {
 			size *= 1.15
 		}
-		data, err := outlineMathSVGText([]byte(result.SVG))
-		if err != nil {
-			results[i].Error = err
-			continue
-		}
-		img, err := rasterizeMathSVG(data, size, fg)
+		data, img, err := cachedMathRaster(result.SVG, size, fg)
 		if err != nil {
 			results[i].Error = err
 			continue
@@ -300,4 +296,132 @@ func tintImage(src image.Image, fg color.Color) image.Image {
 	}
 	draw.DrawMask(dst, dst.Bounds(), image.NewUniform(fg), image.Point{}, src, bounds.Min, draw.Src)
 	return dst
+}
+
+// mathRasterCache keeps outlined SVG and raster per MathJax output, size and
+// colour: reopening a note or editing next to a formula must not re-raster
+// every formula in the document. Bounded, oldest entries evicted first.
+var mathRasterCache = struct {
+	sync.Mutex
+	entries map[string]mathRaster
+	order   []string
+}{entries: map[string]mathRaster{}}
+
+type mathRaster struct {
+	svg []byte
+	img image.Image
+}
+
+const mathRasterCacheMax = 1024
+
+func cachedMathRaster(svg string, size float64, fg color.Color) ([]byte, image.Image, error) {
+	r, g, b, a := fg.RGBA()
+	key := fmt.Sprintf("%g|%d,%d,%d,%d|%s", size, r, g, b, a, svg)
+	mathRasterCache.Lock()
+	hit, ok := mathRasterCache.entries[key]
+	mathRasterCache.Unlock()
+	if ok {
+		return hit.svg, hit.img, nil
+	}
+	data, err := outlineMathSVGText([]byte(svg))
+	if err != nil {
+		return nil, nil, err
+	}
+	img, err := rasterizeMathSVG(data, size, fg)
+	if err != nil {
+		return nil, nil, err
+	}
+	mathRasterCache.Lock()
+	if _, ok := mathRasterCache.entries[key]; !ok {
+		mathRasterCache.entries[key] = mathRaster{data, img}
+		mathRasterCache.order = append(mathRasterCache.order, key)
+		for len(mathRasterCache.order) > mathRasterCacheMax {
+			delete(mathRasterCache.entries, mathRasterCache.order[0])
+			mathRasterCache.order = mathRasterCache.order[1:]
+		}
+	}
+	mathRasterCache.Unlock()
+	return data, img, nil
+}
+
+// mathJaxCache memoizes MathJax output per context-free expression. Anything
+// that defines macros, labels or references, or a display equation that may be
+// numbered, depends on its neighbours and always renders in the ordered batch.
+var mathJaxCache = struct {
+	sync.Mutex
+	entries map[string]mathjax.Result
+	order   []string
+}{entries: map[string]mathjax.Result{}}
+
+var mathContextual = []string{`\def`, `\gdef`, `\edef`, `\let`, `\newcommand`, `\renewcommand`, `\DeclareMathOperator`, `\newenvironment`, `\label`, `\ref`, `\eqref`, `\tag`, `\notag`, `\nonumber`}
+
+func mathCacheable(expression mathjax.Expression, options mathjax.Options) bool {
+	for _, token := range mathContextual {
+		if strings.Contains(expression.TeX, token) {
+			return false
+		}
+	}
+	return !expression.Display || options.Numbering == "" || options.Numbering == "none"
+}
+
+func cachedMathJax(ctx context.Context, expressions []mathjax.Expression, options mathjax.Options) ([]mathjax.Result, error) {
+	for _, expression := range expressions {
+		if strings.Contains(expression.TeX, `\def`) || strings.Contains(expression.TeX, `\newcommand`) || strings.Contains(expression.TeX, `\let`) || strings.Contains(expression.TeX, `\renewcommand`) || strings.Contains(expression.TeX, `\DeclareMathOperator`) {
+			// Macro definitions change how later expressions parse.
+			return mathjax.Render(ctx, expressions, options)
+		}
+	}
+	macros := mathjax.MarshalOptions(mathjax.Options{Macros: options.Macros})
+	keys := make([]string, len(expressions))
+	results := make([]mathjax.Result, len(expressions))
+	var pending []mathjax.Expression
+	var slots []int
+	queued := map[string]int{}
+	mathJaxCache.Lock()
+	for i, expression := range expressions {
+		if !mathCacheable(expression, options) {
+			pending, slots = append(pending, expression), append(slots, i)
+			continue
+		}
+		keys[i] = fmt.Sprintf("%t|%s|%s", expression.Display, macros, expression.TeX)
+		if hit, ok := mathJaxCache.entries[keys[i]]; ok {
+			results[i] = hit
+			continue
+		}
+		if _, ok := queued[keys[i]]; ok {
+			continue
+		}
+		queued[keys[i]] = len(pending)
+		pending, slots = append(pending, expression), append(slots, i)
+	}
+	mathJaxCache.Unlock()
+	if len(pending) > 0 {
+		rendered, err := mathjax.Render(ctx, pending, options)
+		if err != nil {
+			return nil, err
+		}
+		mathJaxCache.Lock()
+		for j, result := range rendered {
+			i := slots[j]
+			results[i] = result
+			if keys[i] == "" || result.Error != "" {
+				continue
+			}
+			if _, ok := mathJaxCache.entries[keys[i]]; !ok {
+				mathJaxCache.entries[keys[i]] = result
+				mathJaxCache.order = append(mathJaxCache.order, keys[i])
+				for len(mathJaxCache.order) > mathRasterCacheMax {
+					delete(mathJaxCache.entries, mathJaxCache.order[0])
+					mathJaxCache.order = mathJaxCache.order[1:]
+				}
+			}
+		}
+		mathJaxCache.Unlock()
+		for i, key := range keys {
+			if j, ok := queued[key]; ok && key != "" && slots[j] != i {
+				results[i] = rendered[j]
+			}
+		}
+	}
+	return results, nil
 }

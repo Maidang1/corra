@@ -69,9 +69,10 @@ static NSColor *CRAlertTint(NSString *label, BOOL dark) {
 // refreshAlerts re-derives the callout label of every quote paragraph. The
 // marker is ordinary text, so typing or deleting one changes the label without
 // anything else noticing.
-- (void)refreshAlerts {
+- (void)refreshAlerts { [self refreshAlertsIn:NSMakeRange(0,_text.string.length)]; }
+- (void)refreshAlertsIn:(NSRange)scope {
     NSString *carried = nil;
-    for (NSValue *value in CRRanges(_text.string)) {
+    for (NSValue *value in CRRangesIn(_text.string,scope)) {
         NSRange range = value.rangeValue;
         NSDictionary *p = CRParagraphAt(self, range.location);
         NSString *label = nil;

@@ -57,7 +57,7 @@ func TestNativeEditor(t *testing.T) {
 		}
 		e.Format("italic")
 		got, dirty, err = e.Snapshot()
-		if err != nil || !dirty || !strings.Contains(got, "# _Title_") {
+		if err != nil || !dirty || !strings.Contains(got, "# *Title*") {
 			t.Errorf("format: %q %v %v", got, dirty, err)
 		}
 		nativeTestAction(e, "undo", "")

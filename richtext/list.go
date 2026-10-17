@@ -30,33 +30,71 @@ func listMarker(p Paragraph) string {
 // listSources preserves source indentation for text edits. A structural edit
 // recalculates the whole adjacent tree, because an ordered parent's marker can
 // require more columns than a bullet's marker.
-func listSources(doc Document) map[int]string {
+func listSources(doc Document) (map[int]string, map[int]int) {
 	out := make(map[int]string)
+	// itemColumns maps each list paragraph to the content column of the item
+	// it belongs to, which is where code inside that item is indented.
+	itemColumns := make(map[int]int)
+	column := 0
 	for start := 0; start < len(doc.Paragraphs); {
 		if !isList(doc.Paragraphs[start]) {
 			start++
 			continue
 		}
 		end, structural := start, false
-		for end < len(doc.Paragraphs) && isList(doc.Paragraphs[end]) {
+		quote := doc.Paragraphs[start].Quote
+		// An empty paragraph (an extra blank line) stays inside the list when
+		// the item goes on after it.
+		inside := func(i int) bool {
+			for i < len(doc.Paragraphs) && emptyParagraph(doc.Paragraphs[i]) && doc.Paragraphs[i].Kind == "body" {
+				i++
+			}
+			return i < len(doc.Paragraphs) && doc.Paragraphs[i].Quote == quote && (listCode(doc.Paragraphs[i]) || (isList(doc.Paragraphs[i]) && doc.Paragraphs[i].ListContinuation))
+		}
+		for end < len(doc.Paragraphs) && (isList(doc.Paragraphs[end]) || listCode(doc.Paragraphs[end]) || (end > start && emptyParagraph(doc.Paragraphs[end]) && doc.Paragraphs[end].Kind == "body" && inside(end))) && doc.Paragraphs[end].Quote == quote {
 			p := doc.Paragraphs[end]
+			if !isList(p) {
+				end++ // code lines inside an item are written by the code writer
+				continue
+			}
 			if p.ListBaseline == "" || p.ListBaseline != listFingerprint(p) {
 				structural = true
 			}
 			if end > start && p.ID != doc.Paragraphs[end-1].NextID {
 				structural = true
 			}
-			if p.Baseline != fingerprint(p) && originalMarkerWidth(p.Raw) != markerWidth(p) {
+			if p.Baseline != fingerprint(p) && originalMarkerWidth(stripQuote(p.Raw, quote)) != markerWidth(p) {
 				structural = true
 			}
 			end++
 		}
-		// Each entry is the content column available to the next depth.
-		columns := []int{0}
+		// Each entry is the content column available to the next depth. The
+		// list keeps the indent it was written with (up to three spaces):
+		// lines after it may rely on falling outside its items.
+		base := 0
+		if first := doc.Paragraphs[start]; quote == 0 && len(first.ListIndent) <= 3 && strings.Trim(first.ListIndent, " ") == "" {
+			base = len(first.ListIndent)
+		}
+		columns := []int{base}
+		// levels holds the stored depth of each open item. A malformed native
+		// depth jump (a first item at depth 1) maps to the nearest open
+		// parent, and its siblings map with it.
+		var levels []int
 		for i := start; i < end; i++ {
 			p := doc.Paragraphs[i]
-			depth := max(0, p.Depth)
-			// A malformed native depth jump is clamped to the available parent.
+			if !isList(p) {
+				continue
+			}
+			stored := max(0, p.Depth)
+			for len(levels) > 0 && (levels[len(levels)-1] > stored || (!p.ListContinuation && levels[len(levels)-1] == stored)) {
+				levels = levels[:len(levels)-1]
+			}
+			depth := len(levels)
+			if p.ListContinuation {
+				depth = max(0, len(levels)-1)
+			} else {
+				levels = append(levels, stored)
+			}
 			depth = min(depth, len(columns)-1)
 			indent := p.ListIndent
 			if structural {
@@ -65,8 +103,9 @@ func listSources(doc Document) map[int]string {
 					indent = strings.Repeat(" ", columns[min(depth+1, len(columns)-1)])
 				}
 			}
-			line := p.Raw
-			if p.Baseline == "" || p.Baseline != fingerprint(p) || p.ListBaseline != listFingerprint(p) {
+			line := stripQuote(p.Raw, quote)
+			unchanged := !(p.Baseline == "" || p.Baseline != fingerprint(p) || p.ListBaseline != listFingerprint(p))
+			if !unchanged {
 				line = serializeParagraph(p)
 				// Wrapped lines of the item's text align under its content.
 				content := len(indent)
@@ -78,13 +117,31 @@ func listSources(doc Document) map[int]string {
 				line = strings.TrimLeft(line, " \t")
 			}
 			out[i] = indent + line
+			if strings.TrimSpace(line) == "" {
+				out[i] = "" // an empty item paragraph needs no indentation
+			}
+			if quote > 0 {
+				// Every line of the item sits inside the quote.
+				prefix := strings.Repeat("> ", quote)
+				if unchanged && !structural {
+					out[i] = p.Raw
+				} else {
+					out[i] = prefix + strings.ReplaceAll(out[i], "\n", "\n"+prefix)
+				}
+			}
 			if !p.ListContinuation {
 				columns = append(columns[:depth+1], columns[depth]+originalMarkerWidth(line))
+				column = len(indent) + originalMarkerWidth(line)
+			} else {
+				column = len(indent) // its own item's text column, not a nested item's
+			}
+			if p.Quote == 0 {
+				itemColumns[i] = column
 			}
 		}
 		start = end
 	}
-	return out
+	return out, itemColumns
 }
 
 func markerWidth(p Paragraph) int {
@@ -115,4 +172,30 @@ func originalMarkerWidth(raw string) int {
 		}
 	}
 	return max(markerEnd+1, column)
+}
+
+// stripQuote removes quote markers ("> ") from every line of a list item that
+// lives inside quote blockquotes.
+func stripQuote(raw string, quote int) string {
+	if quote == 0 {
+		return raw
+	}
+	lines := strings.Split(raw, "\n")
+	for i, line := range lines {
+		rest := line
+		for level := 0; level < quote; level++ {
+			trimmed := strings.TrimLeft(rest, " ")
+			if !strings.HasPrefix(trimmed, ">") {
+				break
+			}
+			rest = strings.TrimPrefix(trimmed[1:], " ")
+		}
+		lines[i] = rest
+	}
+	return strings.Join(lines, "\n")
+}
+
+// listCode reports a code line or quote that belongs to a list item.
+func listCode(p Paragraph) bool {
+	return (p.Kind == "code" || p.Kind == "quote") && p.CodeIndent != ""
 }

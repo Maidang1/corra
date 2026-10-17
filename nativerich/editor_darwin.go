@@ -35,6 +35,8 @@ type Editor struct {
 	dirty                    bool
 	source                   string
 	mathKey, mathResult      string
+	mathBatchKey             string
+	mathBatch                []render.MathResult
 
 	// OnSaveImage persists (or uploads) a pasted/dropped image and returns
 	// the Markdown to insert; ok=false cancels the insertion.
@@ -117,7 +119,7 @@ func (e *Editor) Format(command string) {
 		return
 	}
 	if command == "math-refresh" {
-		e.mathKey = ""
+		e.mathKey, e.mathBatchKey = "", ""
 	}
 	p, free := stringArg(command)
 	defer free()

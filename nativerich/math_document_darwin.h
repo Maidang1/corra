@@ -26,9 +26,16 @@
     return _preparedMath[_mathIndex++];
 }
 - (NSImage *)mathImage:(NSDictionary *)result {
-    NSData *data=[[NSData alloc] initWithBase64EncodedString:result[@"image"] ?: @"" options:0];
-    NSImage *image=data.length ? [[NSImage alloc] initWithData:data] : nil;
-    if (image) image.size=NSMakeSize(image.size.width/2,image.size.height/2);
+    // Identical formulas (and reloads) share one decoded image.
+    static NSCache *cache;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ cache=[NSCache new]; cache.countLimit=1024; });
+    NSString *encoded=result[@"image"] ?: @"";
+    NSImage *image=encoded.length ? [cache objectForKey:encoded] : nil;
+    if (image) return image;
+    NSData *data=[[NSData alloc] initWithBase64EncodedString:encoded options:0];
+    image=data.length ? [[NSImage alloc] initWithData:data] : nil;
+    if (image) { image.size=NSMakeSize(image.size.width/2,image.size.height/2); [cache setObject:image forKey:encoded]; }
     return image;
 }
 - (BOOL)revealInlineMathAt:(NSUInteger)location {

@@ -22,8 +22,9 @@ func TestQuoteAlertLabel(t *testing.T) {
 		{"> note body", ""},
 		// Nested quotes carry the marker too.
 		{"> > [!NOTE]\n> > body", "NOTE"},
-		// Quotes with non-paragraph children fall back to source lines.
-		{"> [!TIP]\n> - item", ""},
+		// A callout may hold a list; code inside a quote is still source.
+		{"> [!TIP]\n> - item", "TIP"},
+		{"> [!TIP]\n> ```\n> x\n> ```", ""},
 	} {
 		got := ""
 		for _, p := range Parse(tc.src).Paragraphs {

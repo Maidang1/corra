@@ -29,6 +29,9 @@ func quoteAlert(p Paragraph) string {
 // callout opened by the paragraph before it. A blank ">" line keeps one
 // blockquote together; a blank source line starts a new one.
 func alertGroupContinues(previous Paragraph) bool {
+	if previous.Alert != "" && isList(previous) && previous.Quote > 0 {
+		return true // parsed from the same blockquote
+	}
 	if previous.Kind != "quote" || previous.Alert == "" {
 		return false
 	}
@@ -40,6 +43,13 @@ func alertGroupContinues(previous Paragraph) bool {
 // line instead of decaying into a plain quote.
 func applyAlerts(paragraphs []Paragraph) []Paragraph {
 	for i := range paragraphs {
+		if isList(paragraphs[i]) && paragraphs[i].Quote > 0 {
+			// A list inside the callout's blockquote belongs to the callout.
+			if i > 0 {
+				paragraphs[i].Alert = paragraphs[i-1].Alert
+			}
+			continue
+		}
 		if paragraphs[i].Kind != "quote" {
 			continue
 		}

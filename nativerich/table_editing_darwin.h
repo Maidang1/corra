@@ -3,7 +3,7 @@
     if (!_text.editable || _text.hasMarkedText) return;
     NSTextTableBlock *cell = CRCellAt(self,_text.selectedRange.location);
     if (!cell) return;
-    NSRange tableRange = CRTableRange(self,cell.table);
+    NSRange tableRange = CRTableRangeNear(self,cell.table,_text.selectedRange.location);
     NSRange active = [_text.string paragraphRangeForRange:NSMakeRange(_text.selectedRange.location,0)];
     if (NSMaxRange(_text.selectedRange) > NSMaxRange(active)) return;
     NSMutableDictionary *p = [[self documentForRange:tableRange][@"paragraphs"][0] mutableCopy];
@@ -68,7 +68,7 @@
     if (!cell) return NO;
     NSRange active=[_text.string paragraphRangeForRange:NSMakeRange(_text.selectedRange.location,0)];
     if (NSMaxRange(_text.selectedRange)>NSMaxRange(active)) return YES;
-    NSRange range=CRTableRange(self,cell.table);
+    NSRange range=CRTableRangeNear(self,cell.table,_text.selectedRange.location);
     NSMutableDictionary *p=[[self documentForRange:range][@"paragraphs"][0] mutableCopy];
     NSMutableArray *rows=[NSMutableArray array];
     for (NSArray *row in p[@"rows"]) [rows addObject:[row mutableCopy]];
@@ -90,5 +90,43 @@
     }
     p[@"rows"]=rows; p[@"alignments"]=align;
     [self replaceTable:range paragraph:p row:cell.startingRow column:cell.startingColumn];
+    return YES;
+}
+// replaceAcrossTable handles a selection with exactly one end inside a table
+// (Typora): the selected cells lose their text but keep the grid, the
+// selected text outside is deleted, and typed text lands where the selection
+// started. Without this, text after the table would merge into a cell.
+- (BOOL)replaceAcrossTable:(NSRange)range withText:(NSString *)text {
+    if (!_text.editable || _text.hasMarkedText || !range.length || NSMaxRange(range)>_text.string.length) return NO;
+    if ([text rangeOfCharacterFromSet:NSCharacterSet.newlineCharacterSet].location!=NSNotFound || ![self allowFootnoteRange:range]) return NO;
+    NSUInteger last=NSMaxRange(range)-1;
+    NSTextTableBlock *head=CRCellAt(self,range.location), *tail=CRCellAt(self,last);
+    if ((head!=nil)==(tail!=nil)) return NO; // inside one table, or none
+    NSTextTableBlock *cell=head ?: tail;
+    NSRange table=CRTableRangeNear(self,cell.table,head ? range.location : last);
+    NSMutableAttributedString *after=[_text.textStorage mutableCopy];
+    NSRange outer, inner;
+    if (head) {
+        outer=NSMakeRange(NSMaxRange(table),NSMaxRange(range)-NSMaxRange(table));
+        inner=NSMakeRange(range.location,NSMaxRange(table)-range.location);
+    } else {
+        // Keep the line break before the table, or the line above would join
+        // the first cell.
+        NSUInteger end=table.location;
+        if (end>range.location && [_text.string characterAtIndex:end-1]=='\n') end--;
+        outer=NSMakeRange(range.location,end-range.location);
+        inner=NSMakeRange(table.location,NSMaxRange(range)-table.location);
+    }
+    // Edit the later range first so the earlier one's offsets stay valid.
+    if (head) [after deleteCharactersInRange:outer];
+    // Clear each selected cell's text, last first, keeping its line break.
+    for (NSValue *v in CRRangesIn(_text.string,inner).reverseObjectEnumerator) {
+        NSRange cleared=NSIntersectionRange(CRContent(_text.string,v.rangeValue),inner);
+        if (cleared.length) [after deleteCharactersInRange:cleared];
+    }
+    if (!head) [after deleteCharactersInRange:outer];
+    NSDictionary *typing=range.location<_text.string.length ? [_text.textStorage attributesAtIndex:range.location effectiveRange:NULL] : _text.typingAttributes;
+    if (text.length) [after insertAttributedString:[[NSAttributedString alloc] initWithString:text attributes:CRTextAttrs(typing)] atIndex:range.location];
+    [self replace:NSMakeRange(0,_text.string.length) with:after selection:NSMakeRange(range.location+text.length,0)];
     return YES;
 }

@@ -343,3 +343,28 @@ func TestAttachmentAndExportCallbacks(t *testing.T) {
 		t.Fatal("export did not receive current source")
 	}
 }
+
+// TestCompactToolbar: a narrow window folds the formatting group into the
+// trailing menu instead of letting the toolbar overflow the window.
+func TestCompactToolbar(t *testing.T) {
+	v, tt := notesFixture(t)
+	v.AttachRichEditor(&fakeRichEditor{})
+	tt.SetSize(860, 600)
+	tt.Frame()
+	tt.Frame()
+	if _, ok := tt.Find("文本格式"); ok {
+		t.Fatal("formatting group still in a narrow toolbar")
+	}
+	for _, label := range []string{"新建备忘录 (Cmd+N)", "共享与导出", "备忘录选项"} {
+		r, ok := tt.Find(label)
+		if !ok || r.X+r.W > 861 {
+			t.Fatalf("narrow toolbar %s out of bounds %+v", label, r)
+		}
+	}
+	tt.SetSize(1280, 800)
+	tt.Frame()
+	tt.Frame()
+	if _, ok := tt.Find("文本格式"); !ok {
+		t.Fatal("formatting group missing from a wide toolbar")
+	}
+}

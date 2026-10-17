@@ -21,22 +21,39 @@ const (
 // hosts the expand control, clear of the traffic lights.
 func (v *View) header(c *ui.Context) {
 	t := c.Theme()
-	ui.Row(c).FillWidth().Height(topRowH).Gap(10).AlignItems(ui.Center).DragWindow().
-		Padding(0, max(12, c.TitleBar().Right), 0, 16).Children(func() {
+	// The row starts at the window's top edge; the inset keeps its center
+	// on the traffic lights' line, level with the sidebar panel's toolbar.
+	bar := ui.Row(c).FillWidth().Height(topRowH+8).Gap(10).AlignItems(ui.Center).DragWindow().
+		Padding(8, max(12, c.TitleBar().Right), 0, 16)
+	// Like a macOS toolbar, a narrow window folds the formatting group into
+	// the trailing menu, then drops the folder title. The width derives from
+	// the window's, so toggling a panel takes effect in the same frame.
+	width := v.windowW
+	if v.App.Sidebar {
+		width -= sidebarW
+	}
+	if v.App.Outline {
+		width -= 236
+	}
+	compact := width > 0 && width < 700
+	tight := width > 0 && width < 480
+	bar.Children(func() {
 		if !v.App.Sidebar {
 			// Collapsed: the leading slot hosts the expand control,
-			// offset past the traffic lights (the card starts at x=8).
-			ui.Row(c).FillHeight().AlignItems(ui.Center).Padding(0, 4, 0, max(0, c.TitleBar().Left-8-16)).Children(func() {
+			// offset past the traffic lights (the toolbar starts at x=0).
+			ui.Row(c).FillHeight().AlignItems(ui.Center).Padding(0, 4, 0, max(0, c.TitleBar().Left-16)).Children(func() {
 				iconButton(c, iconSidebar, "切换边栏", v.toggleSidebar)
 			})
 		}
 		if v.App.Sidebar {
 			// The folder title counts as navigation: it collapses with
 			// the sidebar.
-			ui.Column(c).Gap(0).Children(func() {
-				ui.Text(c, folderLabel(v.App.SelFolder)).FontSize(13).Bold().NoWrap().Clip()
-				ui.Text(c, itoa(len(v.App.VisibleNotes()))+" 个备忘录").FontSize(11).TextColor(t.TextMuted)
-			})
+			if !tight {
+				ui.Column(c).Gap(0).Children(func() {
+					ui.Text(c, folderLabel(v.App.SelFolder)).FontSize(13).Bold().NoWrap().Clip()
+					ui.Text(c, itoa(len(v.App.VisibleNotes()))+" 个备忘录").FontSize(11).TextColor(t.TextMuted)
+				})
+			}
 			toolbarCapsule(c).Children(func() {
 				iconButton(c, iconEllipsis, "文件夹选项", nil).Menu(v.folderMenu)
 			})
@@ -44,17 +61,9 @@ func (v *View) header(c *ui.Context) {
 		ui.Spacer(c)
 		v.modeSwitcher(c)
 		toolbarCapsule(c).Children(func() { iconButton(c, iconCompose, "新建备忘录 (Cmd+N)", v.newNote) })
-		toolbarCapsule(c).Children(func() {
-			ui.ButtonBase(c).Key("format").Label("文本格式").Tooltip("文本格式").Size(36, 36).Radius(18).
-				Disabled(!v.canEdit()).Children(func() { ui.Text(c, "Aa").FontSize(18).TextColor(t.TextMuted) }).Menu(v.formatMenu)
-			iconButton(c, iconChecklist, "插入任务列表", func() { v.insertSnippet("- [ ] ") }).Disabled(!v.canEdit())
-			iconButton(c, iconTable, "插入表格", func() { v.insertSnippet("\n| 列 1 | 列 2 | 列 3 |\n| --- | --- | --- |\n|  |  |  |\n") }).Disabled(!v.canEdit())
-			iconButton(c, iconPaperclip, "插入图片（可上传图床）", func() {
-				if v.flushAutosave() && v.OnInsertImage != nil {
-					v.OnInsertImage()
-				}
-			}).Disabled(!v.canEdit() || v.OnInsertImage == nil)
-		})
+		if !compact {
+			v.formatCapsule(c)
+		}
 		toolbarCapsule(c).Children(func() {
 			iconButton(c, iconShare, "共享与导出", nil).Disabled(v.App.Path == "").Menu(func(m *ui.Menu) {
 				if m.Item("复制 Markdown").Chosen() {
@@ -68,8 +77,45 @@ func (v *View) header(c *ui.Context) {
 					}
 				}
 			})
-			iconButton(c, iconEllipsis, "备忘录选项", nil).Menu(v.noteMenu)
+			iconButton(c, iconEllipsis, "备忘录选项", nil).Menu(func(m *ui.Menu) {
+				if compact {
+					// The folded formatting group lives here when narrow.
+					m.Submenu("文本格式", v.formatMenu)
+					if m.Item("插入任务列表").Disabled(!v.canEdit()).Chosen() {
+						v.insertSnippet("- [ ] ")
+					}
+					if m.Item("插入表格").Disabled(!v.canEdit()).Chosen() {
+						v.insertSnippet(tableSnippet)
+					}
+					if m.Item("插入图片…").Disabled(!v.canEdit() || v.OnInsertImage == nil).Chosen() {
+						if v.flushAutosave() && v.OnInsertImage != nil {
+							v.OnInsertImage()
+						}
+					}
+					m.Separator()
+				}
+				v.noteMenu(m)
+			})
 		})
+	})
+}
+
+const tableSnippet = "\n| 列 1 | 列 2 | 列 3 |\n| --- | --- | --- |\n|  |  |  |\n"
+
+// formatCapsule is the toolbar's formatting group: text styles, checklist,
+// table and attachment.
+func (v *View) formatCapsule(c *ui.Context) {
+	t := c.Theme()
+	toolbarCapsule(c).Children(func() {
+		ui.ButtonBase(c).Key("format").Label("文本格式").Tooltip("文本格式").Size(36, 36).Radius(18).
+			Disabled(!v.canEdit()).Children(func() { ui.Text(c, "Aa").FontSize(18).TextColor(t.TextMuted) }).Menu(v.formatMenu)
+		iconButton(c, iconChecklist, "插入任务列表", func() { v.insertSnippet("- [ ] ") }).Disabled(!v.canEdit())
+		iconButton(c, iconTable, "插入表格", func() { v.insertSnippet(tableSnippet) }).Disabled(!v.canEdit())
+		iconButton(c, iconPaperclip, "插入图片（可上传图床）", func() {
+			if v.flushAutosave() && v.OnInsertImage != nil {
+				v.OnInsertImage()
+			}
+		}).Disabled(!v.canEdit() || v.OnInsertImage == nil)
 	})
 }
 
@@ -174,10 +220,21 @@ func (v *View) insertSnippet(s string) {
 	if v.rich != nil && v.App.Mode != app.ModeEdit {
 		v.App.Mode = app.ModeRich
 		v.ensureRichEditor()
-		if strings.TrimSpace(s) == "- [ ]" {
+		// Empty blocks open natively with the caret inside them; Markdown
+		// insertion cannot hold a caret in a block that has no text yet.
+		switch strings.TrimSpace(s) {
+		case "- [ ]":
 			v.rich.Format("checklist")
-		} else {
-			v.rich.InsertMarkdown(s)
+		case "```\n\n```":
+			v.rich.Format("insert:```")
+		case "$$\n\n$$":
+			v.rich.Format("insert:$$")
+		case "---":
+			v.rich.Format("insert:---")
+		default:
+			// The surrounding newlines are for source mode; the native
+			// editor places blocks on their own lines itself.
+			v.rich.InsertMarkdown(strings.TrimSpace(s))
 		}
 		v.rich.Focus()
 		v.NativeChanged()
@@ -200,6 +257,9 @@ func (v *View) insertSnippet(s string) {
 }
 
 func (v *View) InsertMarkdown(s string) { v.insertSnippet(s) }
+
+// InsertTableAction inserts a 2×2 table (Typora: ⌥⌘T).
+func (v *View) InsertTableAction() { v.insertSnippet(tableSnippet) }
 
 func (v *View) toggleTheme() {
 	if v.themeIsDark() {

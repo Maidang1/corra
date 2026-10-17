@@ -43,15 +43,15 @@ var (
 		Border:         ui.Hex("#3a3c44"),
 		Text:           ui.Hex("#e7e9ee"),
 		TextMuted:      ui.Hex("#8b909a"),
-		Accent:         ui.Hex("#0a67cf"),
-		AccentHover:    ui.Hex("#5aabff"),
-		AccentPressed:  ui.Hex("#2e8bef"),
+		Accent:         ui.Hex("#0a84ff"), // macOS dark-mode system blue
+		AccentHover:    ui.Hex("#409cff"),
+		AccentPressed:  ui.Hex("#0070e0"),
 		AccentText:     ui.Hex("#ffffff"),
 		Danger:         ui.Hex("#e06c6c"),
 		Warning:        ui.Hex("#d9a13b"),
 		Success:        ui.Hex("#5cb87e"),
 		Selection:      ui.Hex("#2e4a86"),
-		Focus:          ui.Hex("#0a67cf"),
+		Focus:          ui.Hex("#0a84ff"),
 		Inverse:        ui.Hex("#eceef2"),
 		InverseText:    ui.Hex("#1a1b1f"),
 		Scrollbar:      ui.Hex("#3a3d45"),
@@ -62,15 +62,6 @@ var (
 	fontUI   = "SF Pro Text, .AppleSystemUIFont, Helvetica Neue, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, sans-serif"
 	fontMono = "SF Mono, Menlo, Cascadia Code, JetBrains Mono, Consolas, Noto Sans Mono CJK SC, monospace"
 )
-
-// windowBackground is the cool gray the window wears behind its floating
-// cards — Apple's Finder/Notes gray, slightly darker than any surface.
-func windowBackground(t *ui.Theme) ui.Color {
-	if t.Dark {
-		return ui.Hex("#16171b")
-	}
-	return ui.Hex("#f1f1f4")
-}
 
 // cardBorder is the hairline rim around a floating card.
 func cardBorder(t *ui.Theme) ui.Color {
