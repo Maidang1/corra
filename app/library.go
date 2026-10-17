@@ -401,7 +401,7 @@ func SanitizeFileName(title string) string {
 	}
 	name := strings.Trim(b.String(), "-.")
 	if name == "" {
-		name = "note"
+		name = "document"
 	}
 	if len([]rune(name)) > 60 {
 		name = string([]rune(name)[:60])

@@ -42,3 +42,9 @@ func TestProductErrorCopy(t *testing.T) {
 		}
 	})
 }
+
+func TestSanitizeFileNameDocumentFallback(t *testing.T) {
+	if got, want := SanitizeFileName(""), "document.md"; got != want {
+		t.Fatalf("SanitizeFileName(\"\") = %q, want %q", got, want)
+	}
+}
