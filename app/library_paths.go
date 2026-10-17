@@ -9,7 +9,7 @@ import (
 
 func openLibraryRoot(root string, create bool) (*os.Root, error) {
 	if root == "" {
-		return nil, fmt.Errorf("notes library is not configured")
+		return nil, fmt.Errorf("document library is not configured")
 	}
 	if create {
 		if err := os.MkdirAll(root, 0o755); err != nil {
@@ -48,7 +48,7 @@ func checkLibraryPath(root *os.Root, rel string, allowMissing bool) error {
 			return err
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("symbolic links are not managed notes paths: %s", rel)
+			return fmt.Errorf("symbolic links are not managed document library paths: %s", rel)
 		}
 	}
 	return nil
@@ -56,7 +56,7 @@ func checkLibraryPath(root *os.Root, rel string, allowMissing bool) error {
 
 func libraryNotePath(dir *os.Root, root, path string) (string, error) {
 	if path == "" || !mdExt(path) {
-		return "", fmt.Errorf("not a Markdown note: %s", path)
+		return "", fmt.Errorf("not a Markdown document: %s", path)
 	}
 	rootAbs, err := filepath.Abs(root)
 	if err != nil {
@@ -68,7 +68,7 @@ func libraryNotePath(dir *os.Root, root, path string) (string, error) {
 	}
 	rel, err := filepath.Rel(rootAbs, pathAbs)
 	if err != nil || !filepath.IsLocal(rel) || rel == "." {
-		return "", fmt.Errorf("note is outside the library: %s", path)
+		return "", fmt.Errorf("document is outside the library: %s", path)
 	}
 	if err := checkLibraryPath(dir, rel, false); err != nil {
 		return "", err
@@ -78,7 +78,7 @@ func libraryNotePath(dir *os.Root, root, path string) (string, error) {
 		return "", err
 	}
 	if !info.Mode().IsRegular() {
-		return "", fmt.Errorf("not a regular note file: %s", path)
+		return "", fmt.Errorf("not a regular document file: %s", path)
 	}
 	return rel, nil
 }

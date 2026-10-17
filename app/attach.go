@@ -48,7 +48,7 @@ func (a *App) SaveAttachment(name string, data []byte) (string, error) {
 	}
 
 	if notePath == "" {
-		return "", fmt.Errorf("先保存备忘录，再插入附件")
+		return "", fmt.Errorf("先保存文档，再插入附件")
 	}
 	dir := filepath.Join(filepath.Dir(notePath), AssetsDirName)
 	if err := os.MkdirAll(dir, 0o755); err != nil {

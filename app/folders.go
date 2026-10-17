@@ -57,7 +57,7 @@ func (a *App) RenameFolder(folder, newFolder string) error {
 		return err
 	}
 	if !info.IsDir() {
-		return fmt.Errorf("not a notes folder: %s", folder)
+		return fmt.Errorf("not a document library folder: %s", folder)
 	}
 	if old == next {
 		return nil
@@ -116,7 +116,7 @@ func (a *App) DeleteFolder(folder string) error {
 		return err
 	}
 	if !info.IsDir() {
-		return fmt.Errorf("not a notes folder: %s", folder)
+		return fmt.Errorf("not a document library folder: %s", folder)
 	}
 	if err := dir.Remove(rel); err != nil {
 		return err
@@ -165,7 +165,7 @@ func (a *App) relocateSelectedNote(dest, folder string, restore bool) error {
 		return err
 	}
 	if isTrashPath(rel) != restore {
-		return fmt.Errorf("restore requires a deleted note; move requires an active note")
+		return fmt.Errorf("restore requires a deleted document; move requires an active document")
 	}
 	if err := checkLibraryPath(dir, dest, false); err != nil {
 		return err
@@ -175,7 +175,7 @@ func (a *App) relocateSelectedNote(dest, folder string, restore bool) error {
 		return err
 	}
 	if !info.IsDir() {
-		return fmt.Errorf("not a notes folder: %s", folder)
+		return fmt.Errorf("not a document library folder: %s", folder)
 	}
 	next, err := moveNoteWithAttachments(dir, root, rel, dest)
 	if err != nil {
