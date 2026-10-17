@@ -59,7 +59,7 @@ func buildMenu() *mygo.Menu {
 	fileMenu := &mygo.MenuItem{
 		Label: "文件",
 		Submenu: []*mygo.MenuItem{
-			item("新建备忘录", "CmdOrCtrl+N", func() { view.NewNoteAction() }),
+			item("新建文档", "CmdOrCtrl+N", func() { view.NewNoteAction() }),
 			item("新建文件夹…", "CmdOrCtrl+Shift+N", func() { view.NewFolderAction() }),
 			item("打开…", "CmdOrCtrl+O", func() { fileOps.Open() }),
 			{Label: "最近打开", Submenu: recentItems(item)},
@@ -112,7 +112,7 @@ func buildMenu() *mygo.Menu {
 			mygo.Separator(),
 			item("插入任务列表", "CmdOrCtrl+Shift+L", func() { view.InsertMarkdown("\n- [ ] ") }),
 			item("插入脚注", "CmdOrCtrl+Alt+F", func() { view.InsertFootnote() }),
-			item("删除所选备忘录", "", func() { view.DeleteNoteAction() }),
+			item("删除所选文档", "", func() { view.DeleteNoteAction() }),
 		},
 	}
 
@@ -158,7 +158,7 @@ func buildMenu() *mygo.Menu {
 			item("切换源码 / 文稿", "CmdOrCtrl+E", func() { view.ToggleModeAction() }),
 			item("显示 / 隐藏边栏", "CmdOrCtrl+Alt+S", func() { view.ToggleSidebarAction() }),
 			item("大纲", "CmdOrCtrl+Ctrl+1", func() { view.App.Outline = !view.App.Outline; editorApp.InvalidateUI() }),
-			item("搜索备忘录", "CmdOrCtrl+Shift+F", func() { view.SearchAction() }),
+			item("搜索文档", "CmdOrCtrl+Shift+F", func() { view.SearchAction() }),
 			mygo.Separator(),
 			checked("字数统计", editorApp.WordCount, func() { editorApp.WordCount = !editorApp.WordCount; editorApp.InvalidateUI() }),
 			checked("拼写检查", editorApp.Spellcheck, func() { view.ToggleSpellcheck() }),

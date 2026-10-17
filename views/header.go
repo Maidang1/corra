@@ -51,7 +51,7 @@ func (v *View) header(c *ui.Context) {
 			if !tight {
 				ui.Column(c).Gap(0).Children(func() {
 					ui.Text(c, folderLabel(v.App.SelFolder)).FontSize(13).Bold().NoWrap().Clip()
-					ui.Text(c, itoa(len(v.App.VisibleNotes()))+" 个备忘录").FontSize(11).TextColor(t.TextMuted)
+					ui.Text(c, itoa(len(v.App.VisibleNotes()))+" 个文档").FontSize(11).TextColor(t.TextMuted)
 				})
 			}
 			toolbarCapsule(c).Children(func() {
@@ -64,7 +64,7 @@ func (v *View) header(c *ui.Context) {
 			v.formatCapsule(c)
 		}
 		toolbarCapsule(c).Children(func() {
-			iconButton(c, iconCompose, "新建备忘录 (Cmd+N)", v.newNote)
+			iconButton(c, iconCompose, "新建文档 (Cmd+N)", v.newNote)
 			iconButton(c, iconShare, "共享与导出", nil).Disabled(v.App.Path == "").Menu(func(m *ui.Menu) {
 				if m.Item("复制 Markdown").Chosen() {
 					if v.syncEditor() {
@@ -77,7 +77,7 @@ func (v *View) header(c *ui.Context) {
 					}
 				}
 			})
-			iconButton(c, iconEllipsis, "备忘录选项", nil).Menu(func(m *ui.Menu) {
+			iconButton(c, iconEllipsis, "文档选项", nil).Menu(func(m *ui.Menu) {
 				if compact {
 					// The folded formatting group lives here when narrow.
 					m.Submenu("文本格式", v.formatMenu)
