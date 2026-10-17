@@ -36,7 +36,7 @@ Corra 已具备本地文档库、Markdown 源码与原生富文本编辑、GFM�
 | 全部内容入口 | 全部文档 | All Documents |
 | 当前内容的操作入口 | 文档选项 | Document Options |
 | 空白既有文档的标题回退 | 未命名文档 | Untitled Document |
-| 新建设置的默认标题 | 新文档 | New Document |
+| 新建文档的默认标题 | 新文档 | New Document |
 
 “文件夹”继续表示文档库内的实际目录，不改成“文档”。“最近删除”继续表示现有回收站视图，不改变其名称或 `.trash` 存储实现。“搜索”输入框已有的简短 placeholder 保持不变，辅助功能标签使用“搜索文档”。
 

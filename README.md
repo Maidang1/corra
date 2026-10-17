@@ -14,8 +14,8 @@ no JavaScript. Go draws the shell on the GPU; macOS uses an AppKit
 ### Highlights
 
 - **Document library and editing workspace** — folders and a
-  modification-date-grouped document list in the sidebar, with a dated editor
-  and optional outline
+  document list grouped by modification date in the sidebar, with an editor
+  showing the document's modification date and an optional outline
 - **Native WYSIWYG on macOS** — edit headings, body text, inline styles and
   checklists directly, with native selection, clipboard and undo/redo. Documents
   still autosave as Markdown files. Requires a cgo-enabled macOS build.
