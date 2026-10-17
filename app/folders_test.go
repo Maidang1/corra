@@ -188,4 +188,3 @@ func TestAppMoveSelectedNote(t *testing.T) {
 		}
 	}
 }
-
