@@ -47,9 +47,9 @@ type App struct {
 	Mode        Mode
 	ThemeMode   ThemeMode
 	Zoom        float32 // 1 = 100%
-	Sidebar     bool // navigation sidebar visible (folders + notes list)
-	Outline     bool // outline (TOC) panel visible
-	OutlineSel  int  // selected outline row
+	Sidebar     bool    // navigation sidebar visible (folders + notes list)
+	Outline     bool    // outline (TOC) panel visible
+	OutlineSel  int     // selected outline row
 	FindOpen    bool
 	FindQuery   string
 	FindCurrent int
@@ -58,10 +58,10 @@ type App struct {
 	SmartPunct      bool   // typographic quotes/dashes in the source editor & export
 	CodeLineNumbers bool   // line numbers in code fences
 	MathNumbering   string // none (default), ams, or all
-	WordCount        bool   // word-count status bar
-	Spellcheck       bool   // continuous spell checking in the native editor
-	FocusMode        bool   // dim all but the caret's paragraph
-	Typewriter       bool   // keep the caret line vertically centered
+	WordCount       bool   // word-count status bar
+	Spellcheck      bool   // continuous spell checking in the native editor
+	FocusMode       bool   // dim all but the caret's paragraph
+	Typewriter      bool   // keep the caret line vertically centered
 
 	// Editing.
 	Hist editor.Undo
