@@ -24,6 +24,7 @@ func (*Editor) SetSpellcheck(bool)                                {}
 func (*Editor) SetFocusMode(bool)                                 {}
 func (*Editor) SetTypewriter(bool)                                {}
 func (*Editor) ShowFindBar()                                      {}
+func (*Editor) ShowFindReplaceBar()                               {}
 func (*Editor) RevealHeading(int)                                 {}
 func (*Editor) Print()                                            {}
 func (*Editor) Focus()                                            {}

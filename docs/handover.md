@@ -137,7 +137,7 @@ CGO_ENABLED=1 go vet ./...
 3. ~~图片替换~~（已完成）：pill 第三个图标 → `NSOpenPanel` → `replaceImageAtLocation:withURL:`（保留 alt/标题/尺寸后缀，baseDir 内写相对路径）。同时修复了悬停控件的真实点击接线（`mouseDown` 现在分发图片 pill、表格 +/-、语言标签）。
 4. ~~侧栏键盘导航~~（已完成）：`views/notes.go` 的 `moveNoteSelection`；注意 `OverlayShortcut` 只对 overlay 生效，侧栏用的是元素级 `Shortcut`（子树聚焦时才触发）。
 5. **每代码块行号**：需要可持久化的 Markdown 扩展（fence info 或文档元数据），涉及 `internal/mdext` 解析与 `nativerich` 代码块渲染；若不想扩展语法，保持全局开关即可。
-6. **查找替换核查**：`ShowFindBar` 使用 `NSTextView` 自带查找条；确认是否提供替换，若缺失再考虑自绘面板。
+6. ~~查找替换核查~~（已完成）：`NSTextView` 查找条自带替换模式（tag 12 `NSTextFinderActionShowReplaceInterface`），已加「查找并替换…」入口。注意：测试窗口里查找条不进入视图层级（截图空白），`replacebar` 特征只能用 `validateUserInterfaceItem:` 代理验证。
 7. **脚注卡片加交互入口**：卡片目前忽略鼠标事件；可考虑让卡片可点击（「跳到定义」链接样式文本），需把卡片面板改为可接受鼠标移动/点击且不抢焦点。
 
 ## 7. 协作约定

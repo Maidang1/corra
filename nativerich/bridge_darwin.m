@@ -280,6 +280,7 @@ extern char *cr_render_math_document(uintptr_t handle, const char *document, int
 - (void)setFocusMode:(BOOL)enabled;
 - (void)setTypewriter:(BOOL)enabled;
 - (void)showFindBar;
+- (void)showReplaceBar;
 - (void)revealHeading:(NSInteger)index;
 - (void)printDocument;
 - (BOOL)emojiRule:(BOOL)boundary;
@@ -3657,6 +3658,14 @@ int cr_test_traits(uintptr_t ptr,const char *trait) { CREditor *e=CRE(ptr); NSSt
         return present;
     }
     if ([key isEqual:@"findbar"]) return e.text.usesFindBar ? 1 : 0;
+    if ([key isEqual:@"replacebar"]) {
+        // NSTextFinderActionShowReplaceInterface (12) is only meaningful when
+        // the text view accepts it; validation is what the menu would ask.
+        NSMenuItem *item=[NSMenuItem new];
+        item.action=@selector(performFindPanelAction:);
+        item.tag=12;
+        return [e.text validateUserInterfaceItem:item] && e.text.usesFindBar ? 1 : 0;
+    }
     if ([key hasPrefix:@"alphaAt:"]) { NSInteger index=[[key substringFromIndex:8] integerValue]; if (index>=0 && index<e.text.textStorage.length) { NSColor *color=[e.text.textStorage attribute:NSForegroundColorAttributeName atIndex:index effectiveRange:NULL]; return color && color.alphaComponent<0.99; } return 0; }
     return found; }
 int cr_test_checkbox(uintptr_t ptr) { CREditor *e=CRE(ptr); for (NSValue *v in CRRanges(e.text.string)) if (CRKind(CRParagraphAt(e,v.rangeValue.location),@"checklist")) { NSRect r=[e markerRect:v.rangeValue]; NSPoint point=[e.text convertPoint:NSMakePoint(NSMidX(r),NSMidY(r)) toView:nil]; NSEvent *event=[NSEvent mouseEventWithType:NSEventTypeLeftMouseDown location:point modifierFlags:0 timestamp:0 windowNumber:e.window.windowNumber context:nil eventNumber:0 clickCount:1 pressure:1]; [e.text mouseDown:event]; return 1; } return 0; }
@@ -3848,6 +3857,15 @@ static NSDictionary *CRTextAttrs(NSDictionary *attrs) {
     item.tag=NSFindPanelActionShowFindPanel;
     [_text performFindPanelAction:item];
 }
+// showReplaceBar opens the same bar straight in its replace mode, so the
+// writer does not have to discover the mode switch inside the bar.
+- (void)showReplaceBar {
+    _text.usesFindBar=YES;
+    [self.window makeFirstResponder:_text];
+    NSMenuItem *item=[NSMenuItem new];
+    item.tag=12; // NSTextFinderActionShowReplaceInterface
+    [_text performFindPanelAction:item];
+}
 - (void)revealHeading:(NSInteger)index {
     NSInteger seen=0;
     for (NSValue *v in CRRanges(_text.string)) {
@@ -3889,6 +3907,7 @@ void cr_spellcheck(uintptr_t ptr, int enabled) { CRE(ptr).text.continuousSpellCh
 void cr_focus_mode(uintptr_t ptr, int enabled) { [CRE(ptr) setFocusMode:enabled]; }
 void cr_typewriter(uintptr_t ptr, int enabled) { [CRE(ptr) setTypewriter:enabled]; }
 void cr_find(uintptr_t ptr) { [CRE(ptr) showFindBar]; }
+void cr_find_replace(uintptr_t ptr) { [CRE(ptr) showReplaceBar]; }
 void cr_reveal_heading(uintptr_t ptr, int index) { [CRE(ptr) revealHeading:(NSInteger)index]; }
 void cr_print(uintptr_t ptr) { [CRE(ptr) printDocument]; }
 // cr_test_markers reports each list marker's vertical center as drawRect

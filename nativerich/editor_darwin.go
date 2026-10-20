@@ -249,6 +249,13 @@ func (e *Editor) ShowFindBar() {
 	}
 }
 
+// ShowFindReplaceBar opens the find bar straight in its replace mode.
+func (e *Editor) ShowFindReplaceBar() {
+	if e != nil && e.native != 0 {
+		C.cr_find_replace(e.native)
+	}
+}
+
 // RevealHeading scrolls to the index-th heading paragraph.
 func (e *Editor) RevealHeading(index int) {
 	if e != nil && e.native != 0 {

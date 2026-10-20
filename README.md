@@ -96,7 +96,8 @@ no JavaScript. Go draws the shell on the GPU; macOS uses an AppKit
 - **Writer comforts** — word count (CJK-aware, reading minutes), outline
   panel with jump-to-heading, focus mode, typewriter mode, spell checking,
   auto-pairing, smart punctuation, code-fence line numbers, heading
-  auto-numbering, native printing on macOS
+  auto-numbering, native printing on macOS, find (`⌘F`) and find-and-replace
+  (edit menu / command palette; replace mode opens directly)
 - **Deep native integration** — system dark mode, drag & drop, file
   associations, external-change detection with a conflict dialog, global
   menu with accelerators
@@ -219,7 +220,8 @@ JavaScript。Go 在 GPU 上绘制外壳，macOS 编辑区使用 AppKit 原生富
   ⌘⌥↓/⌘⌥↑ 在引用与定义之间跳转，⌘⌥← 回到上次跳转的起点（再按一次往返切换）
 - **写作体验**：字数统计（中英混排、阅读时长）、大纲面板点击跳转、
   专注模式、打字机模式、拼写检查、括号自动配对、智能标点、代码块行号、
-  标题自动编号、macOS 原生打印
+  标题自动编号、macOS 原生打印、查找（`⌘F`）与查找替换（编辑菜单/命令面板，
+  直接打开替换模式）
 - **深度系统集成**：系统深浅色、拖放打开、文件关联、外部修改检测
   与冲突处理、全局菜单与快捷键
 - **设置面板（Cmd+,）**：外观（跟随系统 / 浅色 / 深色）、正文与代码

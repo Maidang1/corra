@@ -26,6 +26,20 @@ func (v *View) FindAction() {
 	}
 }
 
+// FindReplaceAction opens the replace UI: the native find bar's replace mode
+// in rich mode, the source editor's find-replace bar otherwise.
+func (v *View) FindReplaceAction() {
+	if v.App.Mode == app.ModeRich && v.rich != nil {
+		v.rich.ShowFindReplaceBar()
+		return
+	}
+	if v.App.Mode == app.ModeEdit && v.edState != nil {
+		v.edState.Run(editor.FindReplace)
+		v.focusEditor = true
+		v.App.InvalidateUI()
+	}
+}
+
 // PrintAction prints via the native print panel in rich mode; other modes
 // export a PDF instead (MyGo has no print API for its own surfaces).
 func (v *View) PrintAction() {

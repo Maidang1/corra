@@ -37,6 +37,8 @@ type RichEditor interface {
 	SetFocusMode(enabled bool)
 	SetTypewriter(enabled bool)
 	ShowFindBar()
+	// ShowFindReplaceBar opens the find bar straight in replace mode.
+	ShowFindReplaceBar()
 	// RevealHeading scrolls to the index-th heading paragraph (0-based).
 	RevealHeading(index int)
 	// Print prints the rendered document (macOS native print panel).

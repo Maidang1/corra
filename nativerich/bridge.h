@@ -20,6 +20,7 @@ void cr_spellcheck(uintptr_t editor, int enabled);
 void cr_focus_mode(uintptr_t editor, int enabled);
 void cr_typewriter(uintptr_t editor, int enabled);
 void cr_find(uintptr_t editor);
+void cr_find_replace(uintptr_t editor);
 void cr_reveal_heading(uintptr_t editor, int index);
 void cr_print(uintptr_t editor);
 

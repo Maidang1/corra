@@ -103,6 +103,7 @@ func buildMenu() *mygo.Menu {
 			role(mygo.RoleSelectAll),
 			mygo.Separator(),
 			item("文档内查找…", "CmdOrCtrl+F", func() { view.FindAction() }),
+			item("查找并替换…", "", func() { view.FindReplaceAction() }),
 			mygo.Separator(),
 			item("复制 Markdown", "", func() { view.CopyMarkdown() }),
 			item("复制 HTML", "", func() { view.CopyHTML() }),

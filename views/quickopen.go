@@ -37,6 +37,7 @@ func (v *View) quickCommandList() []quickCommand {
 		{"插入脚注", "⌥⌘F", iconDoc, "footnote insert", v.InsertFootnote},
 		{"返回脚注跳转位置", "⌘⌥←", iconDoc, "footnote back return jump", v.FootnoteBackAction},
 		{"查找…", "⌘F", iconSearch, "find search", v.FindAction},
+		{"查找并替换…", "", iconSearch, "replace find substitute", v.FindReplaceAction},
 		{"复制 Markdown", "", iconDoc, "copy markdown", v.CopyMarkdown},
 		{"复制 HTML", "", iconCode, "copy html", v.CopyHTML},
 		{"导出…", "", iconShare, "export pdf html word pandoc", v.OpenExport},
