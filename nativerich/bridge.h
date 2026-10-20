@@ -70,6 +70,7 @@ int cr_test_table_button(uintptr_t editor, int kind);
 int cr_test_click_table_button(uintptr_t editor, int kind);
 int cr_test_hover_footnote(uintptr_t editor);
 char *cr_test_footnote_card(uintptr_t editor);
+int cr_test_footnote_card_jump(uintptr_t editor);
 int cr_test_footnote_shot(uintptr_t editor, const char *path);
 int cr_test_format_bar_shot(uintptr_t editor, const char *path);
 char *cr_test_clipboard_text(void);

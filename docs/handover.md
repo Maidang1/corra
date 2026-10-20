@@ -128,7 +128,7 @@ CGO_ENABLED=1 go vet ./...
 - 表情目录是约 120 个精选 shortcode，非全量 Unicode。
 - 链接补全只检索「可见文档」（受侧栏筛选/回收站影响）。
 - 表格行列移动目前只通过右键菜单，没有拖拽手柄。
-- 脚注卡片仅展示（忽略鼠标事件）；返回引用走 `⌘⌥←`、右键「返回跳转前位置」或命令面板。
+- 脚注卡片可点击「跳到定义」（面板 `ignoresMouseEvents=NO` 但仍无焦点）；返回引用走 `⌘⌥←`、右键「返回跳转前位置」或命令面板。
 - 代码行号是全局开关，没有每块独立开关。
 
 ## 6. 建议的下一步（可直接开工）
@@ -139,7 +139,7 @@ CGO_ENABLED=1 go vet ./...
 4. ~~侧栏键盘导航~~（已完成）：`views/notes.go` 的 `moveNoteSelection`；注意 `OverlayShortcut` 只对 overlay 生效，侧栏用的是元素级 `Shortcut`（子树聚焦时才触发）。
 5. **每代码块行号**：需要可持久化的 Markdown 扩展（fence info 或文档元数据），涉及 `internal/mdext` 解析与 `nativerich` 代码块渲染；若不想扩展语法，保持全局开关即可。
 6. ~~查找替换核查~~（已完成）：`NSTextView` 查找条自带替换模式（tag 12 `NSTextFinderActionShowReplaceInterface`），已加「查找并替换…」入口。注意：测试窗口里查找条不进入视图层级（截图空白），`replacebar` 特征只能用 `validateUserInterfaceItem:` 代理验证。
-7. **脚注卡片加交互入口**：卡片目前忽略鼠标事件；可考虑让卡片可点击（「跳到定义」链接样式文本），需把卡片面板改为可接受鼠标移动/点击且不抢焦点。
+7. ~~脚注卡片加交互入口~~（已完成）：卡片有「跳到定义」按钮；关键点是三处配合——面板接受鼠标事件、`updateHoverAtPoint`/`clearHover` 在指针位于卡片上时保持打开、卡片视图自己的 tracking area 负责离开时关闭。
 
 ## 7. 协作约定
 

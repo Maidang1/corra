@@ -82,15 +82,22 @@
         }
         // A footnote reference raises a readable card. Caret lookup rounds to
         // the nearest boundary, so the mark under the pointer is found through
-        // the glyph and both of its neighbouring characters.
-        NSString *footnote = nil;
-        NSRect footnoteRect = NSZeroRect;
-        NSDictionary *footnoteRun = [self footnoteRunAtPoint:point rect:&footnoteRect];
-        if (footnoteRun) footnote = footnoteRun[@"footnote"];
-        if (![footnote isEqualToString:_hoverFootnote] || !NSEqualRects(footnoteRect, _footnoteRect)) {
-            _hoverFootnote = footnote;
-            _footnoteRect = footnoteRect;
-            [self updateFootnoteCard];
+        // the glyph and both of its neighbouring characters. While the pointer
+        // is on the card itself (reachable for its jump button), keep it open.
+        BOOL overCard = _footnotePanel.isVisible &&
+                        NSPointInRect([self.window convertPointToScreen:[self convertPoint:point toView:nil]], _footnotePanel.frame);
+        if (!overCard) {
+            NSString *footnote = nil;
+            NSRect footnoteRect = NSZeroRect;
+            NSUInteger footnoteLocation = NSNotFound;
+            NSDictionary *footnoteRun = [self footnoteRunAtPoint:point rect:&footnoteRect location:&footnoteLocation];
+            if (footnoteRun) footnote = footnoteRun[@"footnote"];
+            if (![footnote isEqualToString:_hoverFootnote] || !NSEqualRects(footnoteRect, _footnoteRect)) {
+                _hoverFootnote = footnote;
+                _footnoteRect = footnoteRect;
+                _hoverFootnoteLocation = footnoteLocation;
+                [self updateFootnoteCard];
+            }
         }
         // A table raises add-row and add-column buttons on hover.
         if (index != NSNotFound) {
@@ -180,7 +187,12 @@
     _tableRect = NSZeroRect;
     _tableButtons = nil;
     _hoverFootnote = nil;
-    [self hideFootnoteCard];
+    _hoverFootnoteLocation = NSNotFound;
+    // Moving onto the card keeps it open for the jump button; everything
+    // else about the hover is cleared as usual.
+    if (!(_footnotePanel.isVisible && NSPointInRect(NSEvent.mouseLocation, _footnotePanel.frame))) {
+        [self hideFootnoteCard];
+    }
     [self setNeedsDisplay:YES];
     [self.window invalidateCursorRectsForView:self];
 }
@@ -483,8 +495,9 @@
 
 // MARK: - Footnote card
 
-// footnoteRunAtPoint finds a footnote mark whose glyph is under the pointer.
-- (NSDictionary *)footnoteRunAtPoint:(NSPoint)point rect:(NSRect *)outRect {
+// footnoteRunAtPoint finds a footnote mark whose glyph is under the pointer,
+// also reporting the mark's character index for the card's jump button.
+- (NSDictionary *)footnoteRunAtPoint:(NSPoint)point rect:(NSRect *)outRect location:(NSUInteger *)outLocation {
     NSLayoutManager *layout = self.layoutManager;
     [layout ensureLayoutForTextContainer:self.textContainer];
     NSPoint container = NSMakePoint(point.x - self.textContainerOrigin.x, point.y - self.textContainerOrigin.y);
@@ -502,6 +515,7 @@
         rect = NSOffsetRect(rect, self.textContainerOrigin.x, self.textContainerOrigin.y);
         if (!NSPointInRect(point, NSInsetRect(rect, -3, -3))) continue;
         if (outRect) *outRect = rect;
+        if (outLocation) *outLocation = (NSUInteger)at;
         return run;
     }
     return nil;
@@ -524,7 +538,7 @@
         panel.backgroundColor = NSColor.clearColor;
         panel.hasShadow = YES;
         panel.alphaValue = 0;
-        panel.ignoresMouseEvents = YES;
+        panel.ignoresMouseEvents = NO; // the jump button takes clicks; the panel never takes focus
         panel.contentView = view;
         _footnotePanel = panel;
         _footnoteCard = view;
@@ -535,6 +549,8 @@
     NSString *number = presentation[@"number"];
     _footnoteCard.heading = number.length ? [NSString stringWithFormat:@"脚注 %@", number] : [NSString stringWithFormat:@"脚注 %@", _hoverFootnote];
     _footnoteCard.body = presentation[@"tooltip"] ?: @"未找到脚注定义";
+    _footnoteCard.referenceLocation = _hoverFootnoteLocation;
+    _footnoteCard.showsJumpButton = number.length && ![number isEqual:@"?"];
     CGFloat height = [_footnoteCard cardHeight];
     [_footnotePanel setContentSize:NSMakeSize(CRFootnoteCardWidth, height)];
     NSRect anchor = [self.window convertRectToScreen:[self convertRect:_footnoteRect toView:nil]];
@@ -570,7 +586,18 @@
 - (NSDictionary *)footnoteCardState {
     return @{@"open": (_footnotePanel.isVisible ? @YES : @NO),
              @"heading": _footnoteCard.heading ?: @"",
-             @"body": _footnoteCard.body ?: @""};
+             @"body": _footnoteCard.body ?: @"",
+             @"jump": (_footnotePanel.isVisible && _footnoteCard.showsJumpButton ? @YES : @NO)};
+}
+
+// footnoteCardJump follows the card's link: land the caret on the reference
+// (so the jump's return point is the mark itself), jump to the definition
+// and dismiss the card.
+- (void)footnoteCardJump {
+    if (!_footnotePanel.isVisible || !_footnoteCard.showsJumpButton) return;
+    self.selectedRange = NSMakeRange(_footnoteCard.referenceLocation, 0);
+    [self.owner navigateFootnote:YES atLocation:_footnoteCard.referenceLocation];
+    [self hideFootnoteCard];
 }
 
 - (BOOL)footnoteCardSnapshotTo:(NSString *)path {

@@ -210,15 +210,52 @@ func TestNativeFootnoteHoverCard(t *testing.T) {
 			t.Errorf("footnote reference not found")
 			return
 		}
-		open, heading, body := nativeTestFootnoteCard(e)
+		open, heading, body, jump := nativeTestFootnoteCard(e)
 		if !open || heading != "脚注 1" || !strings.Contains(body, "脚注定义") {
 			t.Errorf("card: open=%v heading=%q body=%q", open, heading, body)
 			return
 		}
+		if !jump {
+			t.Errorf("card with a definition did not offer the jump button")
+			return
+		}
+		// The jump button lands on the definition and dismisses the card.
+		state := readNativeFootnotes(t, e)
+		if len(state.Definitions) != 1 {
+			t.Errorf("missing definition: %+v", state)
+			return
+		}
+		if !nativeTestFootnoteCardJump(e) {
+			t.Errorf("card jump failed")
+			return
+		}
+		if location, _ := nativeTestSelection(e); location != state.Definitions[0].Location {
+			t.Errorf("card jump landed at %d, want %d", location, state.Definitions[0].Location)
+		}
+		if open, _, _, _ := nativeTestFootnoteCard(e); open {
+			t.Errorf("card stayed open after the jump")
+		}
+		// The return point is the reference itself: ⌘⌥← comes right back.
+		nativeTestAction(e, "key", "footnote-back")
+		if location, _ := nativeTestSelection(e); location != state.References[0].Location {
+			t.Errorf("back did not return to the reference: %d", location)
+		}
 		// Leaving the reference dismisses the card.
 		nativeTestHoverBlock(e, 0, false)
-		if open, _, _ := nativeTestFootnoteCard(e); open {
+		if open, _, _, _ := nativeTestFootnoteCard(e); open {
 			t.Errorf("card stayed open after leaving the reference")
+		}
+		// A reference without a definition has nothing to jump to.
+		e.Load("丢失[^x]")
+		if !nativeTestHoverFootnote(e) {
+			t.Errorf("dangling reference not found")
+			return
+		}
+		if _, _, _, jump := nativeTestFootnoteCard(e); jump {
+			t.Errorf("card without a definition offered the jump button")
+		}
+		if nativeTestFootnoteCardJump(e) {
+			t.Errorf("jump ran without a definition")
 		}
 	})
 }

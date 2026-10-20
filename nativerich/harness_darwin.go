@@ -285,22 +285,29 @@ func nativeTestHoverFootnote(e *Editor) bool {
 	return C.cr_test_hover_footnote(e.native) != 0
 }
 
-// nativeTestFootnoteCard reports the hover card: open state, heading and body.
-func nativeTestFootnoteCard(e *Editor) (open bool, heading, body string) {
+// nativeTestFootnoteCard reports the hover card: open state, heading, body
+// and whether its jump-to-definition button is showing.
+func nativeTestFootnoteCard(e *Editor) (open bool, heading, body string, jump bool) {
 	value := C.cr_test_footnote_card(e.native)
 	if value == nil {
-		return false, "", ""
+		return false, "", "", false
 	}
 	defer C.free(unsafe.Pointer(value))
 	var state struct {
 		Open    bool   `json:"open"`
 		Heading string `json:"heading"`
 		Body    string `json:"body"`
+		Jump    bool   `json:"jump"`
 	}
 	if json.Unmarshal([]byte(C.GoString(value)), &state) != nil {
-		return false, "", ""
+		return false, "", "", false
 	}
-	return state.Open, state.Heading, state.Body
+	return state.Open, state.Heading, state.Body, state.Jump
+}
+
+// nativeTestFootnoteCardJump clicks the card's jump-to-definition button.
+func nativeTestFootnoteCardJump(e *Editor) bool {
+	return C.cr_test_footnote_card_jump(e.native) != 0
 }
 
 func nativeTestFootnoteShot(e *Editor, path string) bool {

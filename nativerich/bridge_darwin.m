@@ -77,6 +77,7 @@ extern char *cr_render_math_document(uintptr_t handle, const char *document, int
     NSString *_footnoteLabel;
     NSRect _footnoteRect;
     NSString *_hoverFootnote;
+    NSUInteger _hoverFootnoteLocation;
     NSTextTable *_hoverTable;
     NSRect _tableRect;
     NSArray *_tableButtons;
@@ -92,6 +93,7 @@ extern char *cr_render_math_document(uintptr_t handle, const char *document, int
 - (NSRect)tableButtonRectForKind:(NSInteger)kind;
 - (void)hideFootnoteCard;
 - (void)closeFootnoteCard;
+- (void)footnoteCardJump;
 - (NSDictionary *)footnoteCardState;
 - (BOOL)footnoteCardSnapshotTo:(NSString *)path;
 - (void)pickCodeLanguage:(NSMenuItem *)item;
@@ -3371,6 +3373,12 @@ char *cr_test_footnote_card(uintptr_t ptr) {
     NSData *json=[NSJSONSerialization dataWithJSONObject:[CRE(ptr).text footnoteCardState] options:0 error:NULL];
     NSString *value=json ? [[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding] : nil;
     return strdup(value.UTF8String ?: "{}");
+}
+int cr_test_footnote_card_jump(uintptr_t ptr) {
+    CREditor *e=CRE(ptr);
+    if (![[e.text footnoteCardState][@"jump"] boolValue]) return 0;
+    [e.text footnoteCardJump];
+    return 1;
 }
 int cr_test_footnote_shot(uintptr_t ptr,const char *path) {
     return [CRE(ptr).text footnoteCardSnapshotTo:[NSString stringWithUTF8String:path]] ? 1 : 0;

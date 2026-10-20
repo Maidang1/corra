@@ -90,9 +90,10 @@ no JavaScript. Go draws the shell on the GPU; macOS uses an AppKit
 - **Table controls** — hovering a table raises a "+" under it (add row) and
   at its right edge (add column), so a table grows without the context menu
 - **Footnote preview** — hovering a footnote reference raises a readable card
-  with its definition instead of waiting for the system tooltip; ⌘⌥↓/⌘⌥↑ jump
-  between a reference and its definition, and ⌘⌥← returns to where the last
-  jump started (press again to toggle)
+  with its definition instead of waiting for the system tooltip; the card's
+  "跳到定义" link jumps straight there, ⌘⌥↓/⌘⌥↑ jump between a reference and
+  its definition, and ⌘⌥← returns to where the last jump started (press
+  again to toggle)
 - **Writer comforts** — word count (CJK-aware, reading minutes), outline
   panel with jump-to-heading, focus mode, typewriter mode, spell checking,
   auto-pairing, smart punctuation, code-fence line numbers, heading
@@ -216,8 +217,9 @@ JavaScript。Go 在 GPU 上绘制外壳，macOS 编辑区使用 AppKit 原生富
 - **文档统计**：点击状态栏的字数展开统计条，显示字数、字符、行数、标题、
   链接、图片、任务、代码块与阅读时间（统计时跳过围栏代码）
 - **表格控制**：悬停表格时下方出现「+」加行、右侧出现「+」加列，无需右键菜单
-- **脚注预览**：悬停脚注引用即浮出定义卡片，无需等待系统提示；
-  ⌘⌥↓/⌘⌥↑ 在引用与定义之间跳转，⌘⌥← 回到上次跳转的起点（再按一次往返切换）
+- **脚注预览**：悬停脚注引用即浮出定义卡片，无需等待系统提示；卡片上的
+  「跳到定义」链接直达定义，⌘⌥↓/⌘⌥↑ 在引用与定义之间跳转，⌘⌥← 回到上次
+  跳转的起点（再按一次往返切换）
 - **写作体验**：字数统计（中英混排、阅读时长）、大纲面板点击跳转、
   专注模式、打字机模式、拼写检查、括号自动配对、智能标点、代码块行号、
   标题自动编号、macOS 原生打印、查找（`⌘F`）与查找替换（编辑菜单/命令面板，
