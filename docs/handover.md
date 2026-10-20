@@ -5,7 +5,7 @@
 ## 0. 一分钟上手
 
 - 项目：Corra，Go + MyGo 的 macOS 原生 Markdown 桌面编辑器；富文本编辑区是 AppKit `NSTextView`，经 cgo 嵌入（`nativerich/`），**没有 WebView**。
-- 当前分支：`codex/native-rich-editor`；最新提交 `70e6b64`（功能：查找替换入口）；工作区干净。
+- 当前分支：`codex/native-rich-editor`；最新提交 `d9a5020`（功能：脚注卡片可点击）；工作区干净。
 - 环境：macOS + Xcode Command Line Tools、Go 1.27.1、cgo 必须开启。
 - 跑应用：`make dev`（macOS 自动开启 cgo）；打包：`make build`。
 - 跑测试（提交前必跑）：
@@ -119,6 +119,7 @@ CGO_ENABLED=1 go vet ./...
 - 图片替换与点击接线（`603ab59`）：`replaceImageAtLocation:withURL:` + `cr_test_image_replace`「给定路径」桥；`mouseDown` 分发图片 pill/表格按钮/语言标签（`cr_test_click_image_button`/`cr_test_click_table_button` 真实事件测试）；新链接框架 UniformTypeIdentifiers。
 - 侧栏键盘导航（`4035ee0`）：`moveNoteSelection(delta, focusRow)`；列表 `Scroll` 与搜索框 `Box` 上挂元素级 `Shortcut`；`View.focusNotePath` 控制行焦点。
 - 查找替换入口（`70e6b64`）：`showReplaceBar`（tag 12）+ `cr_find_replace`；`FindReplaceAction` 双模式路由；`replacebar` 特征用 `validateUserInterfaceItem:` 代理。
+- 脚注卡片跳转（`d9a5020`）：卡片 `NSButton`「跳到定义 ›」；`footnoteCardJump` 先把光标落到引用再跳（⌘⌥← 返回引用本身）；测试桥 `cr_test_footnote_card_jump`，状态 JSON 增加 `jump` 字段。
 - 状态栏文档统计条（字数/字符/行/标题/链接/图片/任务/代码块/阅读时间）。
 - 测试与截图脚本；`docs/work-summary.md` 有完整功能与架构总结。
 
