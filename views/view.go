@@ -50,6 +50,9 @@ type View struct {
 	autosaveSource string
 	SaveError      string
 	focusEditor    bool
+	// focusNotePath is the sidebar note whose row takes the keyboard focus
+	// next frame, so arrow-key navigation keeps walking the list.
+	focusNotePath string
 	focusSearch    bool
 	FolderDialog   string
 	FolderDraft    string

@@ -134,7 +134,7 @@ CGO_ENABLED=1 go vet ./...
 1. **表格行列拖拽排序**：表格矩形与悬停状态已在 `hover_controls_darwin.h`（`_hoverTable`/`_tableRect`）；行列移动命令已存在（`table:row-up`/`table:row-down`/`table:column-leftward`/`table:column-rightward`，见 `structure_controls_darwin.h`）。可仿照块拖动（`beginBlockDragAtPoint:`/`updateDragTargetAtPoint:`/`commitBlockDrag`）实现行/列手柄与插入线，测试用直接桥驱动。
 2. ~~导出面板~~（已完成）：格式卡片模态在 `views/export.go`，回调 `OnExportHTML`/`OnExportPandoc` 已在 `main.go` 接线；截图测试 `TestExportShot`。
 3. ~~图片替换~~（已完成）：pill 第三个图标 → `NSOpenPanel` → `replaceImageAtLocation:withURL:`（保留 alt/标题/尺寸后缀，baseDir 内写相对路径）。同时修复了悬停控件的真实点击接线（`mouseDown` 现在分发图片 pill、表格 +/-、语言标签）。
-4. **侧栏键盘导航**：`views/notes.go` 的列表与 `App.SelNote`；用 `OverlayShortcut` 处理 ↑↓/回车，注意不要从原生编辑器抢焦点。
+4. ~~侧栏键盘导航~~（已完成）：`views/notes.go` 的 `moveNoteSelection`；注意 `OverlayShortcut` 只对 overlay 生效，侧栏用的是元素级 `Shortcut`（子树聚焦时才触发）。
 5. **每代码块行号**：需要可持久化的 Markdown 扩展（fence info 或文档元数据），涉及 `internal/mdext` 解析与 `nativerich` 代码块渲染；若不想扩展语法，保持全局开关即可。
 6. **查找替换核查**：`ShowFindBar` 使用 `NSTextView` 自带查找条；确认是否提供替换，若缺失再考虑自绘面板。
 7. **脚注卡片加交互入口**：卡片目前忽略鼠标事件；可考虑让卡片可点击（「跳到定义」链接样式文本），需把卡片面板改为可接受鼠标移动/点击且不抢焦点。

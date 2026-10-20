@@ -15,7 +15,9 @@ no JavaScript. Go draws the shell on the GPU; macOS uses an AppKit
 
 - **Document library and editing workspace** — folders and a
   document list grouped by modification date in the sidebar, with an editor
-  showing the document's modification date and an optional outline
+  showing the document's modification date and an optional outline; the list
+  is keyboard-driven like Apple Notes: arrows walk it while a row or the
+  search field has the focus, and Return hands the found note to the editor
 - **Native WYSIWYG on macOS** — edit headings, body text, inline styles and
   checklists directly, with native selection, clipboard and undo/redo. Documents
   still autosave as Markdown files. Requires a cgo-enabled macOS build.
@@ -160,7 +162,8 @@ JavaScript。Go 在 GPU 上绘制外壳，macOS 编辑区使用 AppKit 原生富
 ### 功能
 
 - **文档库与编辑工作区**：侧栏提供文件夹和按修改日期分组的文档列表，
-  编辑区显示文档修改时间，并可开启大纲
+  编辑区显示文档修改时间，并可开启大纲；列表对齐 Apple Notes 的键盘操作：
+  列表行或搜索框聚焦时 ↑↓ 遍历文档（循环），回车把焦点交给编辑器
 - **macOS 原生所见即所得**：直接编辑标题、正文、文字格式和任务清单，
   使用原生选区、剪贴板和撤销重做，自动保存为 Markdown 文件。需启用 cgo。
 - **源码和阅读视图**：`Cmd+E` 切换富文本 / Markdown 源码；文档菜单
