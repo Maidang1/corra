@@ -26,10 +26,6 @@ func (v *View) quickCommandList() []quickCommand {
 	if v.themeIsDark() {
 		themeIcon = iconSun
 	}
-	exportPDF := v.OnExportPDF
-	if exportPDF == nil {
-		exportPDF = func() {}
-	}
 	return []quickCommand{
 		{"新建文档", "⌘N", iconCompose, "new note create", v.NewNoteAction},
 		{"新建文件夹…", "⇧⌘N", iconFolder, "new folder", v.NewFolderAction},
@@ -43,7 +39,7 @@ func (v *View) quickCommandList() []quickCommand {
 		{"查找…", "⌘F", iconSearch, "find search", v.FindAction},
 		{"复制 Markdown", "", iconDoc, "copy markdown", v.CopyMarkdown},
 		{"复制 HTML", "", iconCode, "copy html", v.CopyHTML},
-		{"导出 PDF…", "", iconShare, "export pdf", exportPDF},
+		{"导出…", "", iconShare, "export pdf html word pandoc", v.OpenExport},
 		{"切换文稿 / 源码", "", iconCode, "mode source rich toggle", v.ToggleModeAction},
 		{"切换主题", "", themeIcon, "theme dark light appearance", v.toggleTheme},
 		{"打开设置…", "⌘,", iconGear, "settings preferences", v.OpenSettings},

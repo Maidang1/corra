@@ -69,6 +69,9 @@ type View struct {
 	// Settings modal (preferences: appearance, fonts, writing aids).
 	SettingsOpen bool
 
+	// Export panel: one card per output format (PDF, HTML, pandoc).
+	ExportOpen bool
+
 	// Quick switcher (Cmd+Shift+P): filter the library by title or path.
 	QuickOpen  bool
 	QuickQuery string
@@ -90,6 +93,11 @@ type View struct {
 	OnSaveSettings    func()
 	OnOpenRecent      func(path string)
 	OnExportPDF       func()
+	OnExportHTML      func()
+	OnExportPandoc    func(label, ext, pandocArg string)
+	// PandocPath resolves the pandoc binary for the export panel; nil falls
+	// back to app.PandocPath. Tests stub it for a deterministic panel.
+	PandocPath func() string
 	OnCopyHTML        func() ([]byte, error)
 	OnSave            func() bool
 	OnOpen            func()
@@ -174,6 +182,9 @@ func (v *View) Build(c *ui.Context) {
 	}
 	if v.SettingsOpen {
 		v.settingsDialog(c)
+	}
+	if v.ExportOpen {
+		v.exportDialog(c)
 	}
 	if v.FolderDialog != "" {
 		v.folderDialog(c)

@@ -382,9 +382,14 @@ func TestAttachmentAndExportCallbacks(t *testing.T) {
 		t.Fatal("attachment callback not invoked")
 	}
 	click(t, tt, "共享与导出")
-	if err := tt.ChooseMenuItem("导出 PDF…"); err != nil {
+	if err := tt.ChooseMenuItem("导出…"); err != nil {
 		t.Fatal(err)
 	}
+	tt.Frame()
+	if !v.ExportOpen {
+		t.Fatal("share menu did not open the export panel")
+	}
+	click(t, tt, "导出 PDF 文档 (.pdf)")
 	if exported != v.App.Source {
 		t.Fatal("export did not receive current source")
 	}

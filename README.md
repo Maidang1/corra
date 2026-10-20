@@ -43,9 +43,11 @@ no JavaScript. Go draws the shell on the GPU; macOS uses an AppKit
   GitHub repo via the Contents API; a CDN link (jsDelivr by default,
   configurable) is inserted. The token never leaves your machine (0600
   file)
-- **Export PDF / HTML / Word…** — PDF embeds document images and honors
-  page-break markers; HTML is standalone with KaTeX/mermaid CDN; docx/EPUB/
-  LaTeX/RTF/ODT and imports run through pandoc when it is installed
+- **Export PDF / HTML / Word…** — the share menu and command palette open an
+  export panel with one described card per format; PDF embeds document
+  images and honors page-break markers; HTML is standalone with
+  KaTeX/mermaid CDN; docx/EPUB/LaTeX/RTF/ODT and imports run through pandoc
+  when it is installed (the panel says how to install it otherwise)
 - **Copy as HTML / Markdown**, smart paste from web pages (HTML → Markdown)
 - **Quick open / command palette** — `⌘⇧P` filters the library by title,
   folder or path; an empty query groups recently opened notes above the rest;
@@ -177,9 +179,10 @@ JavaScript。Go 在 GPU 上绘制外壳，macOS 编辑区使用 AppKit 原生富
   的 `assets/` 文件夹
 - **GitHub 图床**：插入图片即通过 Contents API 上传到指定仓库并回插
   CDN 链接（默认 jsDelivr，可自定义反代）；token 只存本机（0600 权限）
-- **导出 PDF / HTML / Word 等**：PDF 嵌入正文图片并支持分页符；HTML 为
-  独立页面（KaTeX/mermaid CDN）；docx/EPUB/LaTeX/RTF/ODT 与反向导入
-  经由 pandoc（检测到才可用）
+- **导出 PDF / HTML / Word 等**：分享菜单与命令面板打开导出面板，每种格式
+  一张说明卡片；PDF 嵌入正文图片并支持分页符；HTML 为独立页面
+  （KaTeX/mermaid CDN）；docx/EPUB/LaTeX/RTF/ODT 与反向导入经由 pandoc
+  （未安装时面板会给出安装提示）
 - **复制为 HTML / Markdown**，网页智能粘贴（HTML → Markdown）
 - **快速打开 / 命令面板**：`⌘⇧P` 按标题/文件夹/路径即时筛选文档，空查询时
   顶部按「最近打开 / 全部文档」分组；输入 `>`

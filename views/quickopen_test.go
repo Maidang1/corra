@@ -100,20 +100,19 @@ func TestQuickOpenCommands(t *testing.T) {
 
 func TestQuickOpenCommandExport(t *testing.T) {
 	v, tt := notesFixture(t)
-	called := false
-	v.OnExportPDF = func() { called = true }
 	v.QuickOpenAction()
 	tt.Frame()
 	tt.Type(">导出")
 	tt.Frame()
 	tt.Key(0, ui.KeyEnter)
 	tt.Frame()
-	if !called {
-		t.Fatal("export command did not run")
+	if !v.ExportOpen {
+		t.Fatal("export command did not open the panel")
 	}
 	if v.QuickOpen {
 		t.Fatal("palette stayed open after export")
 	}
+	v.ExportOpen = false
 
 	// A query without a command shows the empty state.
 	v.QuickOpenAction()

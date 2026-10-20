@@ -70,10 +70,8 @@ func (v *View) header(c *ui.Context) {
 						c.Services().WriteClipboard(v.App.Source)
 					}
 				}
-				if m.Item("导出 PDF…").Disabled(v.OnExportPDF == nil).Chosen() {
-					if v.syncEditor() {
-						v.OnExportPDF()
-					}
+				if m.Item("导出…").Chosen() {
+					v.OpenExport()
 				}
 			})
 			iconButton(c, iconEllipsis, "文档选项", nil).Menu(func(m *ui.Menu) {

@@ -130,7 +130,7 @@ CGO_ENABLED=1 go vet ./...
 ## 6. 建议的下一步（可直接开工）
 
 1. **表格行列拖拽排序**：表格矩形与悬停状态已在 `hover_controls_darwin.h`（`_hoverTable`/`_tableRect`）；行列移动命令已存在（`table:row-up`/`table:row-down`/`table:column-leftward`/`table:column-rightward`，见 `structure_controls_darwin.h`）。可仿照块拖动（`beginBlockDragAtPoint:`/`updateDragTargetAtPoint:`/`commitBlockDrag`）实现行/列手柄与插入线，测试用直接桥驱动。
-2. **导出面板**：现有导出在 `menu.go` 的 `exportSub`（PDF/HTML/Pandoc），执行在 `app/file.go` 的 `fileOps`。给 `views` 增加 `OnExportHTML`/`OnExportPandoc` 回调并在 `main.go` 接线，做一个格式卡片式模态（说明 + 按钮），复用 `ui.Modal`。
+2. ~~导出面板~~（已完成）：格式卡片模态在 `views/export.go`，回调 `OnExportHTML`/`OnExportPandoc` 已在 `main.go` 接线；截图测试 `TestExportShot`。
 3. **图片替换**：图片 pill 已有复制/删除（`_imageCopyRect`/`_imageDeleteRect`、`copyImageAtHover`/`deleteImageAtHover`）；附件是 `NSTextAttachment`（`.image`，属性 `CRImageURL`/`CRImageSource`），可加替换按钮 → `NSOpenPanel` → 更新 URL 并用 `imageAttachmentForURL:` 重载；测试用「给定路径」桥绕过面板。
 4. **侧栏键盘导航**：`views/notes.go` 的列表与 `App.SelNote`；用 `OverlayShortcut` 处理 ↑↓/回车，注意不要从原生编辑器抢焦点。
 5. **每代码块行号**：需要可持久化的 Markdown 扩展（fence info 或文档元数据），涉及 `internal/mdext` 解析与 `nativerich` 代码块渲染；若不想扩展语法，保持全局开关即可。

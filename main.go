@@ -78,6 +78,16 @@ func main() {
 				fileOps.ExportPDF(exportPDF)
 			}
 		}
+		view.OnExportHTML = func() {
+			if view.SyncBuffer() {
+				fileOps.ExportHTML(exportHTML)
+			}
+		}
+		view.OnExportPandoc = func(label, ext, pandocArg string) {
+			if view.SyncBuffer() {
+				fileOps.ExportPandoc(label, ext, pandocArg)
+			}
+		}
 		view.OnSave = func() bool {
 			return view.FlushAutosave()
 		}
