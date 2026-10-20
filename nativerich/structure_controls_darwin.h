@@ -11,6 +11,7 @@
     if (modifiers==(NSEventModifierFlagCommand|NSEventModifierFlagOption) && ([@[@"\uf700",@"\uf701"] containsObject:key]) && [self.owner footnoteLabelAt:self.selectedRange.location]) {
         [self.owner navigateFootnote:[key isEqual:@"\uf701"] atLocation:self.selectedRange.location]; return YES;
     }
+    if (modifiers==(NSEventModifierFlagCommand|NSEventModifierFlagOption) && [key isEqual:@"\uf702"]) return [self.owner footnoteNavigateBack];
     if (!self.editable) return NO;
     BOOL table=CRCellAt(self.owner,self.selectedRange.location)!=nil;
     if (modifiers==NSEventModifierFlagOption && [key isEqual:@"\r"] && CRList(CRParagraphAt(self.owner,self.selectedRange.location))) {
@@ -63,8 +64,10 @@
 - (void)structuralAction:(NSMenuItem *)item { [self.owner format:item.representedObject]; }
 - (void)footnoteAction:(NSMenuItem *)item {
     NSDictionary *target=item.representedObject;
+    if (self.hasMarkedText || [target[@"revision"] unsignedIntegerValue]!=self.owner.documentRevision) return;
+    if ([target[@"command"] isEqual:@"footnote:back"]) { [self.owner footnoteNavigateBack]; return; }
     NSUInteger location=[target[@"location"] unsignedIntegerValue];
-    if (self.hasMarkedText || [target[@"revision"] unsignedIntegerValue]!=self.owner.documentRevision || ![[self.owner footnoteLabelAt:location] isEqual:target[@"label"]]) return;
+    if (![[self.owner footnoteLabelAt:location] isEqual:target[@"label"]]) return;
     [self.owner navigateFootnote:[target[@"command"] isEqual:@"footnote:definition"] atLocation:location];
 }
 - (void)codeLanguageAction:(NSMenuItem *)item {
@@ -175,6 +178,11 @@
             NSMenuItem *item=[[NSMenuItem alloc] initWithTitle:entry[0] action:@selector(footnoteAction:) keyEquivalent:@""];
             item.target=self; item.representedObject=@{@"command":entry[1],@"location":@(location),@"revision":@(self.owner.documentRevision),@"label":footnote};
             [menu addItem:item];
+        }
+        if ([self.owner footnoteCanNavigateBack]) {
+            NSMenuItem *back=[[NSMenuItem alloc] initWithTitle:@"返回跳转前位置" action:@selector(footnoteAction:) keyEquivalent:@""];
+            back.target=self; back.representedObject=@{@"command":@"footnote:back",@"revision":@(self.owner.documentRevision)};
+            [menu addItem:back];
         }
     }
     if (CRKind(CRParagraphAt(self.owner,location),@"code")) {

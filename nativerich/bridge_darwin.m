@@ -109,6 +109,7 @@ extern char *cr_render_math_document(uintptr_t handle, const char *document, int
     NSRange _linkQuery;
     NSPanel *_formatPanel;
     CRFormatBarView *_formatView;
+    NSUInteger _footnoteBack; // caret spot the last footnote jump started from; NSNotFound when none
 }
 @property NSScrollView *scroll;
 @property CRTextView *text;
@@ -152,6 +153,9 @@ extern char *cr_render_math_document(uintptr_t handle, const char *document, int
 - (NSAttributedString *)footnote:(NSDictionary *)run attributes:(NSDictionary *)attrs;
 - (void)refreshFootnotes;
 - (void)navigateFootnote:(BOOL)definition atLocation:(NSUInteger)location;
+- (void)clearFootnoteBack;
+- (BOOL)footnoteCanNavigateBack;
+- (BOOL)footnoteNavigateBack;
 - (void)insertFootnote;
 - (NSString *)footnoteLabelAt:(NSUInteger)location;
 - (BOOL)allowFootnoteRange:(NSRange)range;
@@ -1414,6 +1418,7 @@ static BOOL CRFootnoteAreaStart(CREditor *e, NSUInteger at) {
     if ([command isEqual:@"footnote:definition"] || [command isEqual:@"footnote:reference"]) {
         [self navigateFootnote:[command isEqual:@"footnote:definition"] atLocation:_text.selectedRange.location]; return;
     }
+    if ([command isEqual:@"footnote:back"]) { [self footnoteNavigateBack]; return; }
     if ([command hasPrefix:@"code-line-numbers:"]) {
         BOOL enabled=[[command substringFromIndex:18] boolValue];
         if (_codeLineNumbers!=enabled) { _codeLineNumbers=enabled; [self restyle]; }
@@ -3078,8 +3083,8 @@ uintptr_t cr_new(uintptr_t window, uintptr_t callback) {
     [e restyle];
     return (uintptr_t)(__bridge_retained void *)e;
 }
-void cr_close(uintptr_t ptr) { CREditor *e=(__bridge_transfer CREditor *)(void *)ptr; [e slashClose]; [e emojiMenuClose]; [e linkMenuClose]; [e formatBarHide]; [e.text clearHover]; [e.text clearDrag]; [e.text closeFootnoteCard]; e.callback=0; e.text.delegate=nil; [e.scroll removeFromSuperview]; [e.undo removeAllActions]; }
-void cr_load(uintptr_t ptr,const char *json) { CREditor *e=CRE(ptr); [e slashClose]; [e emojiMenuClose]; [e linkMenuClose]; [e formatBarHide]; [e.text clearHover]; [e.text clearDrag]; e.documentRevision++; e.suppress=YES; e.tocSignature=nil; e.mathSignature=nil; NSAttributedString *value=[e attributedDocument:CRJSON(json)]; [e.text.textStorage setAttributedString:value]; e.text.selectedRange=NSMakeRange(0,0); e.text.typingAttributes=@{CRParagraph: value.length ? [value attribute:CRParagraph atIndex:0 effectiveRange:NULL] : e.emptyParagraph ?: CRBody()}; [e.undo removeAllActions]; e.suppress=NO; [e restyle]; [e refreshMath]; [e refreshTOC]; }
+void cr_close(uintptr_t ptr) { CREditor *e=(__bridge_transfer CREditor *)(void *)ptr; [e slashClose]; [e emojiMenuClose]; [e linkMenuClose]; [e formatBarHide]; [e.text clearHover]; [e.text clearDrag]; [e.text closeFootnoteCard]; [e clearFootnoteBack]; e.callback=0; e.text.delegate=nil; [e.scroll removeFromSuperview]; [e.undo removeAllActions]; }
+void cr_load(uintptr_t ptr,const char *json) { CREditor *e=CRE(ptr); [e slashClose]; [e emojiMenuClose]; [e linkMenuClose]; [e formatBarHide]; [e.text clearHover]; [e.text clearDrag]; [e clearFootnoteBack]; e.documentRevision++; e.suppress=YES; e.tocSignature=nil; e.mathSignature=nil; NSAttributedString *value=[e attributedDocument:CRJSON(json)]; [e.text.textStorage setAttributedString:value]; e.text.selectedRange=NSMakeRange(0,0); e.text.typingAttributes=@{CRParagraph: value.length ? [value attribute:CRParagraph atIndex:0 effectiveRange:NULL] : e.emptyParagraph ?: CRBody()}; [e.undo removeAllActions]; e.suppress=NO; [e restyle]; [e refreshMath]; [e refreshTOC]; }
 char *cr_snapshot(uintptr_t ptr,int *marked) { CREditor *e=CRE(ptr); *marked=e.text.hasMarkedText; if (*marked) return NULL; NSData *data=[NSJSONSerialization dataWithJSONObject:[e document] options:0 error:NULL]; if (!data) return NULL; return strdup([[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding].UTF8String); }
 void cr_format(uintptr_t ptr,const char *command) { [CRE(ptr) format:[NSString stringWithUTF8String:command]]; }
 void cr_insert(uintptr_t ptr,const char *json) {
@@ -3460,7 +3465,8 @@ void cr_test_action(uintptr_t ptr,const char *action,const char *text) {
         } else if ([s isEqual:@"cmd-shift-backspace"]) {
             characters=@"\x7f"; flags=NSEventModifierFlagCommand|NSEventModifierFlagShift;
         }
-        if ([s hasPrefix:@"footnote-"]) { characters=[s hasSuffix:@"down"] ? @"\uf701" : @"\uf700"; flags=NSEventModifierFlagCommand|NSEventModifierFlagOption; }
+        if ([s isEqual:@"footnote-back"]) { characters=@"\uf702"; flags=NSEventModifierFlagCommand|NSEventModifierFlagOption; }
+        else if ([s hasPrefix:@"footnote-"]) { characters=[s hasSuffix:@"down"] ? @"\uf701" : @"\uf700"; flags=NSEventModifierFlagCommand|NSEventModifierFlagOption; }
         if ([s containsString:@"shift"]) flags |= NSEventModifierFlagShift;
         // plain-* sends an unmodified key, the way a writer presses it.
         if ([s hasPrefix:@"plain-"]) {

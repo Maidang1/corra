@@ -485,6 +485,58 @@ func TestNativeFootnoteKeyboardNavigationAndTypingRules(t *testing.T) {
 	})
 }
 
+func TestNativeFootnoteBackNavigationTogglesAndExpires(t *testing.T) {
+	nativeTestMain(func() {
+		window := nativeTestWindow()
+		defer nativeTestCloseWindow(window)
+		e := New(window, nil, nil)
+		defer e.Close()
+		e.Load("A[^x] B[^x].\n\n[^x]: note")
+		state := readNativeFootnotes(t, e)
+		if len(state.References) != 2 || len(state.Definitions) != 1 {
+			t.Errorf("missing footnotes: %+v", state)
+			return
+		}
+		origin := state.References[1].Location
+		// Jump from the second reference; ⌘⌥← must land back on it, while
+		// footnote:reference would have gone to the first reference.
+		nativeTestSelect(e, origin, 0)
+		nativeTestAction(e, "key", "footnote-down")
+		if location, _ := nativeTestSelection(e); location != state.Definitions[0].Location {
+			t.Errorf("definition navigation: %d", location)
+		}
+		nativeTestAction(e, "key", "footnote-back")
+		if location, _ := nativeTestSelection(e); location != origin {
+			t.Errorf("back did not return to the jump origin: %d want %d", location, origin)
+		}
+		// The jump target became the new return point: ⌘⌥← toggles.
+		nativeTestAction(e, "key", "footnote-back")
+		if location, _ := nativeTestSelection(e); location != state.Definitions[0].Location {
+			t.Errorf("back did not toggle to the definition: %d", location)
+		}
+		// The context menu offers the same jump while a return point exists.
+		nativeTestAction(e, "context", "footnote:back")
+		if location, _ := nativeTestSelection(e); location != origin {
+			t.Errorf("context back navigation: %d want %d", location, origin)
+		}
+		// Format commands reach the same path.
+		nativeTestAction(e, "key", "footnote-down")
+		e.Format("footnote:back")
+		if location, _ := nativeTestSelection(e); location != origin {
+			t.Errorf("format back navigation: %d want %d", location, origin)
+		}
+		// A fresh document drops the stale return point without moving text.
+		e.Load("plain text")
+		nativeTestAction(e, "key", "footnote-back")
+		if location, _ := nativeTestSelection(e); location != 0 {
+			t.Errorf("stale back location survived load: %d", location)
+		}
+		if got, _, _ := e.Snapshot(); got != "plain text" {
+			t.Errorf("back changed source: %q", got)
+		}
+	})
+}
+
 func TestNativeFootnoteBoundaryDeletionAndWholeRemoval(t *testing.T) {
 	nativeTestMain(func() {
 		window := nativeTestWindow()

@@ -39,6 +39,7 @@ func (v *View) quickCommandList() []quickCommand {
 		{"插入任务列表", "⇧⌘L", iconChecklist, "task todo list insert",
 			func() { v.InsertMarkdown("\n- [ ] ") }},
 		{"插入脚注", "⌥⌘F", iconDoc, "footnote insert", v.InsertFootnote},
+		{"返回脚注跳转位置", "⌘⌥←", iconDoc, "footnote back return jump", v.FootnoteBackAction},
 		{"查找…", "⌘F", iconSearch, "find search", v.FindAction},
 		{"复制 Markdown", "", iconDoc, "copy markdown", v.CopyMarkdown},
 		{"复制 HTML", "", iconCode, "copy html", v.CopyHTML},

@@ -70,6 +70,15 @@ func (v *View) CopyHTML() {
 	)))
 }
 
+// FootnoteBackAction returns the caret to where the last footnote jump
+// started; running it again toggles back. Rich mode only.
+func (v *View) FootnoteBackAction() {
+	if v.rich == nil || v.App.Mode != app.ModeRich {
+		return
+	}
+	v.rich.Format("footnote:back")
+}
+
 // InsertFootnote adds a footnote reference at the caret and its definition
 // at the end of the document, like Typora's footnote insertion.
 func (v *View) InsertFootnote() {

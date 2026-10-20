@@ -123,7 +123,7 @@ CGO_ENABLED=1 go vet ./...
 - 表情目录是约 120 个精选 shortcode，非全量 Unicode。
 - 链接补全只检索「可见文档」（受侧栏筛选/回收站影响）。
 - 表格行列移动目前只通过右键菜单，没有拖拽手柄。
-- 脚注卡片仅展示（忽略鼠标事件），没有「返回引用」入口。
+- 脚注卡片仅展示（忽略鼠标事件）；返回引用走 `⌘⌥←`、右键「返回跳转前位置」或命令面板。
 - 代码行号是全局开关，没有每块独立开关。
 
 ## 6. 建议的下一步（可直接开工）
@@ -131,10 +131,10 @@ CGO_ENABLED=1 go vet ./...
 1. **表格行列拖拽排序**：表格矩形与悬停状态已在 `hover_controls_darwin.h`（`_hoverTable`/`_tableRect`）；行列移动命令已存在（`table:row-up`/`table:row-down`/`table:column-leftward`/`table:column-rightward`，见 `structure_controls_darwin.h`）。可仿照块拖动（`beginBlockDragAtPoint:`/`updateDragTargetAtPoint:`/`commitBlockDrag`）实现行/列手柄与插入线，测试用直接桥驱动。
 2. **导出面板**：现有导出在 `menu.go` 的 `exportSub`（PDF/HTML/Pandoc），执行在 `app/file.go` 的 `fileOps`。给 `views` 增加 `OnExportHTML`/`OnExportPandoc` 回调并在 `main.go` 接线，做一个格式卡片式模态（说明 + 按钮），复用 `ui.Modal`。
 3. **图片替换**：图片 pill 已有复制/删除（`_imageCopyRect`/`_imageDeleteRect`、`copyImageAtHover`/`deleteImageAtHover`）；附件是 `NSTextAttachment`（`.image`，属性 `CRImageURL`/`CRImageSource`），可加替换按钮 → `NSOpenPanel` → 更新 URL 并用 `imageAttachmentForURL:` 重载；测试用「给定路径」桥绕过面板。
-4. **脚注返回引用**：`footnote_darwin.h` 的 `navigateFootnote:` 已能跳转；记录跳转前的引用位置，加 `⌘⌥←` 或引用卡片上的「返回」按钮。
-5. **侧栏键盘导航**：`views/notes.go` 的列表与 `App.SelNote`；用 `OverlayShortcut` 处理 ↑↓/回车，注意不要从原生编辑器抢焦点。
-6. **每代码块行号**：需要可持久化的 Markdown 扩展（fence info 或文档元数据），涉及 `internal/mdext` 解析与 `nativerich` 代码块渲染；若不想扩展语法，保持全局开关即可。
-7. **查找替换核查**：`ShowFindBar` 使用 `NSTextView` 自带查找条；确认是否提供替换，若缺失再考虑自绘面板。
+4. **侧栏键盘导航**：`views/notes.go` 的列表与 `App.SelNote`；用 `OverlayShortcut` 处理 ↑↓/回车，注意不要从原生编辑器抢焦点。
+5. **每代码块行号**：需要可持久化的 Markdown 扩展（fence info 或文档元数据），涉及 `internal/mdext` 解析与 `nativerich` 代码块渲染；若不想扩展语法，保持全局开关即可。
+6. **查找替换核查**：`ShowFindBar` 使用 `NSTextView` 自带查找条；确认是否提供替换，若缺失再考虑自绘面板。
+7. **脚注卡片加交互入口**：卡片目前忽略鼠标事件；可考虑让卡片可点击（「跳到定义」链接样式文本），需把卡片面板改为可接受鼠标移动/点击且不抢焦点。
 
 ## 7. 协作约定
 
