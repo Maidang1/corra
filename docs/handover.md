@@ -5,7 +5,7 @@
 ## 0. 一分钟上手
 
 - 项目：Corra，Go + MyGo 的 macOS 原生 Markdown 桌面编辑器；富文本编辑区是 AppKit `NSTextView`，经 cgo 嵌入（`nativerich/`），**没有 WebView**。
-- 当前分支：`codex/native-rich-editor`；最新提交 `e0b8d95`（功能：脚注返回导航）；工作区干净。
+- 当前分支：`codex/native-rich-editor`；最新提交 `afc5c34`（功能：导出面板）；工作区干净。
 - 环境：macOS + Xcode Command Line Tools、Go 1.27.1、cgo 必须开启。
 - 跑应用：`make dev`（macOS 自动开启 cgo）；打包：`make build`。
 - 跑测试（提交前必跑）：
@@ -115,6 +115,7 @@ CGO_ENABLED=1 go vet ./...
 - 表格悬停加行/加列；图片尺寸/复制/删除。
 - 快速打开（文档搜索、最近打开分组、↑↓ 选择）与 `>` 命令面板（17 个动作）。
 - 脚注返回导航（`e0b8d95`）：`⌘⌥←` 回到跳转起点（toggle）、右键「返回跳转前位置」、命令面板入口；`cr_load`/`cr_close` 清除返回点。
+- 导出面板（`afc5c34`）：`views/export.go` 格式卡片模态；`OnExportHTML`/`OnExportPandoc` 回调；`View.PandocPath` 可注入（测试确定性）；截图 `TestExportShot`。
 - 状态栏文档统计条（字数/字符/行/标题/链接/图片/任务/代码块/阅读时间）。
 - 测试与截图脚本；`docs/work-summary.md` 有完整功能与架构总结。
 
