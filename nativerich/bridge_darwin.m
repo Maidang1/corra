@@ -39,15 +39,77 @@ static NSString *const CRFootnoteFigureSource = @"CorraFootnoteFigureSource";
 static NSString *const CROwnPaste = @"app.corra.rich-document";
 // Go-side handlers for parity features (cgo exports, main thread only).
 extern char *cr_emoji(const char *word);
+extern char *cr_emoji_search(const char *query);
+extern char *cr_link_candidates(uintptr_t handle, const char *query);
 extern char *cr_paste_image(uintptr_t handle, const char *pngBase64, const char *name);
 extern char *cr_drop_files(uintptr_t handle, const char *pathsJSON);
 extern char *cr_html_to_markdown(const char *html);
 extern char *cr_render_math_document(uintptr_t handle, const char *document, int dark, double zoom, const char *numbering);
 @class CREditor;
-@interface CRTextView : NSTextView
+@class CRSlashMenuView;
+@class CRFormatBarView;
+@class CRFootnoteCardView;
+@class CREmojiMenuView;
+@class CRLinkMenuView;
+@interface CRTextView : NSTextView {
+    NSRange _hoverCodeBlock;
+    NSRect _hoverCodeChip;
+    NSRect _copyRect;
+    NSRange _hoverBlock;
+    NSRect _handleRect;
+    NSPoint _hoverPoint;
+    BOOL _copied;
+    NSUInteger _copyToken;
+    NSRange _dragSource;
+    NSInteger _dragInsertion;
+    BOOL _dragActive;
+    NSRange _languageRange;
+    NSRect _languageRect;
+    NSRange _hoverImage;
+    NSRect _imagePill;
+    NSArray *_imageButtons;
+    NSRect _imageCopyRect;
+    NSRect _imageDeleteRect;
+    NSPanel *_footnotePanel;
+    CRFootnoteCardView *_footnoteCard;
+    NSString *_footnoteLabel;
+    NSRect _footnoteRect;
+    NSString *_hoverFootnote;
+    NSTextTable *_hoverTable;
+    NSRect _tableRect;
+    NSArray *_tableButtons;
+    NSTrackingArea *_hoverTracking;
+}
 @property(nonatomic, weak) CREditor *owner;
+- (void)clearHover;
+- (void)clearDrag;
+- (BOOL)copyImageAtHover;
+- (BOOL)deleteImageAtHover;
+- (void)hideFootnoteCard;
+- (void)closeFootnoteCard;
+- (NSDictionary *)footnoteCardState;
+- (BOOL)footnoteCardSnapshotTo:(NSString *)path;
+- (void)pickCodeLanguage:(NSMenuItem *)item;
 @end
-@interface CREditor : NSObject <NSTextViewDelegate>
+@interface CREditor : NSObject <NSTextViewDelegate> {
+    NSPanel *_slashPanel;
+    CRSlashMenuView *_slashView;
+    NSArray *_slashItems;
+    NSString *_slashFilter;
+    NSInteger _slashSelected;
+    NSPanel *_emojiPanel;
+    CREmojiMenuView *_emojiView;
+    NSString *_emojiFilter;
+    NSInteger _emojiSelected;
+    NSRange _emojiQuery;
+    NSPanel *_linkPanel;
+    CRLinkMenuView *_linkView;
+    NSString *_linkFilter;
+    NSInteger _linkSelected;
+    NSRange _linkQuery;
+    NSPanel *_formatPanel;
+    CRFormatBarView *_formatView;
+}
 @property NSScrollView *scroll;
 @property CRTextView *text;
 @property NSUndoManager *undo;
@@ -100,6 +162,43 @@ extern char *cr_render_math_document(uintptr_t handle, const char *document, int
 - (void)source;
 - (BOOL)allowRange:(NSRange)range;
 - (void)format:(NSString *)command;
+- (void)slashQueryChanged;
+- (BOOL)slashHandleKey:(NSEvent *)event;
+- (void)slashClose;
+- (void)slashChoose:(NSDictionary *)item;
+- (void)slashChooseIndex:(NSInteger)index;
+- (void)emojiMenuQueryChanged;
+- (BOOL)emojiMenuHandleKey:(NSEvent *)event;
+- (void)emojiMenuClose;
+- (void)emojiMenuChoose:(NSDictionary *)item;
+- (void)emojiMenuChooseIndex:(NSInteger)index;
+- (void)emojiMenuParentChanged:(NSNotification *)note;
+- (NSString *)emojiMenuFilterText;
+- (NSDictionary *)emojiMenuState;
+- (void)linkMenuQueryChanged;
+- (BOOL)linkMenuHandleKey:(NSEvent *)event;
+- (void)linkMenuClose;
+- (void)linkMenuChoose:(NSDictionary *)item;
+- (void)linkMenuChooseIndex:(NSInteger)index;
+- (void)linkMenuParentChanged:(NSNotification *)note;
+- (NSString *)linkMenuFilterText;
+- (BOOL)linkMenuHeadingMode;
+- (NSDictionary *)linkMenuState;
+- (BOOL)emojiMenuSnapshotTo:(NSString *)path;
+- (NSDictionary *)slashState;
+- (NSString *)slashFilterText;
+- (NSDictionary *)codeBlockAt:(NSUInteger)location;
+- (NSRange)structuralBlockRangeAt:(NSUInteger)location;
+- (BOOL)moveBlock:(BOOL)down;
+- (NSArray *)structuralBlocks;
+- (NSRect)blockRectForRange:(NSRange)range;
+- (void)updateFormatBar;
+- (void)formatBarHide;
+- (void)formatBarParentChanged:(NSNotification *)note;
+- (void)formatBarApply:(NSString *)command;
+- (void)formatBarLink:(NSString *)url;
+- (NSDictionary *)formatBarState;
+- (BOOL)formatBarSnapshotTo:(NSString *)path;
 - (void)tableCommand:(NSString *)command;
 - (void)replaceTable:(NSRange)range paragraph:(NSDictionary *)p row:(NSInteger)row column:(NSInteger)column;
 - (BOOL)pasteTableText:(NSString *)text;
@@ -319,6 +418,22 @@ static NSColor *CRMutedColor(BOOL dark) {
                 : [NSColor colorWithWhite:0.40 alpha:1];
 }
 
+// CRTintedSymbol returns an SF Symbol drawn in tint. Template drawing alone
+// ignores the fill color on modern macOS, so the palette configuration does
+// the tinting; macOS 11 falls back to a template image.
+static NSImage *CRTintedSymbol(NSString *name, CGFloat size, NSFontWeight weight, NSColor *tint) {
+    NSImage *symbol = [NSImage imageWithSystemSymbolName:name accessibilityDescription:nil];
+    if (!symbol) return nil;
+    NSImageSymbolConfiguration *config = [NSImageSymbolConfiguration configurationWithPointSize:size weight:weight];
+    if (@available(macOS 12.0, *)) {
+        config = [config configurationByApplyingConfiguration:[NSImageSymbolConfiguration configurationWithHierarchicalColor:tint]];
+        return [symbol imageWithSymbolConfiguration:config];
+    }
+    symbol = [symbol imageWithSymbolConfiguration:config];
+    symbol.template = YES;
+    return symbol;
+}
+
 // CRHlColor maps a chroma token class (see render.Highlight) to a theme color.
 // A one-palette-each-mode scheme keeps the code chip legible without a full
 // theme engine; unknown classes inherit the default source color (nil).
@@ -460,6 +575,14 @@ static BOOL CRHasFootnote(NSDictionary *paragraph) {
     for (NSArray *row in paragraph[@"rows"]) for (NSDictionary *cell in row) for (NSDictionary *run in cell[@"runs"]) if ([run[@"footnote"] length]) return YES;
     return NO;
 }
+
+// The slash menu and format bar panels live at file scope; their editor halves
+// are included inside @implementation CREditor below.
+#include "slash_menu_view_darwin.h"
+#include "format_bar_view_darwin.h"
+#include "footnote_card_view_darwin.h"
+#include "emoji_menu_view_darwin.h"
+#include "link_menu_view_darwin.h"
 
 @implementation CREditor
 - (void)notify { if (!_suppress && _callback) { if (!_text.hasMarkedText) { [self refreshMath]; [self refreshTOC]; } cr_callback(_callback,0); } }
@@ -1165,12 +1288,18 @@ static BOOL CRFootnoteAreaStart(CREditor *e, NSUInteger at) {
     return allowed;
 }
 - (void)textDidChange:(NSNotification *)notification {
+    [_text clearHover];
     if (_suppress) return;
     if (!_text.hasMarkedText) [self normalize];
     if (_typewriter) [self centerCaretLine];
     [self notify];
 }
 - (void)textViewDidChangeSelection:(NSNotification *)notification {
+    [_text clearHover];
+    [self slashQueryChanged];
+    [self emojiMenuQueryChanged];
+    [self linkMenuQueryChanged];
+    [self updateFormatBar];
     [self updateTypingParagraph];
     [self finishDraftGroup];
     [self finishInlineSource:NO];
@@ -1189,6 +1318,10 @@ static BOOL CRFootnoteAreaStart(CREditor *e, NSUInteger at) {
     // editing re-renders to its figure form (a formula/image/code), regardless
     // of where the caret sat inside it.
     if (_suppress || _text.hasMarkedText) return;
+    [self slashClose];
+    [self emojiMenuClose];
+    [self linkMenuClose];
+    [self formatBarHide];
     NSRange group=_draftGroup;
     _draftGroup=NSMakeRange(NSNotFound,0);
     if (group.location!=NSNotFound) [self renderDraftGroup:group];
@@ -1301,6 +1434,10 @@ static BOOL CRFootnoteAreaStart(CREditor *e, NSUInteger at) {
     if ([command isEqual:@"math-refresh"]) { [self refreshAllMath]; return; }
     if (!_text.editable || _text.hasMarkedText) return;
     [self finishInlineSource:YES];
+    if ([command isEqual:@"block-up"]) { [self moveBlock:NO]; return; }
+    if ([command isEqual:@"block-down"]) { [self moveBlock:YES]; return; }
+    if ([command isEqual:@"block-duplicate"]) { [self duplicateBlock]; return; }
+    if ([command isEqual:@"block-delete"]) { [self deleteBlock]; return; }
     if ([command hasPrefix:@"table:"]) { [self tableCommand:command]; return; }
     if ([command hasPrefix:@"insert:"]) { [self insertBlock:[command substringFromIndex:7]]; return; }
     if ([command isEqual:@"list-paragraph"]) { [self continueListParagraph]; return; }
@@ -1434,6 +1571,7 @@ static BOOL CRFootnoteAreaStart(CREditor *e, NSUInteger at) {
     if (newTyping) { _text.typingAttributes=newTyping; _emptyParagraph=newTyping[CRParagraph]; }
     if (!key) [self renumber];
     _suppress=wasSuppress; [self notify];
+    [self updateFormatBar];
 }
 // leaveQuotedList turns a top-level list item inside a quote back into a
 // line of that quote (Enter on an empty item, Backspace at its start).
@@ -1597,6 +1735,11 @@ static BOOL CRFootnoteAreaStart(CREditor *e, NSUInteger at) {
 #include "image_darwin.h"
 #include "toc_darwin.h"
 #include "block_rules_darwin.h"
+#include "slash_menu_darwin.h"
+#include "format_bar_darwin.h"
+#include "block_actions_darwin.h"
+#include "emoji_menu_darwin.h"
+#include "link_menu_darwin.h"
 
 - (BOOL)moveTableCell:(BOOL)backward {
     if (!_text.editable || _text.hasMarkedText) return NO;
@@ -2180,7 +2323,14 @@ static BOOL CRFootnoteAreaStart(CREditor *e, NSUInteger at) {
     if (range.location==NSNotFound || NSEqualRanges(range,self.selectedRange)) {
         if ([self.owner openParagraphBesideFigure]) { effective=self.selectedRange; range=effective; }
     }
-    if ([self.owner autoPair:value range:effective]) return;
+    if ([self.owner autoPair:value range:effective]) {
+        if (!self.owner.suppress && !self.hasMarkedText) {
+            [self.owner slashQueryChanged];
+            [self.owner emojiMenuQueryChanged];
+            [self.owner linkMenuQueryChanged];
+        }
+        return;
+    }
     NSDictionary *destinationParagraph=CRParagraphAt(self.owner,effective.location);
     BOOL wasSuppress=self.owner.suppress;
     if (targetCell) {
@@ -2210,6 +2360,8 @@ static BOOL CRFootnoteAreaStart(CREditor *e, NSUInteger at) {
         if (string.length && [string rangeOfCharacterFromSet:NSCharacterSet.newlineCharacterSet].location==NSNotFound) [self.owner applyInputRules];
     }
     self.owner.suppress=wasSuppress;
+    if (!wasSuppress) [self clearHover];
+    if (!wasSuppress && !self.hasMarkedText) { [self.owner slashQueryChanged]; [self.owner emojiMenuQueryChanged]; [self.owner linkMenuQueryChanged]; }
     if (!wasSuppress) [self.owner notify];
 }
 - (void)insertNewline:(id)sender { [self.owner newline]; }
@@ -2293,6 +2445,7 @@ static BOOL CRFootnoteAreaStart(CREditor *e, NSUInteger at) {
         e.suppress=NO;
         [e normalize]; [e notify];
     } else [super deleteBackward:sender];
+    if (!e.suppress && !self.hasMarkedText) { [e slashQueryChanged]; [e emojiMenuQueryChanged]; [e linkMenuQueryChanged]; }
 }
 - (void)deleteForward:(id)sender {
     if (!self.owner.suppress && ([self.owner deleteSelectedFigure] || [self.owner selectFigureBeside:NO])) return;
@@ -2436,7 +2589,8 @@ static BOOL CRFootnoteAreaStart(CREditor *e, NSUInteger at) {
         if (groupLang.length) {
             NSDictionary *attrs=@{NSFontAttributeName:[NSFont systemFontOfSize:10.5*e.zoom],NSForegroundColorAttributeName:CRMutedColor(e.dark)};
             NSSize size=[groupLang sizeWithAttributes:attrs];
-            [groupLang drawAtPoint:NSMakePoint(NSMaxX(chip)-size.width-10*e.zoom,chip.origin.y+6*e.zoom) withAttributes:attrs];
+            CGFloat hoverShift=_hoverCodeChip.size.height>0 && NSIntersectsRect(chip,_hoverCodeChip) ? 34*e.zoom : 0;
+            [groupLang drawAtPoint:NSMakePoint(NSMaxX(chip)-size.width-10*e.zoom-hoverShift,chip.origin.y+6*e.zoom) withAttributes:attrs];
         }
         groupLang=nil;
     };
@@ -2494,6 +2648,11 @@ static BOOL CRFootnoteAreaStart(CREditor *e, NSUInteger at) {
         [(e.dark ? [NSColor colorWithWhite:1 alpha:0.18] : [NSColor colorWithWhite:0 alpha:0.14]) setFill];
         NSRectFillUsingOperation(NSMakeRect(self.textContainerOrigin.x+inset,y,MIN(180*e.zoom,self.textContainer.size.width/3),1),NSCompositingOperationSourceOver);
     }
+    // Hover affordances paint before the glyphs: NSTextView clips its own
+    // drawing to the text container, which would discard the margin handle and
+    // the table buttons that sit just outside the table.
+    [self drawHoverControls];
+    [self drawTableControls];
     [super drawRect:dirty];
     [e drawAlertTitlesIn:visible];
     [e drawCodeLineNumbers:dirty range:visible];
@@ -2613,10 +2772,19 @@ static BOOL CRFootnoteAreaStart(CREditor *e, NSUInteger at) {
             }
         }
     }
+    // These overlays sit above the text: the image pill covers an attachment
+    // and the insertion line must stay visible over glyphs.
+    [self drawImagePill];
+    [self drawDragOverlay];
 }
 - (void)mouseDown:(NSEvent *)event {
-    if (self.window.firstResponder!=self) self.owner.previousResponder=self.window.firstResponder;
     NSPoint point=[self convertPoint:event.locationInWindow fromView:nil];
+    // The hover affordances sit above the text: their click never becomes a
+    // selection drag or a caret move.
+    [self updateHoverAtPoint:point];
+    if (NSPointInRect(point, _copyRect) && [self copyHoveredCode]) return;
+    if (NSPointInRect(point, _handleRect) && _hoverBlock.location != NSNotFound) { [self beginBlockDragAtPoint:point]; return; }
+    if (self.window.firstResponder!=self) self.owner.previousResponder=self.window.firstResponder;
     NSUInteger index=[self characterIndexForInsertionAtPoint:point];
     // Only the paragraph under the pointer can own a checkbox there.
     NSRange line=[self.string paragraphRangeForRange:NSMakeRange(MIN(index,self.string.length),0)];
@@ -2877,6 +3045,7 @@ static BOOL CRFootnoteAreaStart(CREditor *e, NSUInteger at) {
     return YES;
 }
 #include "structure_controls_darwin.h"
+#include "hover_controls_darwin.h"
 @end
 
 static NSView *CRUnderlyingResponder(NSView *view, NSView *excluded) {
@@ -2909,8 +3078,8 @@ uintptr_t cr_new(uintptr_t window, uintptr_t callback) {
     [e restyle];
     return (uintptr_t)(__bridge_retained void *)e;
 }
-void cr_close(uintptr_t ptr) { CREditor *e=(__bridge_transfer CREditor *)(void *)ptr; e.callback=0; e.text.delegate=nil; [e.scroll removeFromSuperview]; [e.undo removeAllActions]; }
-void cr_load(uintptr_t ptr,const char *json) { CREditor *e=CRE(ptr); e.documentRevision++; e.suppress=YES; e.tocSignature=nil; e.mathSignature=nil; NSAttributedString *value=[e attributedDocument:CRJSON(json)]; [e.text.textStorage setAttributedString:value]; e.text.selectedRange=NSMakeRange(0,0); e.text.typingAttributes=@{CRParagraph: value.length ? [value attribute:CRParagraph atIndex:0 effectiveRange:NULL] : e.emptyParagraph ?: CRBody()}; [e.undo removeAllActions]; e.suppress=NO; [e restyle]; [e refreshMath]; [e refreshTOC]; }
+void cr_close(uintptr_t ptr) { CREditor *e=(__bridge_transfer CREditor *)(void *)ptr; [e slashClose]; [e emojiMenuClose]; [e linkMenuClose]; [e formatBarHide]; [e.text clearHover]; [e.text clearDrag]; [e.text closeFootnoteCard]; e.callback=0; e.text.delegate=nil; [e.scroll removeFromSuperview]; [e.undo removeAllActions]; }
+void cr_load(uintptr_t ptr,const char *json) { CREditor *e=CRE(ptr); [e slashClose]; [e emojiMenuClose]; [e linkMenuClose]; [e formatBarHide]; [e.text clearHover]; [e.text clearDrag]; e.documentRevision++; e.suppress=YES; e.tocSignature=nil; e.mathSignature=nil; NSAttributedString *value=[e attributedDocument:CRJSON(json)]; [e.text.textStorage setAttributedString:value]; e.text.selectedRange=NSMakeRange(0,0); e.text.typingAttributes=@{CRParagraph: value.length ? [value attribute:CRParagraph atIndex:0 effectiveRange:NULL] : e.emptyParagraph ?: CRBody()}; [e.undo removeAllActions]; e.suppress=NO; [e restyle]; [e refreshMath]; [e refreshTOC]; }
 char *cr_snapshot(uintptr_t ptr,int *marked) { CREditor *e=CRE(ptr); *marked=e.text.hasMarkedText; if (*marked) return NULL; NSData *data=[NSJSONSerialization dataWithJSONObject:[e document] options:0 error:NULL]; if (!data) return NULL; return strdup([[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding].UTF8String); }
 void cr_format(uintptr_t ptr,const char *command) { [CRE(ptr) format:[NSString stringWithUTF8String:command]]; }
 void cr_insert(uintptr_t ptr,const char *json) {
@@ -2953,7 +3122,7 @@ static void CRUpdateInset(CREditor *e) {
     if (!NSEqualSizes(e.text.textContainerInset,inset)) e.text.textContainerInset=inset;
 }
 void cr_frame(uintptr_t ptr,double x,double y,double w,double h) { CREditor *e=CRE(ptr); NSView *parent=e.scroll.superview; CGFloat top=parent.isFlipped ? y : parent.bounds.size.height-y-h; NSRect frame=NSMakeRect(x,top,MAX(0,w),MAX(0,h)); if (!NSEqualRects(frame,e.scroll.frame)) { e.scroll.frame=frame; CRUpdateInset(e); } }
-void cr_visible(uintptr_t ptr,int visible) { CREditor *e=CRE(ptr); if (!visible && e.window.firstResponder==e.text) cr_focus(ptr,0); e.scroll.hidden=!visible; }
+void cr_visible(uintptr_t ptr,int visible) { CREditor *e=CRE(ptr); if (!visible) { [e slashClose]; [e formatBarHide]; } if (!visible && e.window.firstResponder==e.text) cr_focus(ptr,0); e.scroll.hidden=!visible; }
 void cr_base_dir(uintptr_t ptr,const char *path) { CRE(ptr).baseDir=[NSString stringWithUTF8String:path]; }
 void cr_font(uintptr_t ptr,const char *body,const char *mono) {
     CREditor *e=CRE(ptr);
@@ -2967,6 +3136,10 @@ void cr_font(uintptr_t ptr,const char *body,const char *mono) {
 void cr_style(uintptr_t ptr,double zoom,int dark,int editable) {
     CREditor *e=CRE(ptr); zoom=MAX(0.5,MIN(3,zoom));
     if (e.zoom==zoom && e.dark==dark && e.text.editable==editable) return;
+    [e slashClose];
+    [e emojiMenuClose];
+    [e linkMenuClose];
+    [e formatBarHide];
     BOOL figures=e.zoom!=zoom || e.dark!=dark;
     e.zoom=zoom; e.dark=dark; e.text.editable=editable;
     CRUpdateInset(e);
@@ -3080,6 +3253,188 @@ char *cr_test_toc(uintptr_t ptr) {
     NSData *json=[NSJSONSerialization dataWithJSONObject:tocs options:0 error:NULL];
     return strdup([[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding].UTF8String);
 }
+// cr_test_slash reports the open state, filter, highlighted row and visible
+// palette entries of the slash menu.
+char *cr_test_slash(uintptr_t ptr) {
+    NSData *json=[NSJSONSerialization dataWithJSONObject:[CRE(ptr) slashState] options:0 error:NULL];
+    NSString *value=json ? [[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding] : nil;
+    return strdup(value.UTF8String ?: "{}");
+}
+int cr_test_slash_shot(uintptr_t ptr,const char *path) {
+    return [CRE(ptr) slashSnapshotTo:[NSString stringWithUTF8String:path]] ? 1 : 0;
+}
+char *cr_test_format_bar(uintptr_t ptr) {
+    NSData *json=[NSJSONSerialization dataWithJSONObject:[CRE(ptr) formatBarState] options:0 error:NULL];
+    NSString *value=json ? [[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding] : nil;
+    return strdup(value.UTF8String ?: "{}");
+}
+int cr_test_image_copy(uintptr_t ptr) {
+    return [CRE(ptr).text copyImageAtHover] ? 1 : 0;
+}
+int cr_test_image_delete(uintptr_t ptr) {
+    return [CRE(ptr).text deleteImageAtHover] ? 1 : 0;
+}
+int cr_test_clipboard_image(void) {
+    NSPasteboard *pasteboard = [NSPasteboard generalPasteboard];
+    return [pasteboard availableTypeFromArray:@[NSPasteboardTypePNG, NSPasteboardTypeTIFF]] ? 1 : 0;
+}
+int cr_test_hover_table(uintptr_t ptr) {
+    CREditor *e=CRE(ptr);
+    __block NSRange cell=NSMakeRange(NSNotFound,0);
+    [e.text.textStorage enumerateAttribute:CRTableCell inRange:NSMakeRange(0,e.text.string.length) options:0 usingBlock:^(id block,NSRange range,BOOL *stop) { if (block) { cell=range; *stop=YES; } }];
+    if (cell.location==NSNotFound) return 0;
+    NSRange glyph=[e.text.layoutManager glyphRangeForCharacterRange:cell actualCharacterRange:NULL];
+    if (!glyph.length) return 0;
+    NSRect rect=[e.text.layoutManager boundingRectForGlyphRange:glyph inTextContainer:e.text.textContainer];
+    rect=NSOffsetRect(rect,e.text.textContainerOrigin.x,e.text.textContainerOrigin.y);
+    [e.text updateHoverAtPoint:NSMakePoint(NSMidX(rect),NSMidY(rect))];
+    return [[e.text hoverState][@"table"] boolValue] ? 1 : 0;
+}
+int cr_test_table_button(uintptr_t ptr,int kind) {
+    return [CRE(ptr).text activateTableControl:kind] ? 1 : 0;
+}
+int cr_test_hover_footnote(uintptr_t ptr) {
+    CREditor *e=CRE(ptr);
+    __block NSRange found=NSMakeRange(NSNotFound,0);
+    [e.text.textStorage enumerateAttribute:CRFootnote inRange:NSMakeRange(0,e.text.string.length) options:0 usingBlock:^(id run,NSRange range,BOOL *stop) { if (run) { found=range; *stop=YES; } }];
+    if (found.location==NSNotFound) return 0;
+    NSRange glyph=[e.text.layoutManager glyphRangeForCharacterRange:found actualCharacterRange:NULL];
+    if (!glyph.length) return 0;
+    NSRect rect=[e.text.layoutManager boundingRectForGlyphRange:glyph inTextContainer:e.text.textContainer];
+    rect=NSOffsetRect(rect,e.text.textContainerOrigin.x,e.text.textContainerOrigin.y);
+    [e.text updateHoverAtPoint:NSMakePoint(NSMidX(rect),NSMidY(rect))];
+    return 1;
+}
+char *cr_test_footnote_card(uintptr_t ptr) {
+    NSData *json=[NSJSONSerialization dataWithJSONObject:[CRE(ptr).text footnoteCardState] options:0 error:NULL];
+    NSString *value=json ? [[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding] : nil;
+    return strdup(value.UTF8String ?: "{}");
+}
+int cr_test_footnote_shot(uintptr_t ptr,const char *path) {
+    return [CRE(ptr).text footnoteCardSnapshotTo:[NSString stringWithUTF8String:path]] ? 1 : 0;
+}
+int cr_test_emoji_shot(uintptr_t ptr,const char *path) {
+    return [CRE(ptr) emojiMenuSnapshotTo:[NSString stringWithUTF8String:path]] ? 1 : 0;
+}
+int cr_test_link_shot(uintptr_t ptr,const char *path) {
+    return [CRE(ptr) linkMenuSnapshotTo:[NSString stringWithUTF8String:path]] ? 1 : 0;
+}
+char *cr_test_link(uintptr_t ptr) {
+    NSData *json=[NSJSONSerialization dataWithJSONObject:[CRE(ptr) linkMenuState] options:0 error:NULL];
+    NSString *value=json ? [[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding] : nil;
+    return strdup(value.UTF8String ?: "{}");
+}
+char *cr_test_emoji(uintptr_t ptr) {
+    NSData *json=[NSJSONSerialization dataWithJSONObject:[CRE(ptr) emojiMenuState] options:0 error:NULL];
+    NSString *value=json ? [[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding] : nil;
+    return strdup(value.UTF8String ?: "{}");
+}
+char *cr_test_hover(uintptr_t ptr) {
+    NSData *json=[NSJSONSerialization dataWithJSONObject:[CRE(ptr).text hoverState] options:0 error:NULL];
+    NSString *value=json ? [[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding] : nil;
+    return strdup(value.UTF8String ?: "{}");
+}
+int cr_test_hover_code(uintptr_t ptr,int activate) {
+    CREditor *e=CRE(ptr);
+    NSDictionary *block=[e codeBlocks].firstObject;
+    if (!block) return 0;
+    NSRect chip=[e.text codeChipRectForBlock:block];
+    if (chip.size.height<=0) return 0;
+    NSPoint point=NSMakePoint(NSMaxX(chip)-19*e.zoom,NSMinY(chip)+16*e.zoom);
+    [e.text updateHoverAtPoint:point];
+    if (activate) return [e.text copyHoveredCode] ? 1 : 0;
+    return [[e.text hoverState][@"copy"] boolValue] ? 1 : 0;
+}
+int cr_test_click_code_text(uintptr_t ptr) {
+    CREditor *e=CRE(ptr);
+    NSDictionary *block=[e codeBlocks].firstObject;
+    if (!block) return 0;
+    NSRect chip=[e.text codeChipRectForBlock:block];
+    if (chip.size.height<=0) return 0;
+    NSPoint point=NSMakePoint(NSMinX(chip)+40*e.zoom,NSMidY(chip));
+    NSPoint windowPoint=[e.text convertPoint:point toView:nil];
+    NSEvent *down=[NSEvent mouseEventWithType:NSEventTypeLeftMouseDown location:windowPoint modifierFlags:0 timestamp:0 windowNumber:e.window.windowNumber context:nil eventNumber:0 clickCount:1 pressure:1];
+    NSEvent *up=[NSEvent mouseEventWithType:NSEventTypeLeftMouseUp location:windowPoint modifierFlags:0 timestamp:0 windowNumber:e.window.windowNumber context:nil eventNumber:1 clickCount:1 pressure:0];
+    [NSApp postEvent:up atStart:YES];
+    [e.text mouseDown:down];
+    NSRange range=[block[@"range"] rangeValue];
+    NSUInteger caret=e.text.selectedRange.location;
+    if (caret<range.location || caret>NSMaxRange(range)) return -1;
+    return (int)caret;
+}
+int cr_test_drag_block(uintptr_t ptr,int fromParagraph,int toParagraph,int after) {
+    CREditor *e=CRE(ptr);
+    NSArray *ranges=CRRanges(e.text.string);
+    if (fromParagraph<0 || toParagraph<0 || fromParagraph>=(NSInteger)ranges.count || toParagraph>=(NSInteger)ranges.count) return 0;
+    NSRange from=[ranges[fromParagraph] rangeValue], to=[ranges[toParagraph] rangeValue];
+    NSPoint handle=NSMakePoint(e.text.textContainerOrigin.x-15*e.zoom,NSMidY([e.text lineRectForCharacter:from.location]));
+    [e.text updateHoverAtPoint:handle];
+    NSRect targetRect=[e blockRectForRange:to];
+    if (targetRect.size.height<=0) targetRect=[e.text lineRectForCharacter:to.location];
+    NSPoint target=NSMakePoint(NSMidX(targetRect),after ? NSMaxY(targetRect)+2 : NSMinY(targetRect)-2);
+    [e.text performTestDragTo:target];
+    return 1;
+}
+int cr_test_hover_image(uintptr_t ptr,int buttonIndex,int activate) {
+    CREditor *e=CRE(ptr);
+    NSArray *figures=[e imageFigureRanges];
+    if (!figures.count) return 0;
+    NSRange range=[[figures firstObject] rangeValue];
+    NSRange content=CRContent(e.text.string,range);
+    NSRange glyph=[e.text.layoutManager glyphRangeForCharacterRange:content actualCharacterRange:NULL];
+    if (!glyph.length) return 0;
+    NSRect rect=[e.text.layoutManager boundingRectForGlyphRange:glyph inTextContainer:e.text.textContainer];
+    rect=NSOffsetRect(rect,e.text.textContainerOrigin.x,e.text.textContainerOrigin.y);
+    [e.text updateHoverAtPoint:NSMakePoint(NSMidX(rect),NSMidY(rect))];
+    if (activate) return [e.text applyImageSizeAtIndex:buttonIndex] ? 1 : 0;
+    return [[e.text hoverState][@"image"] boolValue] ? 1 : 0;
+}
+int cr_test_language_hover(uintptr_t ptr) {
+    CREditor *e=CRE(ptr);
+    NSDictionary *block=[e codeBlocks].firstObject;
+    if (!block) return 0;
+    NSRect chip=[e.text codeChipRectForBlock:block];
+    if (chip.size.height<=0) return 0;
+    [e.text updateHoverAtPoint:NSMakePoint(NSMaxX(chip)-19*e.zoom,NSMinY(chip)+16*e.zoom)];
+    return [[e.text hoverState][@"language"] boolValue] ? 1 : 0;
+}
+int cr_test_language_pick(uintptr_t ptr,const char *language) {
+    CREditor *e=CRE(ptr);
+    NSDictionary *block=[e codeBlocks].firstObject;
+    if (!block) return 0;
+    NSString *name=[NSString stringWithUTF8String:language];
+    NSMenuItem *item=[[NSMenuItem alloc] initWithTitle:name action:NULL keyEquivalent:@""];
+    item.representedObject=@{@"language": name, @"range": block[@"range"]};
+    [e.text pickCodeLanguage:item];
+    return 1;
+}
+int cr_test_drag_preview(uintptr_t ptr,int fromParagraph,int toParagraph,int after) {
+    CREditor *e=CRE(ptr);
+    NSArray *ranges=CRRanges(e.text.string);
+    if (fromParagraph<0 || toParagraph<0 || fromParagraph>=(NSInteger)ranges.count || toParagraph>=(NSInteger)ranges.count) return 0;
+    NSRange from=[ranges[fromParagraph] rangeValue], to=[ranges[toParagraph] rangeValue];
+    NSPoint handle=NSMakePoint(e.text.textContainerOrigin.x-15*e.zoom,NSMidY([e.text lineRectForCharacter:from.location]));
+    [e.text updateHoverAtPoint:handle];
+    NSRect targetRect=[e blockRectForRange:to];
+    if (targetRect.size.height<=0) targetRect=[e.text lineRectForCharacter:to.location];
+    NSPoint target=NSMakePoint(NSMidX(targetRect),after ? NSMaxY(targetRect)+2 : NSMinY(targetRect)-2);
+    [e.text prepareTestDragTo:target];
+    return 1;
+}
+int cr_test_hover_block(uintptr_t ptr,int paragraph,int activate) {
+    CREditor *e=CRE(ptr);
+    NSArray *ranges=CRRanges(e.text.string);
+    if (paragraph<0 || paragraph>=(NSInteger)ranges.count) return 0;
+    NSRange range=[ranges[paragraph] rangeValue];
+    if (!range.length) return 0;
+    NSPoint point=NSMakePoint(e.text.textContainerOrigin.x-15*e.zoom,NSMidY([e.text lineRectForCharacter:range.location]));
+    [e.text updateHoverAtPoint:point];
+    if (activate) return [e.text prepareBlockAtPoint:point] ? 1 : 0;
+    return [[e.text hoverState][@"handle"] boolValue] ? 1 : 0;
+}
+int cr_test_format_bar_shot(uintptr_t ptr,const char *path) {
+    return [CRE(ptr) formatBarSnapshotTo:[NSString stringWithUTF8String:path]] ? 1 : 0;
+}
 void cr_test_action(uintptr_t ptr,const char *action,const char *text) {
     CREditor *e=CRE(ptr); NSString *a=[NSString stringWithUTF8String:action], *s=[NSString stringWithUTF8String:text];
     if ([a isEqual:@"undo"]) { [e.text breakUndoCoalescing]; [e.undo undo]; }
@@ -3096,11 +3451,32 @@ void cr_test_action(uintptr_t ptr,const char *action,const char *text) {
     else if ([a isEqual:@"key"]) {
         NSString *characters=[s hasSuffix:@"return"] ? @"\r" : [s hasSuffix:@"backspace"] ? @"\x7f" : [s hasSuffix:@"left"] ? @"[" : @"]";
         NSEventModifierFlags flags=[s hasPrefix:@"alt-"] ? NSEventModifierFlagOption : NSEventModifierFlagCommand;
+        // Named structural shortcuts send an unmodified key with the right flags.
+        if ([s isEqual:@"cmd-shift-up"] || [s isEqual:@"cmd-shift-down"]) {
+            characters=[s hasSuffix:@"up"] ? @"\uf700" : @"\uf701";
+            flags=NSEventModifierFlagCommand|NSEventModifierFlagShift;
+        } else if ([s isEqual:@"cmd-d"]) {
+            characters=@"d"; flags=NSEventModifierFlagCommand;
+        } else if ([s isEqual:@"cmd-shift-backspace"]) {
+            characters=@"\x7f"; flags=NSEventModifierFlagCommand|NSEventModifierFlagShift;
+        }
         if ([s hasPrefix:@"footnote-"]) { characters=[s hasSuffix:@"down"] ? @"\uf701" : @"\uf700"; flags=NSEventModifierFlagCommand|NSEventModifierFlagOption; }
         if ([s containsString:@"shift"]) flags |= NSEventModifierFlagShift;
+        // plain-* sends an unmodified key, the way a writer presses it.
+        if ([s hasPrefix:@"plain-"]) {
+            NSString *name=[s substringFromIndex:6];
+            characters=[name isEqual:@"return"] ? @"\r" : [name isEqual:@"escape"] ? @"\x1b" : [name isEqual:@"up"] ? @"\uf700" : [name isEqual:@"down"] ? @"\uf701" : [name isEqual:@"backspace"] ? @"\x7f" : name;
+            flags=0;
+        }
         NSEvent *event=[NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:flags timestamp:0 windowNumber:e.window.windowNumber context:nil characters:characters charactersIgnoringModifiers:characters isARepeat:NO keyCode:0];
         [e.text keyDown:event];
     }
+    else if ([a isEqual:@"slash-pick"]) [e slashChooseIndex:[s integerValue]];
+    else if ([a isEqual:@"slash-close"]) [e slashClose];
+    else if ([a isEqual:@"emoji-pick"]) [e emojiMenuChooseIndex:[s integerValue]];
+    else if ([a isEqual:@"link-pick"]) [e linkMenuChooseIndex:[s integerValue]];
+    else if ([a isEqual:@"formatbar-pick"]) [e formatBarApply:s];
+    else if ([a isEqual:@"formatbar-link"]) [e formatBarLink:s];
     else if ([a isEqual:@"context"] || [a isEqual:@"context-at"] || [a isEqual:@"click"] || [a isEqual:@"click-trailing"] || [a isEqual:@"drag"]) {
         [e.text.layoutManager ensureLayoutForTextContainer:e.text.textContainer];
         NSUInteger target=e.text.selectedRange.location;
@@ -3223,7 +3599,7 @@ int cr_test_traits(uintptr_t ptr,const char *trait) { CREditor *e=CRE(ptr); NSSt
     return found; }
 int cr_test_checkbox(uintptr_t ptr) { CREditor *e=CRE(ptr); for (NSValue *v in CRRanges(e.text.string)) if (CRKind(CRParagraphAt(e,v.rangeValue.location),@"checklist")) { NSRect r=[e markerRect:v.rangeValue]; NSPoint point=[e.text convertPoint:NSMakePoint(NSMidX(r),NSMidY(r)) toView:nil]; NSEvent *event=[NSEvent mouseEventWithType:NSEventTypeLeftMouseDown location:point modifierFlags:0 timestamp:0 windowNumber:e.window.windowNumber context:nil eventNumber:0 clickCount:1 pressure:1]; [e.text mouseDown:event]; return 1; } return 0; }
 void cr_test_opaque(uintptr_t ptr,int whole) { CREditor *e=CRE(ptr); for (NSValue *v in CRRanges(e.text.string)) if (CRKind(CRParagraphAt(e,v.rangeValue.location),@"opaque")) { NSRange r=CRContent(e.text.string,v.rangeValue); if (!whole) r=NSMakeRange(r.location+1,1); e.text.selectedRange=r; return; } }
-int cr_test_screenshot(uintptr_t ptr,const char *path) { CREditor *e=CRE(ptr); [e.scroll layoutSubtreeIfNeeded]; [e.text.layoutManager ensureLayoutForTextContainer:e.text.textContainer]; NSBitmapImageRep *rep=[e.scroll bitmapImageRepForCachingDisplayInRect:e.scroll.bounds]; [e.scroll cacheDisplayInRect:e.scroll.bounds toBitmapImageRep:rep]; NSData *png=[rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}]; return [png writeToFile:[NSString stringWithUTF8String:path] atomically:YES]; }
+int cr_test_screenshot(uintptr_t ptr,const char *path) { CREditor *e=CRE(ptr); [e.scroll layoutSubtreeIfNeeded]; [e.text display]; [e.text.layoutManager ensureLayoutForTextContainer:e.text.textContainer]; NSBitmapImageRep *rep=[e.scroll bitmapImageRepForCachingDisplayInRect:e.scroll.bounds]; [e.scroll cacheDisplayInRect:e.scroll.bounds toBitmapImageRep:rep]; NSData *png=[rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}]; return [png writeToFile:[NSString stringWithUTF8String:path] atomically:YES]; }
 @interface CRFlippedTestView : NSView
 @end
 @implementation CRFlippedTestView

@@ -109,7 +109,7 @@ func (v *View) syncEditor() bool {
 func (v *View) richVisible() bool {
 	return v.rich != nil && v.App.Mode == app.ModeRich &&
 		(v.App.Path != "" || v.App.Source != "") &&
-		!v.App.Conflict && !v.HostOpen && !v.SettingsOpen && v.FolderDialog == "" && !v.DeleteOpen
+		!v.App.Conflict && !v.HostOpen && !v.SettingsOpen && v.FolderDialog == "" && !v.DeleteOpen && !v.QuickOpen
 }
 
 func (v *View) richPane(c *ui.Context) {

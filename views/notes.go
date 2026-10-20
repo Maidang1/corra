@@ -55,7 +55,7 @@ func (v *View) foldersSidebar(c *ui.Context) {
 			// center line as the workspace card's header.
 			ui.Row(c).FillWidth().Height(topRowH).AlignItems(ui.Center).DragWindow().
 				Padding(0, 8, 0, max(12, c.TitleBar().Left-8)).Children(func() {
-				iconButton(c, iconSidebar, "切换边栏", v.toggleSidebar)
+				iconButton(c, iconSidebar, "收起边栏", v.toggleSidebar)
 			})
 			ui.Column(c).FillWidth().Gap(1).Padding(2, 4, 8, 6).Children(func() {
 				ui.Text(c, "本地文档库").FontSize(12).Bold().TextColor(t.TextMuted).Padding(0, 7, 5, 7)

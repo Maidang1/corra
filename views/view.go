@@ -69,6 +69,14 @@ type View struct {
 	// Settings modal (preferences: appearance, fonts, writing aids).
 	SettingsOpen bool
 
+	// Quick switcher (Cmd+Shift+P): filter the library by title or path.
+	QuickOpen  bool
+	QuickQuery string
+	QuickIndex int
+
+	// StatsOpen expands the status bar's document statistics strip.
+	StatsOpen bool
+
 	// windowW is the window's width as of the last frame, for the
 	// toolbar's compact layout.
 	windowW float32
@@ -175,5 +183,8 @@ func (v *View) Build(c *ui.Context) {
 	}
 	if v.LinkOpen {
 		v.linkDialog(c)
+	}
+	if v.QuickOpen {
+		v.quickOpenDialog(c)
 	}
 }

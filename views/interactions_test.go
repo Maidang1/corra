@@ -44,10 +44,38 @@ func click(t *testing.T, tt *ui.Tester, label string) {
 	}
 }
 
+// waitTransition keeps frames going for d, so a wall-clock transition really
+// finishes before the test pokes the controls it is moving.
+func waitTransition(tt *ui.Tester, d time.Duration) {
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		tt.Frame()
+		time.Sleep(5 * time.Millisecond)
+	}
+	tt.Frame()
+}
+
+// waitFor keeps running frames until cond holds. The panel transitions run on
+// the wall clock, so a frame alone cannot promise they finished under load.
+func waitFor(t *testing.T, tt *ui.Tester, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		tt.Frame()
+		if cond() {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 func TestSidebarButtonChangesVisibility(t *testing.T) {
 	v, tt := notesFixture(t)
 	before := v.App.Sidebar
-	click(t, tt, "切换边栏")
+	click(t, tt, "收起边栏")
 	if v.App.Sidebar == before {
 		t.Fatal("sidebar button is a no-op")
 	}
@@ -60,13 +88,11 @@ func TestSidebarButtonChangesVisibility(t *testing.T) {
 func TestCollapsedSidebar(t *testing.T) {
 	v, tt := notesFixture(t)
 	tt.SetSize(960, 560)
-	click(t, tt, "切换边栏")
+	click(t, tt, "收起边栏")
 	if v.App.Sidebar {
 		t.Fatal("sidebar did not collapse")
 	}
-	if tt.HasText("全部文档") || tt.HasText("搜索文档") {
-		t.Fatal("collapsed sidebar still renders navigation or search")
-	}
+	waitFor(t, tt, "collapse", func() bool { return !tt.HasText("全部文档") && !tt.HasText("搜索文档") })
 	for _, label := range []string{"新建文档 (Cmd+N)", "文本格式", "插入表格", "共享与导出"} {
 		r, ok := tt.Find(label)
 		if !ok || r.X+r.W > 961 || r.W < 25 {
@@ -83,10 +109,13 @@ func TestCollapsedSidebar(t *testing.T) {
 		}
 		f.Close()
 	}
-	click(t, tt, "切换边栏")
-	if !v.App.Sidebar || !tt.HasText("全部文档") {
-		t.Fatal("sidebar did not expand back")
-	}
+	// Let the collapse transition truly finish before clicking: its hit rect
+	// is still moving while the exit animation runs.
+	waitTransition(tt, 300*time.Millisecond)
+	// The collapsed header hosts its own expand control, so the label tells
+	// the two states apart even while the sidebar is still animating out.
+	click(t, tt, "展开边栏")
+	waitFor(t, tt, "expand", func() bool { return v.App.Sidebar && tt.HasText("全部文档") })
 }
 
 func TestFormatControlHasVisibleText(t *testing.T) {

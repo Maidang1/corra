@@ -3,7 +3,10 @@
 // Package nativerich embeds the platform rich-text editor in a native window.
 package nativerich
 
-type Editor struct{}
+type Editor struct {
+	// OnLinkCandidates mirrors the native editor's "[[" completion hook.
+	OnLinkCandidates func(query string) string
+}
 
 func New(window uintptr, changed, sourceRequested func()) *Editor { return nil }
 func (*Editor) Load(string)                                       {}

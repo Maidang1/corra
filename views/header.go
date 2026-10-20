@@ -42,7 +42,7 @@ func (v *View) header(c *ui.Context) {
 			// Collapsed: the leading slot hosts the expand control,
 			// offset past the traffic lights (the toolbar starts at x=0).
 			ui.Row(c).FillHeight().AlignItems(ui.Center).Padding(0, 4, 0, max(0, c.TitleBar().Left-16)).Children(func() {
-				iconButton(c, iconSidebar, "切换边栏", v.toggleSidebar)
+				iconButton(c, iconSidebar, "展开边栏", v.toggleSidebar)
 			})
 		}
 		if v.App.Sidebar {

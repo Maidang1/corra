@@ -1,6 +1,15 @@
 // Included in CREditor's implementation. Fence metadata bounds each block:
 // neighboring code paragraphs can belong to distinct adjacent fences.
 - (NSArray *)codeBlocks { return [self codeBlocksIn:NSMakeRange(0,_text.string.length)]; }
+// codeBlockAt: resolves a character index to the fenced block containing it.
+- (NSDictionary *)codeBlockAt:(NSUInteger)location {
+    if (location > _text.string.length) return nil;
+    for (NSDictionary *block in [self codeBlocksIn:NSMakeRange(location,1)]) {
+        NSRange range = [block[@"range"] rangeValue];
+        if (NSLocationInRange(location, range) || (location == NSMaxRange(range) && location == _text.string.length)) return block;
+    }
+    return nil;
+}
 // codeBlocksIn: lists the blocks touching within, scanning only from the
 // opening fence of a block it cuts into to the end of the last such block.
 - (NSArray *)codeBlocksIn:(NSRange)within {

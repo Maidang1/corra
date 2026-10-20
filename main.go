@@ -53,6 +53,7 @@ func main() {
 		})
 		mainWindow = win
 		if native := nativerich.New(win.NativeHandle(), view.NativeChanged, view.EditSource); native != nil {
+			native.OnLinkCandidates = view.LinkCandidates
 			view.AttachRichEditor(native)
 		}
 

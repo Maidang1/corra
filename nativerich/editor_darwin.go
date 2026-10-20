@@ -44,6 +44,9 @@ type Editor struct {
 	// OnImportFiles imports dropped files and returns the Markdown to
 	// insert (image references, file links); ok=false cancels.
 	OnImportFiles func(paths []string) (markdown string, ok bool)
+	// OnLinkCandidates returns a JSON array of {title, path} note candidates
+	// for the "[[" completion, filtered by the typed query.
+	OnLinkCandidates func(query string) string
 }
 
 func New(window uintptr, changed, sourceRequested func()) *Editor {
@@ -407,6 +410,65 @@ func cr_fold_inline(value *C.char, table C.int) *C.char {
 		richtext.Document
 		Positions []int `json:"positions"`
 	}{richtext.ParseInline(source, table != 0), positions})
+	if err != nil {
+		return nil
+	}
+	return C.CString(string(data))
+}
+
+// emojiCatalog is the picker's curated shortcode list, most useful first.
+var emojiCatalog = []string{
+	"smile", "grin", "joy", "laughing", "blush", "wink", "heart_eyes", "kissing_heart",
+	"stuck_out_tongue", "thinking", "sunglasses", "sob", "cry", "angry", "sweat_smile",
+	"heart", "sparkling_heart", "blue_heart", "green_heart", "yellow_heart", "purple_heart",
+	"two_hearts", "broken_heart", "+1", "-1", "thumbsup", "thumbsdown", "clap", "wave",
+	"pray", "muscle", "ok_hand", "point_right", "tada", "fire", "rocket", "sparkles",
+	"eyes", "star", "zap", "bulb", "white_check_mark", "x", "warning", "no_entry",
+	"rotating_light", "construction", "pushpin", "paperclip", "bookmark", "memo", "books",
+	"pencil2", "art", "computer", "iphone", "camera", "video_camera", "musical_note",
+	"headphones", "coffee", "beer", "cake", "gift", "pizza", "hamburger", "sushi",
+	"avocado", "apple", "sunny", "rainbow", "snowflake", "umbrella", "earth_asia",
+	"chart_with_upwards_trend", "calendar", "clock1", "hourglass", "bell", "mega",
+	"email", "phone", "lock", "key", "bug", "100", "poop", "ghost", "alien", "monkey",
+	"dog", "cat", "robot", "skull", "clown_face", "sleeping", "zzz", "speech_balloon",
+	"thought_balloon", "grey_question", "grey_exclamation", "question", "exclamation",
+	"arrow_right", "arrow_left", "arrow_up", "arrow_down", "checkered_flag",
+	"triangular_flag_on_post", "hear_no_evil", "see_no_evil", "speak_no_evil",
+}
+
+//export cr_link_candidates
+func cr_link_candidates(handle C.uintptr_t, query *C.char) *C.char {
+	e := cgo.Handle(handle).Value().(*Editor)
+	if e.OnLinkCandidates == nil {
+		return nil
+	}
+	value := e.OnLinkCandidates(C.GoString(query))
+	if value == "" {
+		return nil
+	}
+	return C.CString(value)
+}
+
+//export cr_emoji_search
+func cr_emoji_search(query *C.char) *C.char {
+	q := strings.ToLower(strings.TrimSpace(C.GoString(query)))
+	type item struct {
+		Name  string `json:"name"`
+		Emoji string `json:"emoji"`
+	}
+	items := make([]item, 0, 30)
+	for _, name := range emojiCatalog {
+		if q != "" && !strings.Contains(name, q) {
+			continue
+		}
+		if value, ok := mdext.EmojiFor(name); ok {
+			items = append(items, item{Name: name, Emoji: value})
+		}
+		if len(items) >= 30 {
+			break
+		}
+	}
+	data, err := json.Marshal(items)
 	if err != nil {
 		return nil
 	}

@@ -22,7 +22,7 @@ func TestProbeHeaderClicks(t *testing.T) {
 	tt := ui.NewTester(v.Build, 1280, 820)
 	tt.SetScale(2)
 	tt.SetTitleBar(ui.TitleBar{Height: 28, Left: 80})
-	for _, l := range []string{"设置…", "插入任务列表", "新建文档 (Cmd+N)", "切换边栏"} {
+	for _, l := range []string{"设置…", "插入任务列表", "新建文档 (Cmd+N)", "收起边栏"} {
 		r, ok := tt.Find(l)
 		t.Logf("%s => %+v %v", l, r, ok)
 	}
