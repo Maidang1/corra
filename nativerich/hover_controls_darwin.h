@@ -99,7 +99,8 @@
                 [self updateFootnoteCard];
             }
         }
-        // A table raises add-row and add-column buttons on hover.
+        // A table raises add-row and add-column buttons on hover, plus drag
+        // grips on the hovered row's left edge and the column's top edge.
         if (index != NSNotFound) {
             NSTextTableBlock *cell = CRCellAt(self.owner, index);
             if (cell && cell.table) {
@@ -119,6 +120,29 @@
                             table = cell.table;
                             tableButtons = @[@{@"rect": [NSValue valueWithRect:rowButton], @"kind": @0},
                                              @{@"rect": [NSValue valueWithRect:columnButton], @"kind": @1}];
+                            // Locate the hovered cell's row and column for the
+                            // drag grips. The header row (0) is pinned: it gets
+                            // no grip, and neither does a column while the
+                            // pointer is on the header.
+                            _tableHoverRow = cell.startingRow;
+                            _tableHoverColumn = cell.startingColumn;
+                            CGFloat gripSize = 14 * zoom;
+                            if (_tableHoverRow > 0) {
+                                NSRect rowBounds = [self tableRowBounds:_tableHoverRow inTable:table rect:tableRect];
+                                if (rowBounds.size.height > 0) {
+                                    _tableDragRowGrip = NSMakeRect(NSMinX(tableRect) - gripSize - 4 * zoom,
+                                                                   NSMidY(rowBounds) - gripSize / 2,
+                                                                   gripSize, gripSize);
+                                }
+                            }
+                            if (_tableHoverRow > 0 && _tableHoverColumn >= 0) {
+                                NSRect colBounds = [self tableColumnBounds:_tableHoverColumn inTable:table rect:tableRect];
+                                if (colBounds.size.width > 0) {
+                                    _tableDragColumnGrip = NSMakeRect(NSMidX(colBounds) - gripSize / 2,
+                                                                      NSMinY(tableRect) - gripSize - 4 * zoom,
+                                                                      gripSize, gripSize);
+                                }
+                            }
                         }
                     }
                 }
@@ -137,13 +161,17 @@
             }
         }
     }
+    // The grip rects are recomputed from the hovered cell each pass; a change
+    // in the hovered row or column is what matters, not the rect itself.
+    BOOL gripChanged = (_tableDragRowGrip.size.width > 0) != (_tableHoverRow > 0 && table != nil) ||
+                       (_tableDragColumnGrip.size.width > 0) != (_tableHoverRow > 0 && _tableHoverColumn >= 0 && table != nil);
     BOOL changed = !NSEqualRanges(code, _hoverCodeBlock) || !NSEqualRects(chip, _hoverCodeChip) ||
                    !NSEqualRanges(block, _hoverBlock) || !NSEqualRects(handle, _handleRect) ||
                    !NSEqualRanges(languageBlock, _languageRange) || !NSEqualRects(language, _languageRect) ||
                    !NSEqualRanges(image, _hoverImage) || !NSEqualRects(pill, _imagePill) ||
                    table != _hoverTable || !NSEqualRects(tableRect, _tableRect) ||
                    !NSEqualRects(imageCopy, _imageCopyRect) || !NSEqualRects(imageDelete, _imageDeleteRect) ||
-                   !NSEqualRects(imageReplace, _imageReplaceRect);
+                   !NSEqualRects(imageReplace, _imageReplaceRect) || gripChanged;
     _hoverPoint = point;
     if (!changed) return;
     NSRect oldCopy = _copyRect, oldHandle = _handleRect, oldChip = _hoverCodeChip;
@@ -186,6 +214,10 @@
     _hoverTable = nil;
     _tableRect = NSZeroRect;
     _tableButtons = nil;
+    _tableDragRowGrip = NSZeroRect;
+    _tableDragColumnGrip = NSZeroRect;
+    _tableHoverRow = -1;
+    _tableHoverColumn = -1;
     _hoverFootnote = nil;
     _hoverFootnoteLocation = NSNotFound;
     // Moving onto the card keeps it open for the jump button; everything
@@ -195,6 +227,45 @@
     }
     [self setNeedsDisplay:YES];
     [self.window invalidateCursorRectsForView:self];
+}
+
+// tableRowBounds returns the bounding rect of a body row inside a table.
+// Row 0 is the header; body rows start at 1.
+- (NSRect)tableRowBounds:(NSInteger)row inTable:(NSTextTable *)table rect:(NSRect)tableRect {
+    if (row <= 0) return NSZeroRect;
+    __block NSRect best = NSZeroRect;
+    __block NSInteger bestRow = -1;
+    [self.textStorage enumerateAttribute:CRTableCell inRange:NSMakeRange(0, self.string.length) options:0 usingBlock:^(NSTextTableBlock *block, NSRange range, BOOL *stop) {
+        if (![block isKindOfClass:NSTextTableBlock.class] || block.table != table) return;
+        if (block.startingRow != row) return;
+        NSRange glyph = [self.layoutManager glyphRangeForCharacterRange:range actualCharacterRange:NULL];
+        if (!glyph.length) return;
+        NSRect r = [self.layoutManager boundingRectForGlyphRange:glyph inTextContainer:self.textContainer];
+        r = NSOffsetRect(r, self.textContainerOrigin.x, self.textContainerOrigin.y);
+        if (bestRow < row) { best = r; bestRow = row; }
+        else best = NSUnionRect(best, r);
+    }];
+    if (bestRow < 0) return NSZeroRect;
+    return NSMakeRect(tableRect.origin.x, best.origin.y, tableRect.size.width, best.size.height);
+}
+
+// tableColumnBounds returns the bounding rect of a column inside a table.
+- (NSRect)tableColumnBounds:(NSInteger)column inTable:(NSTextTable *)table rect:(NSRect)tableRect {
+    if (column < 0) return NSZeroRect;
+    __block NSRect best = NSZeroRect;
+    __block BOOL found = NO;
+    [self.textStorage enumerateAttribute:CRTableCell inRange:NSMakeRange(0, self.string.length) options:0 usingBlock:^(NSTextTableBlock *block, NSRange range, BOOL *stop) {
+        if (![block isKindOfClass:NSTextTableBlock.class] || block.table != table) return;
+        if (block.startingColumn != column) return;
+        NSRange glyph = [self.layoutManager glyphRangeForCharacterRange:range actualCharacterRange:NULL];
+        if (!glyph.length) return;
+        NSRect r = [self.layoutManager boundingRectForGlyphRange:glyph inTextContainer:self.textContainer];
+        r = NSOffsetRect(r, self.textContainerOrigin.x, self.textContainerOrigin.y);
+        if (!found) { best = r; found = YES; }
+        else best = NSUnionRect(best, r);
+    }];
+    if (!found) return NSZeroRect;
+    return NSMakeRect(best.origin.x, tableRect.origin.y, best.size.width, tableRect.size.height);
 }
 
 // lineRectForCharacter is the used line rect of index, in view coordinates.
@@ -333,6 +404,97 @@
     [self setNeedsDisplay:YES];
 }
 
+// MARK: - Table drag
+
+// beginTableDragAtPoint starts a row or column drag from its grip. The drag
+// runs a tracking loop until mouse-up, then commits through the model layer.
+- (void)beginTableDragAtPoint:(NSPoint)point {
+    if (!_hoverTable) return;
+    BOOL isRow = NSPointInRect(point, _tableDragRowGrip);
+    BOOL isColumn = !isRow && NSPointInRect(point, _tableDragColumnGrip);
+    if (!isRow && !isColumn) return;
+    _tableDragIsRow = isRow;
+    _tableDragRow = isRow ? _tableHoverRow : -1;
+    _tableDragColumn = isColumn ? _tableHoverColumn : -1;
+    _tableDragTarget = NSNotFound;
+    _tableDragActive = NO;
+    NSPoint start = point;
+    BOOL moved = NO;
+    while (YES) {
+        NSEvent *event = [self.window nextEventMatchingMask:NSEventMaskLeftMouseDragged | NSEventMaskLeftMouseUp
+                                                   untilDate:NSDate.distantFuture
+                                                      inMode:NSEventTrackingRunLoopMode dequeue:YES];
+        if (!event) break;
+        if (event.type == NSEventTypeLeftMouseUp) break;
+        NSPoint current = [self convertPoint:event.locationInWindow fromView:nil];
+        if (!moved && hypot(current.x - start.x, current.y - start.y) < 4) continue;
+        moved = YES;
+        _tableDragActive = YES;
+        [self updateTableDragTargetAtPoint:current];
+    }
+    if (moved) [self commitTableDrag];
+    [self clearTableDrag];
+}
+
+// updateTableDragTargetAtPoint turns the pointer into an insertion slot
+// between rows or columns.
+- (void)updateTableDragTargetAtPoint:(NSPoint)point {
+    if (!_hoverTable) return;
+    NSInteger rows = [self tableRowCount:_hoverTable];
+    NSInteger columns = _hoverTable.numberOfColumns;
+    if (_tableDragIsRow) {
+        if (rows <= 1) return; // header only: nothing to move
+        // Find the insertion slot by vertical position: above the first body
+        // row is slot 1, below the last is slot rows.
+        NSInteger target = rows; // default: append at end
+        for (NSInteger r = 1; r < rows; r++) {
+            NSRect bounds = [self tableRowBounds:r inTable:_hoverTable rect:_tableRect];
+            if (bounds.size.height <= 0) continue;
+            if (point.y < NSMidY(bounds)) { target = r; break; }
+        }
+        _tableDragTarget = target;
+    } else {
+        if (columns <= 0) return;
+        NSInteger target = columns;
+        for (NSInteger c = 0; c < columns; c++) {
+            NSRect bounds = [self tableColumnBounds:c inTable:_hoverTable rect:_tableRect];
+            if (bounds.size.width <= 0) continue;
+            if (point.x < NSMidX(bounds)) { target = c; break; }
+        }
+        _tableDragTarget = target;
+    }
+    [self setNeedsDisplay:YES];
+}
+
+// commitTableDrag applies the move through the model layer.
+- (void)commitTableDrag {
+    if (!_hoverTable || _tableDragTarget == NSNotFound) return;
+    if (_tableDragIsRow) {
+        if (_tableDragRow > 0) [self.owner tableMoveRow:_tableDragRow toIndex:_tableDragTarget inTable:_hoverTable];
+    } else {
+        if (_tableDragColumn >= 0) [self.owner tableMoveColumn:_tableDragColumn toIndex:_tableDragTarget inTable:_hoverTable];
+    }
+}
+
+- (void)clearTableDrag {
+    _tableDragRow = -1;
+    _tableDragColumn = -1;
+    _tableDragTarget = NSNotFound;
+    _tableDragActive = NO;
+    _tableDragIsRow = NO;
+    [self setNeedsDisplay:YES];
+}
+
+// tableRowCount returns the number of rows in the table (header + body).
+- (NSInteger)tableRowCount:(NSTextTable *)table {
+    __block NSInteger maxRow = 0;
+    [self.textStorage enumerateAttribute:CRTableCell inRange:NSMakeRange(0, self.string.length) options:0 usingBlock:^(NSTextTableBlock *block, NSRange range, BOOL *stop) {
+        if (![block isKindOfClass:NSTextTableBlock.class] || block.table != table) return;
+        if (block.startingRow > maxRow) maxRow = block.startingRow;
+    }];
+    return maxRow + 1;
+}
+
 // MARK: - Drawing
 
 - (void)drawDragOverlay {
@@ -370,12 +532,105 @@
     [[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(x0 - 4 * zoom, NSMidY(bar) - 3 * zoom, 6 * zoom, 6 * zoom)] fill];
 }
 
-// drawTableControls paints the add-row / add-column circles above the table.
+// drawTableDragOverlay paints the dragged row/column band and the insertion
+// line while a table drag is active.
+- (void)drawTableDragOverlay {
+    if (!_tableDragActive || !_hoverTable) return;
+    CGFloat zoom = self.owner.zoom;
+    BOOL dark = self.owner.dark;
+    NSColor *accent = dark ? [NSColor colorWithRed:0.45 green:0.66 blue:1 alpha:1]
+                           : [NSColor colorWithRed:0.12 green:0.44 blue:0.92 alpha:1];
+    // Highlight the dragged band.
+    NSRect band = NSZeroRect;
+    if (_tableDragIsRow && _tableDragRow > 0) {
+        band = [self tableRowBounds:_tableDragRow inTable:_hoverTable rect:_tableRect];
+    } else if (!_tableDragIsRow && _tableDragColumn >= 0) {
+        band = [self tableColumnBounds:_tableDragColumn inTable:_hoverTable rect:_tableRect];
+    }
+    if (band.size.width > 0 && band.size.height > 0) {
+        [[accent colorWithAlphaComponent:0.08] setFill];
+        [[NSBezierPath bezierPathWithRect:band] fill];
+        [[accent colorWithAlphaComponent:0.30] setStroke];
+        NSBezierPath *outline = [NSBezierPath bezierPathWithRect:NSInsetRect(band, 0.5, 0.5)];
+        outline.lineWidth = 1;
+        [outline stroke];
+    }
+    // Draw the insertion line.
+    if (_tableDragTarget == NSNotFound) return;
+    NSInteger rows = [self tableRowCount:_hoverTable];
+    NSInteger columns = _hoverTable.numberOfColumns;
+    if (_tableDragIsRow) {
+        if (_tableDragTarget < 1 || _tableDragTarget > rows) return;
+        if (_tableDragTarget == _tableDragRow || _tableDragTarget == _tableDragRow + 1) return;
+        CGFloat y;
+        if (_tableDragTarget >= rows) {
+            NSRect last = [self tableRowBounds:rows - 1 inTable:_hoverTable rect:_tableRect];
+            y = NSMaxY(last);
+        } else {
+            NSRect target = [self tableRowBounds:_tableDragTarget inTable:_hoverTable rect:_tableRect];
+            y = NSMinY(target);
+        }
+        NSRect line = NSMakeRect(NSMinX(_tableRect), y - 1.5 * zoom, _tableRect.size.width, 3 * zoom);
+        [accent setFill];
+        [[NSBezierPath bezierPathWithRoundedRect:line xRadius:1.5 * zoom yRadius:1.5 * zoom] fill];
+    } else {
+        if (_tableDragTarget < 0 || _tableDragTarget > columns) return;
+        if (_tableDragTarget == _tableDragColumn || _tableDragTarget == _tableDragColumn + 1) return;
+        CGFloat x;
+        if (_tableDragTarget >= columns) {
+            NSRect last = [self tableColumnBounds:columns - 1 inTable:_hoverTable rect:_tableRect];
+            x = NSMaxX(last);
+        } else {
+            NSRect target = [self tableColumnBounds:_tableDragTarget inTable:_hoverTable rect:_tableRect];
+            x = NSMinX(target);
+        }
+        NSRect line = NSMakeRect(x - 1.5 * zoom, NSMinY(_tableRect), 3 * zoom, _tableRect.size.height);
+        [accent setFill];
+        [[NSBezierPath bezierPathWithRoundedRect:line xRadius:1.5 * zoom yRadius:1.5 * zoom] fill];
+    }
+}
+
+// drawTableControls paints the add-row / add-column circles above the table,
+// plus the drag grips on the hovered row and column.
 - (void)drawTableControls {
-    if (!_tableButtons.count) return;
     CGFloat zoom = self.owner.zoom;
     BOOL dark = self.owner.dark;
     NSColor *muted = CRMutedColor(dark);
+    // The drag grips: six dots in a vertical row for rows, horizontal for
+    // columns, matching the block handle's style.
+    if (_tableDragRowGrip.size.width > 0) {
+        BOOL hovered = NSPointInRect(_hoverPoint, _tableDragRowGrip);
+        if (hovered) {
+            [[(dark ? [NSColor whiteColor] : [NSColor blackColor]) colorWithAlphaComponent:0.07] setFill];
+            [[NSBezierPath bezierPathWithRoundedRect:_tableDragRowGrip xRadius:4 * zoom yRadius:4 * zoom] fill];
+        }
+        [muted setFill];
+        CGFloat radius = 1.2 * zoom, dx = 3.6 * zoom, dy = 4 * zoom;
+        for (NSInteger row = 0; row < 3; row++) {
+            for (NSInteger col = 0; col < 2; col++) {
+                CGFloat x = NSMidX(_tableDragRowGrip) + (col ? dx / 2 : -dx / 2);
+                CGFloat y = NSMidY(_tableDragRowGrip) + (row - 1) * dy;
+                [[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(x - radius, y - radius, radius * 2, radius * 2)] fill];
+            }
+        }
+    }
+    if (_tableDragColumnGrip.size.width > 0) {
+        BOOL hovered = NSPointInRect(_hoverPoint, _tableDragColumnGrip);
+        if (hovered) {
+            [[(dark ? [NSColor whiteColor] : [NSColor blackColor]) colorWithAlphaComponent:0.07] setFill];
+            [[NSBezierPath bezierPathWithRoundedRect:_tableDragColumnGrip xRadius:4 * zoom yRadius:4 * zoom] fill];
+        }
+        [muted setFill];
+        CGFloat radius = 1.2 * zoom, dx = 4 * zoom, dy = 3.6 * zoom;
+        for (NSInteger row = 0; row < 2; row++) {
+            for (NSInteger col = 0; col < 3; col++) {
+                CGFloat x = NSMidX(_tableDragColumnGrip) + (col - 1) * dx;
+                CGFloat y = NSMidY(_tableDragColumnGrip) + (row ? dy / 2 : -dy / 2);
+                [[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(x - radius, y - radius, radius * 2, radius * 2)] fill];
+            }
+        }
+    }
+    if (!_tableButtons.count) return;
     for (NSDictionary *button in _tableButtons) {
         NSRect rect = [button[@"rect"] rectValue];
         BOOL hovered = NSPointInRect(_hoverPoint, rect);
@@ -875,4 +1130,6 @@
     if (_imageDeleteRect.size.width) [self addCursorRect:_imageDeleteRect cursor:NSCursor.pointingHandCursor];
     for (NSDictionary *button in _tableButtons) [self addCursorRect:[button[@"rect"] rectValue] cursor:NSCursor.pointingHandCursor];
     if (_handleRect.size.height > 0) [self addCursorRect:_handleRect cursor:NSCursor.pointingHandCursor];
+    if (_tableDragRowGrip.size.width > 0) [self addCursorRect:_tableDragRowGrip cursor:NSCursor.openHandCursor];
+    if (_tableDragColumnGrip.size.width > 0) [self addCursorRect:_tableDragColumnGrip cursor:NSCursor.openHandCursor];
 }

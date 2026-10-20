@@ -81,6 +81,17 @@ extern char *cr_render_math_document(uintptr_t handle, const char *document, int
     NSTextTable *_hoverTable;
     NSRect _tableRect;
     NSArray *_tableButtons;
+    // Table row/column drag: grips on the hovered row's left edge and the
+    // column's top edge, a live insertion line, and the dragged band.
+    NSInteger _tableDragRow;      // body row being dragged (0 = header, -1 = none)
+    NSInteger _tableDragColumn;   // column being dragged (-1 = none)
+    NSInteger _tableDragTarget;   // insertion slot (0...count)
+    BOOL _tableDragActive;
+    BOOL _tableDragIsRow;
+    NSRect _tableDragRowGrip;     // left-edge grip of the hovered row
+    NSRect _tableDragColumnGrip;  // top-edge grip of the hovered column
+    NSInteger _tableHoverRow;     // row under the pointer (-1 = none)
+    NSInteger _tableHoverColumn;  // column under the pointer (-1 = none)
     NSTrackingArea *_hoverTracking;
 }
 @property(nonatomic, weak) CREditor *owner;
@@ -211,6 +222,8 @@ extern char *cr_render_math_document(uintptr_t handle, const char *document, int
 - (NSDictionary *)formatBarState;
 - (BOOL)formatBarSnapshotTo:(NSString *)path;
 - (void)tableCommand:(NSString *)command;
+- (BOOL)tableMoveRow:(NSInteger)row toIndex:(NSInteger)target inTable:(NSTextTable *)table;
+- (BOOL)tableMoveColumn:(NSInteger)column toIndex:(NSInteger)target inTable:(NSTextTable *)table;
 - (void)replaceTable:(NSRange)range paragraph:(NSDictionary *)p row:(NSInteger)row column:(NSInteger)column;
 - (BOOL)pasteTableText:(NSString *)text;
 - (BOOL)replaceAcrossTable:(NSRange)range withText:(NSString *)text;
@@ -2790,6 +2803,7 @@ static BOOL CRFootnoteAreaStart(CREditor *e, NSUInteger at) {
     // and the insertion line must stay visible over glyphs.
     [self drawImagePill];
     [self drawDragOverlay];
+    [self drawTableDragOverlay];
 }
 - (void)mouseDown:(NSEvent *)event {
     NSPoint point=[self convertPoint:event.locationInWindow fromView:nil];
@@ -2807,6 +2821,12 @@ static BOOL CRFootnoteAreaStart(CREditor *e, NSUInteger at) {
     }
     for (NSDictionary *button in _tableButtons) {
         if (NSPointInRect(point,[button[@"rect"] rectValue]) && [self activateTableControl:[button[@"kind"] integerValue]]) return;
+    }
+    // A table grip starts a row/column drag; the grips sit outside the table
+    // bounds, so they win over the text click.
+    if (_hoverTable && (NSPointInRect(point, _tableDragRowGrip) || NSPointInRect(point, _tableDragColumnGrip))) {
+        [self beginTableDragAtPoint:point];
+        return;
     }
     if (NSPointInRect(point, _handleRect) && _hoverBlock.location != NSNotFound) { [self beginBlockDragAtPoint:point]; return; }
     if (self.window.firstResponder!=self) self.owner.previousResponder=self.window.firstResponder;

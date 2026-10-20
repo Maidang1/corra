@@ -47,6 +47,58 @@
     p[@"rows"]=rows; p[@"alignments"]=align;
     [self replaceTable:tableRange paragraph:p row:r column:c];
 }
+// tableMoveRow:toIndex: drags a body row (the header is pinned at 0) into the
+// insertion slot target (1...rowCount), as one undo group. A slot on the
+// row's own edges is a no-op, as is the header or a missing row.
+- (BOOL)tableMoveRow:(NSInteger)row toIndex:(NSInteger)target inTable:(NSTextTable *)table {
+    if (!_text.editable || _text.hasMarkedText || !table) return NO;
+    NSRange tableRange = CRTableRange(self, table);
+    if (tableRange.location == NSNotFound) return NO;
+    NSMutableDictionary *p = [[self documentForRange:tableRange][@"paragraphs"][0] mutableCopy];
+    NSMutableArray *rows = [NSMutableArray array];
+    for (NSArray *r in p[@"rows"]) [rows addObject:[r mutableCopy]];
+    if (row <= 0 || row >= (NSInteger)rows.count) return NO;
+    target = MAX(1, MIN(target, (NSInteger)rows.count));
+    if (target == row || target == row + 1) return NO;
+    NSMutableArray *moved = rows[row];
+    [rows removeObjectAtIndex:row];
+    if (target > row) target--;
+    [rows insertObject:moved atIndex:target];
+    p[@"rows"] = rows;
+    [self replaceTable:tableRange paragraph:p row:target column:0];
+    return YES;
+}
+// tableMoveColumn:toIndex: drags a column into the insertion slot target
+// (0...columnCount), carrying its alignment along. A slot on the column's own
+// edges is a no-op.
+- (BOOL)tableMoveColumn:(NSInteger)column toIndex:(NSInteger)target inTable:(NSTextTable *)table {
+    if (!_text.editable || _text.hasMarkedText || !table) return NO;
+    NSRange tableRange = CRTableRange(self, table);
+    if (tableRange.location == NSNotFound) return NO;
+    NSMutableDictionary *p = [[self documentForRange:tableRange][@"paragraphs"][0] mutableCopy];
+    NSMutableArray *rows = [NSMutableArray array];
+    for (NSArray *r in p[@"rows"]) [rows addObject:[r mutableCopy]];
+    NSInteger columns = table.numberOfColumns;
+    if (column < 0 || column >= columns) return NO;
+    target = MAX(0, MIN(target, columns));
+    if (target == column || target == column + 1) return NO;
+    NSMutableArray *align = [p[@"alignments"] mutableCopy] ?: [NSMutableArray array];
+    while (align.count < columns) [align addObject:@"none"];
+    NSInteger final = target > column ? target - 1 : target;
+    for (NSMutableArray *r in rows) {
+        while (r.count < columns) [r addObject:@{@"runs":@[]}];
+        id moved = r[column];
+        [r removeObjectAtIndex:column];
+        [r insertObject:moved atIndex:final];
+    }
+    id movedAlign = align[column];
+    [align removeObjectAtIndex:column];
+    [align insertObject:movedAlign atIndex:final];
+    p[@"rows"] = rows;
+    p[@"alignments"] = align;
+    [self replaceTable:tableRange paragraph:p row:0 column:final];
+    return YES;
+}
 - (void)replaceTable:(NSRange)tableRange paragraph:(NSDictionary *)p row:(NSInteger)r column:(NSInteger)c {
     [self beginStructuralCommand];
     NSDictionary *ending = _emptyParagraph;
