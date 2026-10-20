@@ -9,6 +9,24 @@ import (
 	"github.com/Maidang1/corra/app"
 )
 
+// panelTransition is how the floating panels — the folders sidebar and the
+// outline — arrive and leave: they collapse along the window row's width,
+// sliding away like a macOS sidebar rather than snapping in and out.
+var panelTransition = ui.ElementTransition{
+	Duration: 250 * time.Millisecond,
+	Ease:     ui.EaseInOut,
+	Enter:    &ui.Motion{Collapse: true},
+	Exit:     &ui.Motion{Collapse: true},
+}
+
+// workspaceTransition keeps the writing area moving in step with the
+// panels: no Enter or Exit, just its position and size animating as a
+// panel's collapse makes room for it (or takes it away).
+var workspaceTransition = ui.ElementTransition{
+	Duration: 250 * time.Millisecond,
+	Ease:     ui.EaseInOut,
+}
+
 // View renders an app.App and routes input back to it.
 type View struct {
 	App    *app.App
@@ -128,7 +146,8 @@ func (v *View) Build(c *ui.Context) {
 		}
 		// The writing area is the window itself: no card, rim or shadow,
 		// and no rule under the toolbar — the page simply starts below it.
-		ui.Column(c).Key("workspace").Fill().Gap(0).Background(t.Surface).Children(func() {
+		ui.Column(c).Key("workspace").Fill().Gap(0).Background(t.Surface).
+			Transition(workspaceTransition).Children(func() {
 			v.header(c)
 			ui.Row(c).Fill().Gap(0).Children(func() {
 				v.editorPane(c)

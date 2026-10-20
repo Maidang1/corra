@@ -12,7 +12,8 @@ import (
 // headings; clicking one jumps to it in the active mode.
 func (v *View) outlinePanel(c *ui.Context) {
 	t := c.Theme()
-	ui.Box(c).Width(236).FillHeight().Padding(0, 8, 8, 0).Children(func() {
+	ui.Box(c).Key("outline").Width(236).FillHeight().Padding(0, 8, 8, 0).
+		Transition(panelTransition).Children(func() {
 		ui.Column(c).Fill().Gap(0).Radius(16).Clip().Background(sidebarBackground(t)).
 			Border(1, cardBorder(t)).Shadow(0, 6, 18, 0, cardShadow(t)).Children(func() {
 			ui.Text(c, "大纲").FontSize(12).Bold().TextColor(t.TextMuted).Padding(12, 14, 6, 14)
