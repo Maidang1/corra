@@ -45,7 +45,8 @@ func fieldFill(t *ui.Theme) ui.Color {
 // sidebar's translucent gray.
 func (v *View) foldersSidebar(c *ui.Context) {
 	t := c.Theme()
-	ui.Box(c).Width(sidebarW).FillHeight().Padding(8, 4, 8, 8).Children(func() {
+	ui.Box(c).Key("sidebar").Width(sidebarW).FillHeight().Padding(8, 4, 8, 8).
+		Transition(panelTransition).Children(func() {
 		ui.Column(c).Fill().Gap(0).Radius(20).Clip().
 			Background(sidebarBackground(t)).
 			Border(1, cardBorder(t)).Shadow(0, 8, 24, 0, cardShadow(t)).Children(func() {

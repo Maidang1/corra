@@ -235,11 +235,28 @@ func TestNotesShellSizes(t *testing.T) {
 				v.App.ThemeMode = app.ThemeDark
 			}
 			tt.SetSize(width, 820)
-			for _, label := range []string{"新建文档 (Cmd+N)", "文本格式", "插入表格", "共享与导出", "搜索文档"} {
+			tt.Frame() // let the panel animations settle on the new size
+			compact := width-268 < 700
+			bar := []string{"新建文档 (Cmd+N)", "共享与导出", "搜索文档"}
+			if !compact {
+				bar = append(bar, "文本格式", "插入表格")
+			}
+			for _, label := range bar {
 				r, ok := tt.Find(label)
 				if !ok || r.X < 0 || r.X+r.W > float32(width)+1 || r.W < 25 {
 					t.Fatalf("%s outside %d: %+v", label, width, r)
 				}
+			}
+			if compact {
+				// The format group folds into 文档选项 when narrow.
+				click(t, tt, "文档选项")
+				menu := strings.Join(tt.Menu(), "|")
+				for _, label := range []string{"文本格式", "插入表格"} {
+					if !strings.Contains(menu, label) {
+						t.Fatalf("%s missing from the compact menu at %d: %s", label, width, menu)
+					}
+				}
+				tt.CloseMenu()
 			}
 			if dir := os.Getenv("CORRA_SCREENSHOTS"); dir != "" {
 				name := "light"
