@@ -78,8 +78,10 @@ no JavaScript. Go draws the shell on the GPU; macOS uses an AppKit
   (with a checkmark flash) and a clickable language tag that swaps the fence
   language; the tag makes room for the button
 - **Image controls** — hover an image for a size pill (original / 25 / 50 /
-  75 / 100%); the current size is highlighted, and copy / delete buttons sit
-  after a divider so the image can be managed without selecting its block
+  75 / 100%); the current size is highlighted, and replace / copy / delete
+  buttons sit after a divider so the image can be managed without selecting
+  its block; replacing keeps the alt text, title and size, and writes a
+  relative path for files inside the document's folder
 - **Document stats** — click the word count in the status bar for a strip of
   chips: words, characters, lines, headings, links, images, tasks, code
   blocks and reading time, counted outside fenced code
@@ -205,7 +207,8 @@ JavaScript。Go 在 GPU 上绘制外壳，macOS 编辑区使用 AppKit 原生富
 - **代码块体验**：悬停围栏代码块出现一键复制按钮（带勾选反馈），
   语言标签可点击切换语言，并会给复制按钮让位
 - **图片控制**：悬停图片出现尺寸条（原图 / 25% / 50% / 75% / 100%）、
-  分隔线与复制/删除按钮，当前尺寸高亮，点击即改尺寸或管理图片
+  分隔线与替换/复制/删除按钮，当前尺寸高亮，点击即改尺寸或管理图片；
+  替换图片保留替代文本、标题与尺寸，文档目录内的文件写入相对路径
 - **文档统计**：点击状态栏的字数展开统计条，显示字数、字符、行数、标题、
   链接、图片、任务、代码块与阅读时间（统计时跳过围栏代码）
 - **表格控制**：悬停表格时下方出现「+」加行、右侧出现「+」加列，无需右键菜单

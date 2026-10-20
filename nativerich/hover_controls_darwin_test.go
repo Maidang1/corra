@@ -258,3 +258,47 @@ func TestNativeImageActions(t *testing.T) {
 		}
 	})
 }
+
+// The pill's buttons work for a physical click too, not only through the
+// test bridge: mouseDown routes the size presets, copy and delete before the
+// click can fall through to the figure's source reveal.
+func TestNativeImagePillRealClickDispatch(t *testing.T) {
+	nativeTestMain(func() {
+		window, e := newSlashEditor(t)
+		if e == nil {
+			return
+		}
+		defer nativeTestCloseWindow(window)
+		defer e.Close()
+
+		path := writeTestPNG(t, 480, 240, "click")
+		original := "![alt](" + path + ")"
+		// A size preset click writes the suffix.
+		e.Load(original)
+		if !nativeTestClickImageButton(e, 2) {
+			t.Errorf("size preset click did not reach the pill")
+			return
+		}
+		if got, _, _ := e.Snapshot(); !strings.Contains(got, "=50%") {
+			t.Errorf("size preset click wrote %q", got)
+			return
+		}
+		// A copy click puts the rendered image on the pasteboard.
+		if !nativeTestClickImageButton(e, 5) {
+			t.Errorf("copy click did not reach the pill")
+			return
+		}
+		if !nativeTestClipboardImage() {
+			t.Errorf("copy click left the pasteboard empty")
+			return
+		}
+		// A delete click removes the whole figure.
+		if !nativeTestClickImageButton(e, 6) {
+			t.Errorf("delete click did not reach the pill")
+			return
+		}
+		if got, _, _ := e.Snapshot(); strings.TrimSpace(got) != "" {
+			t.Errorf("delete click left %q", got)
+		}
+	})
+}

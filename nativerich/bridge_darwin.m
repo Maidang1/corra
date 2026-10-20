@@ -1,6 +1,7 @@
 //go:build darwin && cgo
 
 #import <AppKit/AppKit.h>
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import "bridge.h"
 
 // NSFilenamesPboardType is still how Finder file lists arrive.
@@ -68,6 +69,7 @@ extern char *cr_render_math_document(uintptr_t handle, const char *document, int
     NSRange _hoverImage;
     NSRect _imagePill;
     NSArray *_imageButtons;
+    NSRect _imageReplaceRect;
     NSRect _imageCopyRect;
     NSRect _imageDeleteRect;
     NSPanel *_footnotePanel;
@@ -84,7 +86,10 @@ extern char *cr_render_math_document(uintptr_t handle, const char *document, int
 - (void)clearHover;
 - (void)clearDrag;
 - (BOOL)copyImageAtHover;
+- (void)replaceImageAtHover;
 - (BOOL)deleteImageAtHover;
+- (NSRect)imagePillButtonRect:(NSInteger)index;
+- (NSRect)tableButtonRectForKind:(NSInteger)kind;
 - (void)hideFootnoteCard;
 - (void)closeFootnoteCard;
 - (NSDictionary *)footnoteCardState;
@@ -264,6 +269,7 @@ extern char *cr_render_math_document(uintptr_t handle, const char *document, int
 - (NSString *)imageSpecAt:(NSUInteger)caret;
 - (void)setImageSize:(NSString *)spec;
 - (void)setImageSize:(NSString *)spec atLocation:(NSUInteger)location;
+- (BOOL)replaceImageAtLocation:(NSUInteger)location withURL:(NSString *)url;
 - (NSArray *)tocFigureRanges;
 - (NSArray *)tocEntriesFromText;
 - (void)refreshTOC;
@@ -2788,6 +2794,17 @@ static BOOL CRFootnoteAreaStart(CREditor *e, NSUInteger at) {
     // selection drag or a caret move.
     [self updateHoverAtPoint:point];
     if (NSPointInRect(point, _copyRect) && [self copyHoveredCode]) return;
+    if (NSPointInRect(point, _languageRect) && _languageRange.location != NSNotFound) { [self showLanguageMenu]; return; }
+    if (_hoverImage.location != NSNotFound) {
+        NSInteger sizeIndex=[self imageButtonAtPoint:point];
+        if (sizeIndex>=0) { [self applyImageSizeAtIndex:sizeIndex]; return; }
+        if (NSPointInRect(point, _imageReplaceRect)) { [self replaceImageAtHover]; return; }
+        if (NSPointInRect(point, _imageCopyRect) && [self copyImageAtHover]) return;
+        if (NSPointInRect(point, _imageDeleteRect) && [self deleteImageAtHover]) return;
+    }
+    for (NSDictionary *button in _tableButtons) {
+        if (NSPointInRect(point,[button[@"rect"] rectValue]) && [self activateTableControl:[button[@"kind"] integerValue]]) return;
+    }
     if (NSPointInRect(point, _handleRect) && _hoverBlock.location != NSNotFound) { [self beginBlockDragAtPoint:point]; return; }
     if (self.window.firstResponder!=self) self.owner.previousResponder=self.window.firstResponder;
     NSUInteger index=[self characterIndexForInsertionAtPoint:point];
@@ -3278,6 +3295,45 @@ int cr_test_image_copy(uintptr_t ptr) {
 }
 int cr_test_image_delete(uintptr_t ptr) {
     return [CRE(ptr).text deleteImageAtHover] ? 1 : 0;
+}
+// cr_test_image_replace swaps the first figure's file for a given path, the
+// way the replace button does once NSOpenPanel returns.
+int cr_test_image_replace(uintptr_t ptr,const char *path) {
+    CREditor *e=CRE(ptr);
+    NSArray *figures=[e imageFigureRanges];
+    if (!figures.count) return 0;
+    return [e replaceImageAtLocation:[[figures firstObject] rangeValue].location withURL:[NSString stringWithUTF8String:path]] ? 1 : 0;
+}
+// cr_test_click_image_button sends a real mouse event to a pill button, so
+// the dispatch a physical click takes is the one under test: 0..4 are the
+// size presets, 5 copy, 6 delete.
+int cr_test_click_image_button(uintptr_t ptr,int index) {
+    CREditor *e=CRE(ptr);
+    NSArray *figures=[e imageFigureRanges];
+    if (!figures.count) return 0;
+    NSRange range=[[figures firstObject] rangeValue];
+    NSRange content=CRContent(e.text.string,range);
+    NSRange glyph=[e.text.layoutManager glyphRangeForCharacterRange:content actualCharacterRange:NULL];
+    if (!glyph.length) return 0;
+    NSRect bounds=[e.text.layoutManager boundingRectForGlyphRange:glyph inTextContainer:e.text.textContainer];
+    bounds=NSOffsetRect(bounds,e.text.textContainerOrigin.x,e.text.textContainerOrigin.y);
+    [e.text updateHoverAtPoint:NSMakePoint(NSMidX(bounds),NSMidY(bounds))];
+    NSRect button=[e.text imagePillButtonRect:index];
+    if (!button.size.width) return 0;
+    NSPoint point=[e.text convertPoint:NSMakePoint(NSMidX(button),NSMidY(button)) toView:nil];
+    NSEvent *event=[NSEvent mouseEventWithType:NSEventTypeLeftMouseDown location:point modifierFlags:0 timestamp:0 windowNumber:e.window.windowNumber context:nil eventNumber:0 clickCount:1 pressure:1];
+    [e.text mouseDown:event];
+    return 1;
+}
+int cr_test_click_table_button(uintptr_t ptr,int kind) {
+    CREditor *e=CRE(ptr);
+    if (!cr_test_hover_table(ptr)) return 0;
+    NSRect button=[e.text tableButtonRectForKind:kind];
+    if (!button.size.width) return 0;
+    NSPoint point=[e.text convertPoint:NSMakePoint(NSMidX(button),NSMidY(button)) toView:nil];
+    NSEvent *event=[NSEvent mouseEventWithType:NSEventTypeLeftMouseDown location:point modifierFlags:0 timestamp:0 windowNumber:e.window.windowNumber context:nil eventNumber:0 clickCount:1 pressure:1];
+    [e.text mouseDown:event];
+    return 1;
 }
 int cr_test_clipboard_image(void) {
     NSPasteboard *pasteboard = [NSPasteboard generalPasteboard];

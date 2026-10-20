@@ -132,7 +132,7 @@ CGO_ENABLED=1 go vet ./...
 
 1. **表格行列拖拽排序**：表格矩形与悬停状态已在 `hover_controls_darwin.h`（`_hoverTable`/`_tableRect`）；行列移动命令已存在（`table:row-up`/`table:row-down`/`table:column-leftward`/`table:column-rightward`，见 `structure_controls_darwin.h`）。可仿照块拖动（`beginBlockDragAtPoint:`/`updateDragTargetAtPoint:`/`commitBlockDrag`）实现行/列手柄与插入线，测试用直接桥驱动。
 2. ~~导出面板~~（已完成）：格式卡片模态在 `views/export.go`，回调 `OnExportHTML`/`OnExportPandoc` 已在 `main.go` 接线；截图测试 `TestExportShot`。
-3. **图片替换**：图片 pill 已有复制/删除（`_imageCopyRect`/`_imageDeleteRect`、`copyImageAtHover`/`deleteImageAtHover`）；附件是 `NSTextAttachment`（`.image`，属性 `CRImageURL`/`CRImageSource`），可加替换按钮 → `NSOpenPanel` → 更新 URL 并用 `imageAttachmentForURL:` 重载；测试用「给定路径」桥绕过面板。
+3. ~~图片替换~~（已完成）：pill 第三个图标 → `NSOpenPanel` → `replaceImageAtLocation:withURL:`（保留 alt/标题/尺寸后缀，baseDir 内写相对路径）。同时修复了悬停控件的真实点击接线（`mouseDown` 现在分发图片 pill、表格 +/-、语言标签）。
 4. **侧栏键盘导航**：`views/notes.go` 的列表与 `App.SelNote`；用 `OverlayShortcut` 处理 ↑↓/回车，注意不要从原生编辑器抢焦点。
 5. **每代码块行号**：需要可持久化的 Markdown 扩展（fence info 或文档元数据），涉及 `internal/mdext` 解析与 `nativerich` 代码块渲染；若不想扩展语法，保持全局开关即可。
 6. **查找替换核查**：`ShowFindBar` 使用 `NSTextView` 自带查找条；确认是否提供替换，若缺失再考虑自绘面板。

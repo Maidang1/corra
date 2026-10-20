@@ -4,7 +4,7 @@ package nativerich
 
 /*
 #cgo CFLAGS: -x objective-c -fobjc-arc
-#cgo LDFLAGS: -framework AppKit
+#cgo LDFLAGS: -framework AppKit -framework UniformTypeIdentifiers
 #include "bridge.h"
 */
 import "C"

@@ -242,6 +242,26 @@ func nativeTestImageDelete(e *Editor) bool {
 	return C.cr_test_image_delete(e.native) != 0
 }
 
+// nativeTestImageReplace swaps the first figure's file for a given path, the
+// way the replace button does once the open panel returns.
+func nativeTestImageReplace(e *Editor, path string) bool {
+	p, free := stringArg(path)
+	defer free()
+	return C.cr_test_image_replace(e.native, p) != 0
+}
+
+// nativeTestClickImageButton sends a real mouse event to a pill button:
+// 0..4 are the size presets, 5 copy, 6 delete.
+func nativeTestClickImageButton(e *Editor, index int) bool {
+	return C.cr_test_click_image_button(e.native, C.int(index)) != 0
+}
+
+// nativeTestClickTableButton sends a real mouse event to the hovered table's
+// add-row (0) / add-column (1) button.
+func nativeTestClickTableButton(e *Editor, kind int) bool {
+	return C.cr_test_click_table_button(e.native, C.int(kind)) != 0
+}
+
 // nativeTestClipboardImage reports whether the pasteboard holds an image.
 func nativeTestClipboardImage() bool {
 	return C.cr_test_clipboard_image() != 0

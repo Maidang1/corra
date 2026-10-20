@@ -17,7 +17,7 @@
     NSRange image = NSMakeRange(NSNotFound, 0);
     NSRect pill = NSZeroRect;
     NSArray *imageButtons = nil;
-    NSRect imageCopy = NSZeroRect, imageDelete = NSZeroRect;
+    NSRect imageCopy = NSZeroRect, imageDelete = NSZeroRect, imageReplace = NSZeroRect;
     NSTextTable *table = nil;
     NSRect tableRect = NSZeroRect;
     NSArray *tableButtons = nil;
@@ -59,7 +59,7 @@
                 CGFloat buttonWidth = 38 * zoom, buttonHeight = 24 * zoom, gap = 2 * zoom, pad = 5 * zoom;
                 CGFloat iconWidth = 24 * zoom, iconGap = 2 * zoom, dividerGap = 9 * zoom;
                 CGFloat sizesWidth = sizes.count * buttonWidth + (sizes.count - 1) * gap;
-                CGFloat pillWidth = sizesWidth + 2 * pad + dividerGap + 2 * iconWidth + iconGap;
+                CGFloat pillWidth = sizesWidth + 2 * pad + dividerGap + 3 * iconWidth + 2 * iconGap;
                 CGFloat pillHeight = buttonHeight + 2 * pad;
                 NSRect candidate = NSMakeRect(NSMaxX(rect) - pillWidth - 8 * zoom, NSMaxY(rect) - pillHeight - 8 * zoom, pillWidth, pillHeight);
                 if (candidate.origin.x < NSMinX(rect) + 4 * zoom) candidate.origin.x = NSMinX(rect) + 4 * zoom;
@@ -74,8 +74,9 @@
                 }
                 imageButtons = buttons;
                 CGFloat iconsX = NSMinX(candidate) + pad + sizesWidth + dividerGap;
-                imageCopy = NSMakeRect(iconsX, NSMinY(candidate) + pad, iconWidth, buttonHeight);
-                imageDelete = NSMakeRect(iconsX + iconWidth + iconGap, NSMinY(candidate) + pad, iconWidth, buttonHeight);
+                imageReplace = NSMakeRect(iconsX, NSMinY(candidate) + pad, iconWidth, buttonHeight);
+                imageCopy = NSMakeRect(iconsX + iconWidth + iconGap, NSMinY(candidate) + pad, iconWidth, buttonHeight);
+                imageDelete = NSMakeRect(iconsX + 2 * (iconWidth + iconGap), NSMinY(candidate) + pad, iconWidth, buttonHeight);
                 break;
             }
         }
@@ -134,7 +135,8 @@
                    !NSEqualRanges(languageBlock, _languageRange) || !NSEqualRects(language, _languageRect) ||
                    !NSEqualRanges(image, _hoverImage) || !NSEqualRects(pill, _imagePill) ||
                    table != _hoverTable || !NSEqualRects(tableRect, _tableRect) ||
-                   !NSEqualRects(imageCopy, _imageCopyRect) || !NSEqualRects(imageDelete, _imageDeleteRect);
+                   !NSEqualRects(imageCopy, _imageCopyRect) || !NSEqualRects(imageDelete, _imageDeleteRect) ||
+                   !NSEqualRects(imageReplace, _imageReplaceRect);
     _hoverPoint = point;
     if (!changed) return;
     NSRect oldCopy = _copyRect, oldHandle = _handleRect, oldChip = _hoverCodeChip;
@@ -150,6 +152,7 @@
     _imageButtons = imageButtons;
     _imageCopyRect = imageCopy;
     _imageDeleteRect = imageDelete;
+    _imageReplaceRect = imageReplace;
     _hoverTable = table;
     _tableRect = tableRect;
     _tableButtons = tableButtons;
@@ -172,6 +175,7 @@
     _imageButtons = nil;
     _imageCopyRect = NSZeroRect;
     _imageDeleteRect = NSZeroRect;
+    _imageReplaceRect = NSZeroRect;
     _hoverTable = nil;
     _tableRect = NSZeroRect;
     _tableButtons = nil;
@@ -643,16 +647,17 @@
             NSSize size = [labels[i] sizeWithAttributes:attrs];
             [labels[i] drawAtPoint:NSMakePoint(NSMidX(button) - size.width / 2, NSMidY(button) - size.height / 2) withAttributes:attrs];
         }
-        // A divider separates the size presets from copy and delete.
-        CGFloat dividerX = NSMinX(_imageCopyRect) - 4.5 * zoom;
+        // A divider separates the size presets from replace, copy and delete.
+        CGFloat dividerX = NSMinX(_imageReplaceRect) - 4.5 * zoom;
         [[(dark ? [NSColor whiteColor] : [NSColor blackColor]) colorWithAlphaComponent:0.12] setFill];
         NSRectFill(NSMakeRect(dividerX, NSMinY(_imagePill) + 7 * zoom, 1, _imagePill.size.height - 14 * zoom));
+        NSImage *replaceIcon = CRTintedSymbol(@"arrow.triangle.2.circlepath", 12 * zoom, NSFontWeightRegular, muted);
         NSImage *copyIcon = CRTintedSymbol(@"doc.on.doc", 12 * zoom, NSFontWeightRegular, muted);
         NSImage *deleteIcon = CRTintedSymbol(@"trash", 12 * zoom, NSFontWeightRegular,
                                              NSPointInRect(_hoverPoint, _imageDeleteRect) ? NSColor.systemRedColor : muted);
-        for (NSUInteger i = 0; i < 2; i++) {
-            NSRect button = i == 0 ? _imageCopyRect : _imageDeleteRect;
-            NSImage *icon = i == 0 ? copyIcon : deleteIcon;
+        for (NSUInteger i = 0; i < 3; i++) {
+            NSRect button = i == 0 ? _imageReplaceRect : (i == 1 ? _imageCopyRect : _imageDeleteRect);
+            NSImage *icon = i == 0 ? replaceIcon : (i == 1 ? copyIcon : deleteIcon);
             if (NSPointInRect(_hoverPoint, button)) {
                 [[(dark ? [NSColor whiteColor] : [NSColor blackColor]) colorWithAlphaComponent:0.08] setFill];
                 [[NSBezierPath bezierPathWithRoundedRect:button xRadius:5 * zoom yRadius:5 * zoom] fill];
@@ -672,6 +677,24 @@
     return -1;
 }
 
+// imagePillButtonRect exposes a pill button to the test bridge: 0..4 are the
+// size presets, 5 copy, 6 delete. Replace stays out: its click opens a panel.
+- (NSRect)imagePillButtonRect:(NSInteger)index {
+    if (index >= 0 && index < (NSInteger)_imageButtons.count) return [_imageButtons[index] rectValue];
+    if (index == 5) return _imageCopyRect;
+    if (index == 6) return _imageDeleteRect;
+    return NSZeroRect;
+}
+
+// tableButtonRectForKind exposes the add-row (0) / add-column (1) button of
+// the hovered table to the test bridge.
+- (NSRect)tableButtonRectForKind:(NSInteger)kind {
+    for (NSDictionary *button in _tableButtons) {
+        if ([button[@"kind"] integerValue] == kind) return [button[@"rect"] rectValue];
+    }
+    return NSZeroRect;
+}
+
 // imageAttachmentInRange finds the rendered attachment inside a figure range.
 - (NSTextAttachment *)imageAttachmentInRange:(NSRange)range {
     __block NSTextAttachment *found = nil;
@@ -689,6 +712,27 @@
     NSPasteboard *pasteboard = [NSPasteboard generalPasteboard];
     [pasteboard clearContents];
     return [pasteboard writeObjects:@[image]];
+}
+
+// replaceImageAtHover asks for a new picture and swaps the figure's URL,
+// keeping alt, title and size. A file inside the document's folder is written
+// relative, so the note survives being moved with its assets.
+- (void)replaceImageAtHover {
+    if (_hoverImage.location == NSNotFound) return;
+    NSUInteger location = _hoverImage.location;
+    NSOpenPanel *panel = [NSOpenPanel openPanel];
+    panel.title = @"替换图片";
+    panel.allowedContentTypes = @[UTTypeImage];
+    panel.allowsMultipleSelection = NO;
+    NSUInteger revision = self.owner.documentRevision;
+    NSString *snapshot = [self.string copy];
+    [panel beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse response) {
+        if (response != NSModalResponseOK || !self.window) return;
+        if (self.owner.documentRevision != revision || ![self.string isEqual:snapshot]) return;
+        NSString *path = panel.URL.path;
+        if (path.length) [self.owner replaceImageAtLocation:location withURL:path];
+    }];
+    [self clearHover];
 }
 
 - (BOOL)deleteImageAtHover {
@@ -799,6 +843,7 @@
     if (_copyRect.size.height > 0) [self addCursorRect:_copyRect cursor:NSCursor.pointingHandCursor];
     if (_languageRect.size.height > 0) [self addCursorRect:_languageRect cursor:NSCursor.pointingHandCursor];
     for (NSValue *value in _imageButtons) [self addCursorRect:[value rectValue] cursor:NSCursor.pointingHandCursor];
+    if (_imageReplaceRect.size.width) [self addCursorRect:_imageReplaceRect cursor:NSCursor.pointingHandCursor];
     if (_imageCopyRect.size.width) [self addCursorRect:_imageCopyRect cursor:NSCursor.pointingHandCursor];
     if (_imageDeleteRect.size.width) [self addCursorRect:_imageDeleteRect cursor:NSCursor.pointingHandCursor];
     for (NSDictionary *button in _tableButtons) [self addCursorRect:[button[@"rect"] rectValue] cursor:NSCursor.pointingHandCursor];
