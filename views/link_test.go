@@ -2,6 +2,7 @@ package views
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -43,5 +44,27 @@ func TestLinkCandidates(t *testing.T) {
 	}
 	if got := (&View{App: &app.App{}}).LinkCandidates("x"); got != "[]" {
 		t.Fatalf("missing library = %q", got)
+	}
+}
+
+func TestResolveLinkedDocument(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(dir, "sub", "my note.md")
+	if err := os.WriteFile(other, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	v := &View{App: &app.App{Path: filepath.Join(dir, "a.md")}}
+	for _, target := range []string{"sub/my note.md", "sub/my%20note.md#part"} {
+		if path, ok := v.ResolveLinkedDocument(target); !ok || path != other {
+			t.Errorf("%q resolved to %q, %v", target, path, ok)
+		}
+	}
+	for _, target := range []string{"gone.md", "sub", ""} {
+		if _, ok := v.ResolveLinkedDocument(target); ok {
+			t.Errorf("%q resolved", target)
+		}
 	}
 }

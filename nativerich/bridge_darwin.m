@@ -23,6 +23,13 @@ static NSString *const CRKbd = @"CorraKbd"; // <kbd>key</kbd>
 static NSString *const CRHighlight = @"CorraHighlight";
 static NSString *const CRSup = @"CorraSup";
 static NSString *const CRSub = @"CorraSub";
+// CRColor/CRBackground hold the stored CSS color of <span style="color:…">
+// and background-color; drawing resolves them per theme.
+static NSString *const CRColor = @"CorraColor";
+static NSString *const CRBackground = @"CorraBackground";
+// CRMention marks a page mention: a "[@Title](note.md)" link drawn as a chip
+// that opens the note on click and deletes as one unit.
+static NSString *const CRMention = @"CorraMention";
 static NSString *const CRHl = @"CorraHl"; // syntax-highlight token class on code
 static NSString *const CRSoftBreak = @"CorraSoftBreak"; // a U+2028 that was a plain source newline
 static NSString *const CRFootnote = @"CorraFootnote";
@@ -42,6 +49,8 @@ static NSString *const CROwnPaste = @"app.corra.rich-document";
 extern char *cr_emoji(const char *word);
 extern char *cr_emoji_search(const char *query);
 extern char *cr_link_candidates(uintptr_t handle, const char *query);
+extern int cr_open_document(uintptr_t handle, const char *target);
+extern char *cr_page_info(const char *path);
 extern char *cr_paste_image(uintptr_t handle, const char *pngBase64, const char *name);
 extern char *cr_drop_files(uintptr_t handle, const char *pathsJSON);
 extern char *cr_html_to_markdown(const char *html);
@@ -125,6 +134,9 @@ extern char *cr_render_math_document(uintptr_t handle, const char *document, int
     NSString *_linkFilter;
     NSInteger _linkSelected;
     NSRange _linkQuery;
+    BOOL _linkMention;      // the open menu answers an "@" mention, not "[["
+    BOOL _linkCard;         // ...and the pick becomes a page card (slash menu)
+    NSUInteger _linkCardAt; // where that card's "@" was typed
     NSPanel *_formatPanel;
     CRFormatBarView *_formatView;
     NSUInteger _footnoteBack; // caret spot the last footnote jump started from; NSNotFound when none
@@ -286,6 +298,10 @@ extern char *cr_render_math_document(uintptr_t handle, const char *document, int
 - (void)setImageSize:(NSString *)spec atLocation:(NSUInteger)location;
 - (BOOL)replaceImageAtLocation:(NSUInteger)location withURL:(NSString *)url;
 - (NSArray *)tocFigureRanges;
+- (NSAttributedString *)pageFigure:(NSDictionary *)p;
+- (NSDictionary *)pageCardState;
+- (BOOL)openDocumentLink:(id)link;
+- (BOOL)deleteMentionBefore:(NSUInteger)location;
 - (NSArray *)tocEntriesFromText;
 - (void)refreshTOC;
 - (NSInteger)tocEntryAtPoint:(NSPoint)point range:(NSRange)range;
@@ -595,6 +611,19 @@ static NSArray *CRImportedParagraphs(NSArray *paragraphs) {
     }
     return result;
 }
+// CRLocalDocument reports whether a link target is a note next to this one
+// ("other.md", "dir/note.markdown#part"), not a web page or an anchor.
+static BOOL CRLocalDocument(id target) {
+    NSString *link=[target isKindOfClass:NSURL.class] ? [(NSURL *)target absoluteString] : [target isKindOfClass:NSString.class] ? target : nil;
+    if (!link.length || [link hasPrefix:@"#"] || [link rangeOfString:@":"].location!=NSNotFound) return NO;
+    NSString *path=[[link componentsSeparatedByString:@"#"].firstObject stringByRemovingPercentEncoding] ?: link;
+    NSString *ext=path.pathExtension.lowercaseString;
+    return [ext isEqual:@"md"] || [ext isEqual:@"markdown"];
+}
+// CRIsMention: a link to a note whose text starts with "@".
+static BOOL CRIsMention(NSString *text, id link) {
+    return [text isKindOfClass:NSString.class] && text.length>1 && [text hasPrefix:@"@"] && CRLocalDocument(link);
+}
 static BOOL CRHasFootnote(NSDictionary *paragraph) {
     if ([paragraph[@"footnoteId"] length]) return YES;
     for (NSDictionary *run in paragraph[@"runs"]) if ([run[@"footnote"] length]) return YES;
@@ -604,6 +633,7 @@ static BOOL CRHasFootnote(NSDictionary *paragraph) {
 
 // The slash menu and format bar panels live at file scope; their editor halves
 // are included inside @implementation CREditor below.
+#include "color_palette_darwin.h"
 #include "slash_menu_view_darwin.h"
 #include "format_bar_view_darwin.h"
 #include "footnote_card_view_darwin.h"
@@ -630,6 +660,7 @@ static BOOL CRHasFootnote(NSDictionary *paragraph) {
         return YES;
     }
     NSString *target=[link isKindOfClass:NSURL.class] ? [(NSURL *)link absoluteString] : [link description];
+    if ([self openDocumentLink:link]) return YES; // a note opens in Corra, not in another app
     if (![target hasPrefix:@"#"]) return NO;
     [self jumpToAnchor:[target substringFromIndex:1]];
     return YES; // never hand a bare fragment to the system
@@ -765,6 +796,17 @@ static BOOL CRHasFootnote(NSDictionary *paragraph) {
         out[NSForegroundColorAttributeName] = _dark ? [NSColor colorWithWhite:0.65 alpha:1] : [NSColor colorWithWhite:0.43 alpha:1];
     }
     if (attrs[NSLinkAttributeName]) out[NSForegroundColorAttributeName] = NSColor.linkColor;
+    if (attrs[NSLinkAttributeName] && !attrs[NSAttachmentAttributeName] && ![attrs[CRMention] boolValue]) out[NSUnderlineStyleAttributeName] = @(NSUnderlineStyleSingle);
+    // A chosen text color wins over the link blue, as in Notion; raw HTML
+    // and code keep their own ink.
+    if ([attrs[CRMention] boolValue] && attrs[NSLinkAttributeName] && !mono) {
+        // A mention reads as a reference to a page, not as a web link.
+        out[NSForegroundColorAttributeName] = _dark ? [NSColor colorWithWhite:0.86 alpha:1] : [NSColor colorWithWhite:0.22 alpha:1];
+        out[NSFontAttributeName] = [[NSFontManager sharedFontManager] convertWeight:YES ofFont:out[NSFontAttributeName]];
+        out[NSToolTipAttributeName] = [NSString stringWithFormat:@"%@\n点按以打开", [attrs[NSLinkAttributeName] description]];
+    }
+    NSColor *ink = [attrs[CRHTML] boolValue] || mono ? nil : CRResolvedColor(attrs[CRColor], NO, _dark);
+    if (ink) out[NSForegroundColorAttributeName] = ink;
     if (attrs[CRHl]) out[NSForegroundColorAttributeName] = CRHlColor(attrs[CRHl],_dark);
     return out;
 }
@@ -941,9 +983,12 @@ static BOOL CRFootnoteAreaStart(CREditor *e, NSUInteger at) {
         if ([run[@"highlight"] boolValue]) attrs[CRHighlight] = @YES;
         if ([run[@"sup"] boolValue]) attrs[CRSup] = @YES;
         if ([run[@"sub"] boolValue]) attrs[CRSub] = @YES;
+        if ([run[@"color"] length]) attrs[CRColor] = run[@"color"];
+        if ([run[@"background"] length]) attrs[CRBackground] = run[@"background"];
         if ([run[@"html"] boolValue]) attrs[CRHTML] = @YES;
         if ([run[@"link"] length]) attrs[NSLinkAttributeName] = run[@"link"];
         if ([run[@"linkTitle"] length]) attrs[CRLinkTitle] = run[@"linkTitle"];
+        if (CRIsMention(run[@"text"],run[@"link"]) && ![run[@"code"] boolValue]) attrs[CRMention] = @YES;
         if ([run[@"footnote"] length]) {
             [result appendAttributedString:[self footnote:run attributes:[self visual:attrs paragraph:paragraph]]];
             continue;
@@ -1021,8 +1066,8 @@ static BOOL CRFootnoteAreaStart(CREditor *e, NSUInteger at) {
             _emptyParagraph = CRBody();
             continue;
         }
-        if (CRKind(p,@"math") || CRKind(p,@"image") || CRKind(p,@"diagram") || CRKind(p,@"toc")) {
-            [result appendAttributedString:CRKind(p,@"toc") ? [self tocFigure:p] : [self figure:p]];
+        if (CRKind(p,@"math") || CRKind(p,@"image") || CRKind(p,@"diagram") || CRKind(p,@"toc") || CRKind(p,@"page")) {
+            [result appendAttributedString:CRKind(p,@"toc") ? [self tocFigure:p] : CRKind(p,@"page") ? [self pageFigure:p] : [self figure:p]];
             if (i+1 < paragraphs.count) {
                 NSMutableDictionary *ending=[[self visual:@{CRParagraph:p} paragraph:p] mutableCopy];
                 [ending removeObjectForKey:NSBackgroundColorAttributeName];
@@ -1136,7 +1181,7 @@ static BOOL CRFootnoteAreaStart(CREditor *e, NSUInteger at) {
             }
         }
         NSMutableDictionary *p = [CRParagraphAt(self,range.location) mutableCopy];
-        BOOL figure=CRKind(p,@"math") || CRKind(p,@"image") || CRKind(p,@"diagram") || CRKind(p,@"toc");
+        BOOL figure=CRKind(p,@"math") || CRKind(p,@"image") || CRKind(p,@"diagram") || CRKind(p,@"toc") || CRKind(p,@"page");
         if (figure && ![[_text.string substringWithRange:range] isEqual:@"\uFFFC"]) {
             // The user typed into the figure: it is source text now. With the
             // figure itself deleted, what is left is prose.
@@ -1199,6 +1244,8 @@ static BOOL CRFootnoteAreaStart(CREditor *e, NSUInteger at) {
                 if ([attrs[CRHTML] boolValue]) base[@"html"]=@YES;
                 if ([attrs[CRSup] boolValue]) base[@"sup"]=@YES;
                 if ([attrs[CRSub] boolValue]) base[@"sub"]=@YES;
+                if ([attrs[CRColor] isKindOfClass:NSString.class] && [attrs[CRColor] length]) base[@"color"]=attrs[CRColor];
+                if ([attrs[CRBackground] isKindOfClass:NSString.class] && [attrs[CRBackground] length]) base[@"background"]=attrs[CRBackground];
                 if (attrs[NSLinkAttributeName]) base[@"link"]=[attrs[NSLinkAttributeName] description];
                 if (attrs[NSLinkAttributeName] && attrs[CRLinkTitle]) base[@"linkTitle"]=attrs[CRLinkTitle];
                 // U+2028 line separators become break runs so a soft visual
@@ -1435,6 +1482,39 @@ static BOOL CRFootnoteAreaStart(CREditor *e, NSUInteger at) {
     [_undo endUndoGrouping];
     [self notify];
 }
+// applyColor sets ("color:#hex", "background:#hex") or clears ("color:",
+// "background:") a text or background color on the selection, or on what is
+// typed next when nothing is selected.
+- (void)applyColor:(NSString *)command selection:(NSRange)selection {
+    BOOL background=[command hasPrefix:@"background:"];
+    NSString *key=background ? CRBackground : CRColor;
+    NSString *value=[[command substringFromIndex:background ? 11 : 6] lowercaseString];
+    if (value.length && !CRResolvedColor(value,background,NO)) return;
+    if (!selection.length) {
+        NSMutableDictionary *typing=[_text.typingAttributes mutableCopy];
+        if (value.length) typing[key]=value; else [typing removeObjectForKey:key];
+        _text.typingAttributes=[self visual:typing paragraph:typing[CRParagraph] ?: CRBody()];
+        return;
+    }
+    if (NSMaxRange(selection)>_text.string.length) return;
+    NSMutableAttributedString *after=[_text.textStorage mutableCopy];
+    BOOL changed=NO;
+    for (NSValue *v in CRSelectedParagraphs(self)) {
+        NSDictionary *p=CRParagraphAt(self,v.rangeValue.location);
+        // Figures and source lines have no inline styles to color.
+        if ([@[@"code",@"source",@"opaque",@"math",@"image",@"diagram",@"toc",@"page"] containsObject:p[@"kind"] ?: @""]) continue;
+        // Line endings stay uncolored: a tinted newline paints a stray chip.
+        NSRange part=NSIntersectionRange(CRContent(_text.string,v.rangeValue),selection);
+        if (!part.length) continue;
+        if (value.length) [after addAttribute:key value:value range:part];
+        else [after removeAttribute:key range:part];
+        changed=YES;
+    }
+    if (!changed) return;
+    BOOL wasSuppress=_suppress; _suppress=YES;
+    [self replace:NSMakeRange(0,_text.string.length) with:after selection:selection];
+    _suppress=wasSuppress; [self notify];
+}
 - (void)format:(NSString *)command {
     if ([command isEqual:@"footnote:insert"]) { [self insertFootnote]; return; }
     if ([command isEqual:@"footnote:definition"] || [command isEqual:@"footnote:reference"]) {
@@ -1501,6 +1581,7 @@ static BOOL CRFootnoteAreaStart(CREditor *e, NSUInteger at) {
         [self replace:NSMakeRange(0,_text.string.length) with:after selection:selection];
         return;
     }
+    if ([command hasPrefix:@"color:"] || [command hasPrefix:@"background:"]) { [self applyColor:command selection:selection]; return; }
     NSString *key = @{@"bold":CRBold,@"italic":CRItalic,@"strike":NSStrikethroughStyleAttributeName,@"code":CRCode,@"underline":CRUnderline,@"highlight":CRHighlight,@"sup":CRSup,@"sub":CRSub}[command];
     BOOL clear = [command isEqual:@"clear"];
     if (!key) for (NSValue *value in CRSelectedParagraphs(self)) if (CRKind(CRParagraphAt(self,value.rangeValue.location),@"table")) return;
@@ -1580,7 +1661,7 @@ static BOOL CRFootnoteAreaStart(CREditor *e, NSUInteger at) {
         }
         if (clear) {
             // Clear strips the inline traits as well as the paragraph kind.
-            NSArray *traits=@[CRBold,CRItalic,CRCode,CRUnderline,CRKbd,CRHighlight,CRSup,CRSub,NSStrikethroughStyleAttributeName,NSLinkAttributeName,CRLinkTitle];
+            NSArray *traits=@[CRBold,CRItalic,CRCode,CRUnderline,CRKbd,CRHighlight,CRSup,CRSub,CRColor,CRBackground,NSStrikethroughStyleAttributeName,NSLinkAttributeName,CRLinkTitle];
             if (selection.length) for (NSString *trait in traits) [after removeAttribute:trait range:selection];
             else if (!CRKind(CRParagraphAt(self,selection.location),@"source")) {
                 NSMutableDictionary *p=[CRParagraphAt(self,selection.location) mutableCopy];
@@ -1761,6 +1842,7 @@ static BOOL CRFootnoteAreaStart(CREditor *e, NSUInteger at) {
 #include "alert_darwin.h"
 #include "image_darwin.h"
 #include "toc_darwin.h"
+#include "page_card_darwin.h"
 #include "block_rules_darwin.h"
 #include "slash_menu_darwin.h"
 #include "format_bar_darwin.h"
@@ -2121,7 +2203,7 @@ static BOOL CRFootnoteAreaStart(CREditor *e, NSUInteger at) {
     BOOL renderable=YES;
     NSMutableArray *paragraphs=[NSMutableArray array];
     for (NSDictionary *p in ps) {
-        if (!CRKind(p,@"math") && !CRKind(p,@"image") && !CRKind(p,@"code") && !CRKind(p,@"diagram") && !CRKind(p,@"toc")) renderable=NO;
+        if (!CRKind(p,@"math") && !CRKind(p,@"image") && !CRKind(p,@"code") && !CRKind(p,@"diagram") && !CRKind(p,@"toc") && !CRKind(p,@"page")) renderable=NO;
         // Fresh parse IDs collide with the document's; identity stays valid
         // through baseline, not id.
         NSMutableDictionary *clean=[p mutableCopy];
@@ -2428,6 +2510,7 @@ static BOOL CRFootnoteAreaStart(CREditor *e, NSUInteger at) {
         if (edit.length && [e replaceCodeRange:edit withText:@""]) return;
         if ([e replaceAcrossTable:selection withText:@""]) return;
     }
+    if (!e.suppress && self.editable && !self.hasMarkedText && !selection.length && selection.location && [e deleteMentionBefore:selection.location]) return;
     if (!e.suppress && self.editable && !self.hasMarkedText && selection.length && selection.length==self.string.length) {
         // Clearing the whole note leaves one plain line, not the last block's kind.
         NSDictionary *body=CRBody(), *attrs=[e visual:@{CRParagraph:body} paragraph:body];
@@ -2538,11 +2621,14 @@ static BOOL CRFootnoteAreaStart(CREditor *e, NSUInteger at) {
     NSLayoutManager *lm=self.layoutManager;
     NSTextStorage *storage=self.textStorage;
     if (!visible.length || NSMaxRange(visible)>storage.length) return;
-    for (NSString *key in @[CRHighlight,CRCode,CRKbd]) {
-    BOOL mark=key==CRHighlight, kbd=key==CRKbd;
+    for (NSString *key in @[CRBackground,CRMention,CRHighlight,CRCode,CRKbd]) {
+    BOOL tint=key==CRBackground, mention=key==CRMention, mark=key==CRHighlight || tint || mention, kbd=key==CRKbd;
     // Longest runs: kerning and other attributes must not split one chip.
     [storage enumerateAttribute:key inRange:visible options:0 usingBlock:^(id value, NSRange range, BOOL *stop) {
-        if (![value boolValue]) return;
+        NSColor *fill=tint ? CRResolvedColor(value,YES,e.dark) : nil;
+        if (tint ? !fill : ![value boolValue]) return;
+        if (mention && ![storage attribute:NSLinkAttributeName atIndex:range.location effectiveRange:NULL]) return;
+        if (mention) fill=e.dark ? [NSColor colorWithWhite:1 alpha:0.09] : [NSColor colorWithWhite:0 alpha:0.05];
         NSDictionary *attrs=[storage attributesAtIndex:range.location effectiveRange:NULL];
         NSDictionary *p=attrs[CRParagraph];
         if (CRKind(p,@"code") || CRKind(p,@"source") || CRKind(p,@"opaque")) return;
@@ -2562,7 +2648,8 @@ static BOOL CRFootnoteAreaStart(CREditor *e, NSUInteger at) {
             NSRect chip=NSMakeRect(bounds.origin.x-padX,baseline-font.ascender-padY,bounds.size.width+2*padX,font.ascender-font.descender+2*padY);
             chip=NSOffsetRect(chip,self.textContainerOrigin.x,self.textContainerOrigin.y);
             NSBezierPath *path=[NSBezierPath bezierPathWithRoundedRect:chip xRadius:(mark ? 3 : 4)*e.zoom yRadius:(mark ? 3 : 4)*e.zoom];
-            if (mark) [(e.dark ? [NSColor colorWithRed:0.75 green:0.55 blue:0.10 alpha:0.45] : [NSColor colorWithRed:1 green:0.89 blue:0.45 alpha:1]) setFill];
+            if (fill) [fill setFill];
+            else if (mark) [(e.dark ? [NSColor colorWithRed:0.75 green:0.55 blue:0.10 alpha:0.45] : [NSColor colorWithRed:1 green:0.89 blue:0.45 alpha:1]) setFill];
             else if (kbd) [(e.dark ? [NSColor colorWithWhite:0.26 alpha:1] : [NSColor colorWithWhite:0.97 alpha:1]) setFill];
             else [(e.dark ? [NSColor colorWithWhite:1 alpha:0.10] : [NSColor colorWithWhite:0 alpha:0.055]) setFill];
             [path fill];
@@ -2848,6 +2935,16 @@ static BOOL CRFootnoteAreaStart(CREditor *e, NSUInteger at) {
     if (simpleClick && glyph<self.layoutManager.numberOfGlyphs && NSPointInRect(containerPoint,[self.layoutManager boundingRectForGlyphRange:NSMakeRange(glyph,1) inTextContainer:self.textContainer])) {
         NSUInteger hit=[self.layoutManager characterIndexForGlyphAtIndex:glyph];
         NSDictionary *attrs=hit<self.string.length ? [self.textStorage attributesAtIndex:hit effectiveRange:NULL] : @{};
+        id document=[attrs[CRMention] boolValue] ? attrs[NSLinkAttributeName] : CRKind(attrs[CRParagraph],@"page") ? CRPageTarget(attrs[CRParagraph]) : nil;
+        if (document) {
+            // A mention or page card opens its note on click, as in Notion; a
+            // drag still selects across it.
+            NSEvent *next=[self.window nextEventMatchingMask:NSEventMaskLeftMouseUp|NSEventMaskLeftMouseDragged untilDate:NSDate.distantFuture inMode:NSEventTrackingRunLoopMode dequeue:NO];
+            if (next.type==NSEventTypeLeftMouseUp && [self.owner openDocumentLink:document]) {
+                [self.window nextEventMatchingMask:NSEventMaskLeftMouseUp untilDate:NSDate.distantPast inMode:NSEventTrackingRunLoopMode dequeue:YES];
+                return;
+            }
+        }
         BOOL styled=attrs[CRMathText]!=nil || attrs[CRFootnote]!=nil;
         for (NSString *key in @[CRBold,CRItalic,CRCode,NSStrikethroughStyleAttributeName,CRUnderline,CRKbd,CRHighlight,CRSup,CRSub,NSLinkAttributeName]) if (attrs[key] && ![attrs[key] isEqual:@NO]) styled=YES;
         if (styled && !attrs[CRInlineSource]) {
@@ -3112,6 +3209,9 @@ uintptr_t cr_new(uintptr_t window, uintptr_t callback) {
     e.text.textContainer.containerSize=NSMakeSize(e.scroll.contentSize.width,CGFLOAT_MAX); e.text.textContainer.widthTracksTextView=YES;
     e.text.textContainerInset=NSMakeSize(36,22); e.text.automaticQuoteSubstitutionEnabled=NO; e.text.automaticDashSubstitutionEnabled=NO;
     e.text.automaticLinkDetectionEnabled=NO; e.text.automaticDataDetectionEnabled=NO; e.text.automaticTextReplacementEnabled=NO;
+    // Link ink and underline come from visual:, so a mention chip or a
+    // colored link can look like itself; AppKit only adds the hand cursor.
+    e.text.linkTextAttributes=@{NSCursorAttributeName:NSCursor.pointingHandCursor};
     // Markdown is literal: no silent autocorrect or spaces around pasted words.
     e.text.automaticSpellingCorrectionEnabled=NO; e.text.smartInsertDeleteEnabled=NO;
     e.text.drawsBackground=NO; // CRTextView.drawRect paints canvas and chips itself
@@ -3194,8 +3294,8 @@ void cr_style(uintptr_t ptr,double zoom,int dark,int editable) {
         [copy enumerateAttribute:NSAttachmentAttributeName inRange:NSMakeRange(0,copy.length) options:0 usingBlock:^(id attachment, NSRange range, BOOL *stop) {
             if (!attachment) return;
             NSDictionary *paragraph=CRParagraphAt(e,range.location);
-            if (!CRKind(paragraph,@"image") && !CRKind(paragraph,@"diagram") && !CRKind(paragraph,@"toc")) return;
-            NSAttributedString *figure=CRKind(paragraph,@"toc") ? [e tocFigure:paragraph] : [e figure:paragraph];
+            if (!CRKind(paragraph,@"image") && !CRKind(paragraph,@"diagram") && !CRKind(paragraph,@"toc") && !CRKind(paragraph,@"page")) return;
+            NSAttributedString *figure=CRKind(paragraph,@"toc") ? [e tocFigure:paragraph] : CRKind(paragraph,@"page") ? [e pageFigure:paragraph] : [e figure:paragraph];
             NSTextAttachment *updated=figure.length ? [figure attribute:NSAttachmentAttributeName atIndex:0 effectiveRange:NULL] : nil;
             if (updated) [e.text.textStorage addAttribute:NSAttachmentAttributeName value:updated range:range];
         }];
@@ -3408,6 +3508,11 @@ int cr_test_emoji_shot(uintptr_t ptr,const char *path) {
 }
 int cr_test_link_shot(uintptr_t ptr,const char *path) {
     return [CRE(ptr) linkMenuSnapshotTo:[NSString stringWithUTF8String:path]] ? 1 : 0;
+}
+char *cr_test_page_cards(uintptr_t ptr) {
+    NSData *json=[NSJSONSerialization dataWithJSONObject:[CRE(ptr) pageCardState] options:0 error:NULL];
+    NSString *value=json ? [[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding] : nil;
+    return strdup(value.UTF8String ?: "{}");
 }
 char *cr_test_link(uintptr_t ptr) {
     NSData *json=[NSJSONSerialization dataWithJSONObject:[CRE(ptr) linkMenuState] options:0 error:NULL];

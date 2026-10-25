@@ -1,12 +1,13 @@
 // Package mdext holds the goldmark extensions shared by the renderer and
 // the rich-text codec: ==highlight==, ^superscript^, ~subscript~ (single
 // tilde; ~~ stays strikethrough, as in Typora), inline HTML tags
-// (<u>/<ins>, <mark>, <kbd>, <sub>, <sup>, <br>), YAML front matter
+// (<u>/<ins>, <mark>, <kbd>, <sub>, <sup>, <br>, colored <span>), YAML front matter
 // splitting and [TOC] detection.
 package mdext
 
 import (
 	"bytes"
+	"regexp"
 	"strings"
 
 	"github.com/yuin/goldmark"
@@ -25,6 +26,7 @@ var (
 	KindSuperscript = ast.NewNodeKind("Superscript")
 	KindSubscript   = ast.NewNodeKind("Subscript")
 	KindKbd         = ast.NewNodeKind("Kbd")
+	KindSpan        = ast.NewNodeKind("Span")
 )
 
 // Mark is ==highlighted== inline content.
@@ -72,6 +74,72 @@ func (n *Kbd) Dump(source []byte, level int) { ast.DumpHelper(n, source, level, 
 
 // Kind implements ast.Node.
 func (n *Kbd) Kind() ast.NodeKind { return KindKbd }
+
+// Span is <span style="color:…; background-color:…">colored</span> inline
+// content: text and background colors, as Typora and Notion exports write
+// them. Spans carrying anything else stay raw HTML.
+type Span struct {
+	ast.BaseInline
+	Color, Background string
+}
+
+// Dump implements ast.Node.
+func (n *Span) Dump(source []byte, level int) {
+	ast.DumpHelper(n, source, level, map[string]string{"Color": n.Color, "Background": n.Background}, nil)
+}
+
+// Kind implements ast.Node.
+func (n *Span) Kind() ast.NodeKind { return KindSpan }
+
+// SpanStyle reads the colors of a <span> opening tag. ok is false unless the
+// tag's only attribute is a style holding nothing but color and
+// background-color declarations with plain values (#hex or a color name).
+func SpanStyle(tag string) (color, background string, ok bool) {
+	m := spanTag.FindStringSubmatch(tag)
+	if m == nil {
+		return "", "", false
+	}
+	style := m[1] + m[2]
+	for _, decl := range strings.Split(style, ";") {
+		if strings.TrimSpace(decl) == "" {
+			continue
+		}
+		name, value, found := strings.Cut(decl, ":")
+		if !found {
+			return "", "", false
+		}
+		value = strings.ToLower(strings.TrimSpace(value))
+		if !colorValue.MatchString(value) {
+			return "", "", false
+		}
+		switch strings.ToLower(strings.TrimSpace(name)) {
+		case "color":
+			color = value
+		case "background-color", "background":
+			background = value
+		default:
+			return "", "", false
+		}
+	}
+	return color, background, color != "" || background != ""
+}
+
+// SpanTag writes the opening tag SpanStyle reads back.
+func SpanTag(color, background string) string {
+	var decls []string
+	if color != "" {
+		decls = append(decls, "color:"+color)
+	}
+	if background != "" {
+		decls = append(decls, "background-color:"+background)
+	}
+	return `<span style="` + strings.Join(decls, ";") + `">`
+}
+
+var (
+	spanTag    = regexp.MustCompile(`(?is)^<span\s+style\s*=\s*(?:"([^"]*)"|'([^']*)')\s*>$`)
+	colorValue = regexp.MustCompile(`^(#[0-9a-f]{3}|#[0-9a-f]{6}|[a-z]+)$`)
+)
 
 // --- tilde: ~sub~ and ~~strike~~ share one processor ---------------------
 
@@ -207,14 +275,21 @@ var htmlOpen = map[string]func() ast.Node{
 var htmlClose = map[string]string{
 	"</u>": "<u>", "</ins>": "<ins>", "</mark>": "<mark>",
 	"</kbd>": "<kbd>", "</sub>": "<sub>", "</sup>": "<sup>",
+	"</span>": "<span>",
 }
 
 // rawHTMLTag returns the lowercased bare tag when node is one of the inline
 // HTML tags we interpret, e.g. "<u>" from `<u class="x">`.
 func rawHTMLTag(node ast.Node, src []byte) (string, bool) {
+	name, _, ok := rawHTMLTagSource(node, src)
+	return name, ok
+}
+
+// rawHTMLTagSource is rawHTMLTag that also returns the tag as written.
+func rawHTMLTagSource(node ast.Node, src []byte) (string, string, bool) {
 	raw, ok := node.(*ast.RawHTML)
 	if !ok || raw.Segments == nil {
-		return "", false
+		return "", "", false
 	}
 	var buf bytes.Buffer
 	for i := 0; i < raw.Segments.Len(); i++ {
@@ -233,20 +308,21 @@ func rawHTMLTag(node ast.Node, src []byte) (string, bool) {
 		name = strings.TrimSuffix(name, "/>") + ">"
 	}
 	if name == "<br/>" || name == "<br>" {
-		return "<br>", true
+		return "<br>", tag, true
 	}
-	if _, ok := htmlOpen[name]; ok {
-		return name, true
+	if _, ok := htmlOpen[name]; ok || name == "<span>" {
+		return name, tag, true
 	}
 	if _, ok := htmlClose[name]; ok {
-		return name, true
+		return name, tag, true
 	}
-	return "", false
+	return "", "", false
 }
 
 // TransformHTML rewrites the inline tree under root: content between paired
-// <u>/<ins>/<mark>/<kbd>/<sub>/<sup> tags is wrapped in the matching node,
-// and <br> becomes a hard line break. Unknown tags stay raw HTML.
+// <u>/<ins>/<mark>/<kbd>/<sub>/<sup> tags (and colored <span>s) is wrapped in
+// the matching node, and <br> becomes a hard line break. Unknown tags stay
+// raw HTML.
 func TransformHTML(root ast.Node, src []byte) {
 	ast.Walk(root, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
 		if !entering {
@@ -270,11 +346,12 @@ func transformInlineList(parent ast.Node, src []byte) {
 	type openTag struct {
 		node ast.Node
 		tag  string
+		wrap func() ast.Node // nil: a tag left raw (a <span> Corra does not style)
 	}
 	var stack []openTag
 	for child := parent.FirstChild(); child != nil; {
 		next := child.NextSibling() // captured before any mutation
-		tag, ok := rawHTMLTag(child, src)
+		tag, written, ok := rawHTMLTagSource(child, src)
 		if !ok {
 			child = next
 			continue
@@ -287,8 +364,19 @@ func transformInlineList(parent ast.Node, src []byte) {
 			child = next
 			continue
 		}
-		if _, isOpen := htmlOpen[tag]; isOpen {
-			stack = append(stack, openTag{child, tag})
+		if tag == "<span>" {
+			// Every <span> pairs with its </span>, so a raw one nested in a
+			// colored one cannot steal the colored one's closing tag.
+			var wrap func() ast.Node
+			if color, background, styled := SpanStyle(written); styled {
+				wrap = func() ast.Node { return &Span{Color: color, Background: background} }
+			}
+			stack = append(stack, openTag{child, tag, wrap})
+			child = next
+			continue
+		}
+		if wrap, isOpen := htmlOpen[tag]; isOpen {
+			stack = append(stack, openTag{child, tag, wrap})
 			child = next
 			continue
 		}
@@ -305,9 +393,13 @@ func transformInlineList(parent ast.Node, src []byte) {
 			child = next
 			continue
 		}
-		opener := stack[idx].node
+		opener, wrap := stack[idx].node, stack[idx].wrap
 		stack = stack[:idx]
-		wrapper := htmlOpen[want]()
+		if wrap == nil {
+			child = next
+			continue
+		}
+		wrapper := wrap()
 		// Move siblings between opener and child into the wrapper.
 		var move []ast.Node
 		for sib := opener.NextSibling(); sib != nil && sib != child; sib = sib.NextSibling() {

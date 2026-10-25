@@ -47,6 +47,10 @@ type Editor struct {
 	// OnLinkCandidates returns a JSON array of {title, path} note candidates
 	// for the "[[" completion, filtered by the typed query.
 	OnLinkCandidates func(query string) string
+	// OnOpenDocument opens a note a mention, page card or link points at;
+	// target is the link as written, relative to the open note. It reports
+	// whether the note was opened.
+	OnOpenDocument func(target string) bool
 }
 
 func New(window uintptr, changed, sourceRequested func()) *Editor {
@@ -454,6 +458,22 @@ func cr_link_candidates(handle C.uintptr_t, query *C.char) *C.char {
 		return nil
 	}
 	return C.CString(value)
+}
+
+//export cr_open_document
+func cr_open_document(handle C.uintptr_t, target *C.char) C.int {
+	e := cgo.Handle(handle).Value().(*Editor)
+	if e.OnOpenDocument == nil {
+		return 0
+	}
+	value := C.GoString(target)
+	return boolInt(e.OnOpenDocument(value))
+}
+
+//export cr_page_info
+func cr_page_info(path *C.char) *C.char {
+	data, _ := json.Marshal(PageInfo(C.GoString(path)))
+	return C.CString(string(data))
 }
 
 //export cr_emoji_search

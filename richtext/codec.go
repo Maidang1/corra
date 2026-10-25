@@ -106,6 +106,10 @@ type Run struct {
 	Highlight bool   `json:"highlight,omitempty"` // ==x== or <mark>
 	Sup       bool   `json:"sup,omitempty"`       // ^x^ or <sup>
 	Sub       bool   `json:"sub,omitempty"`       // ~x~ or <sub>
+	// Color and Background are CSS colors from <span style="color:…;
+	// background-color:…">, lowercased ("#d44c47").
+	Color      string `json:"color,omitempty"`
+	Background string `json:"background,omitempty"`
 	// Math holds an inline math expression; Text keeps its exact $...$ source.
 	Math string `json:"math,omitempty"`
 	// Footnote is the reference label; Text retains its exact [^label] token.
@@ -635,10 +639,27 @@ func loneImage(node ast.Node, raw string) *Paragraph {
 		}
 		return nil
 	}
-	if _, ok := node.FirstChild().(*ast.Image); !ok {
+	img, ok := node.FirstChild().(*ast.Image)
+	if !ok {
 		return nil
 	}
+	if IsPageTarget(string(decodeText(img.Destination))) {
+		// "![Title](note.md)" embeds another note: a page card.
+		return &Paragraph{Kind: "page", Raw: raw, Runs: []Run{{Text: raw}}}
+	}
 	return &Paragraph{Kind: "image", Raw: raw, Runs: []Run{{Text: raw}}}
+}
+
+// IsPageTarget reports whether a link destination is a note beside this one
+// ("other.md", "dir/note.markdown#part"): not a web page, an anchor or an
+// image.
+func IsPageTarget(destination string) bool {
+	if destination == "" || strings.HasPrefix(destination, "#") || strings.Contains(destination, ":") {
+		return false
+	}
+	path, _, _ := strings.Cut(destination, "#")
+	path = strings.ToLower(path)
+	return strings.HasSuffix(path, ".md") || strings.HasSuffix(path, ".markdown")
 }
 
 func convertBlock(node ast.Node, src []byte, raw string) []Paragraph {
@@ -824,6 +845,17 @@ func collectRuns(parent ast.Node, src []byte, style Run, p *Paragraph) bool {
 		case *mdext.Kbd:
 			flush()
 			run.Kbd = true
+			if !collectRuns(node, src, run, p) {
+				return false
+			}
+		case *mdext.Span:
+			flush()
+			if n.Color != "" {
+				run.Color = n.Color
+			}
+			if n.Background != "" {
+				run.Background = n.Background
+			}
 			if !collectRuns(node, src, run, p) {
 				return false
 			}
@@ -1498,6 +1530,24 @@ func serializeRunsObserved(runs []Run, level escapeLevel, emitted func(int, int,
 				end = i + 1
 			}
 		}
+		if flag == "span" {
+			// One tag around runs sharing their colors, so a colored
+			// phrase with a bold word in it stays one span.
+			inner := append([]Run(nil), runs[i:end]...)
+			for k := range inner {
+				inner[k].Color, inner[k].Background = "", ""
+			}
+			text.WriteString(mdext.SpanTag(run.Color, run.Background))
+			offset, first := text.Len(), i
+			text.WriteString(serializeRunsObserved(inner, level, func(k, a, b int) {
+				if emitted != nil {
+					emitted(first+k, offset+a, offset+b)
+				}
+			}))
+			text.WriteString("</span>")
+			i = end - 1
+			continue
+		}
 		if end > i+1 {
 			delimiter := map[string]string{"bold": italic + italic, "italic": italic, "strike": "~~", "highlight": "=="}[flag]
 			inner := append([]Run(nil), runs[i:end]...)
@@ -1538,6 +1588,7 @@ func serializeRunsObserved(runs []Run, level escapeLevel, emitted func(int, int,
 			var value strings.Builder
 			for _, part := range runs[i:end] {
 				part.Bold, part.Italic, part.Strike, part.Underline, part.Highlight, part.Sup, part.Sub, part.Kbd = false, false, false, false, false, false, false, false
+				part.Color, part.Background = "", ""
 				part.Link, part.LinkTitle = "", ""
 				value.WriteString(serializeRun(part, italic, level))
 			}
@@ -1644,7 +1695,7 @@ func sameStorageRuns(expected, actual []Run) bool {
 	meaningful := func(runs []Run) []Run {
 		var out []Run
 		for _, run := range runs {
-			styled := run.Bold || run.Italic || run.Strike || run.Code || run.Link != "" || run.Underline || run.Highlight || run.Sup || run.Sub || run.Kbd
+			styled := run.Bold || run.Italic || run.Strike || run.Code || run.Link != "" || run.Underline || run.Highlight || run.Sup || run.Sub || run.Kbd || run.Color != "" || run.Background != ""
 			if !styled && !run.Break && run.Math == "" {
 				run.Text = strings.Map(func(r rune) rune {
 					if unicode.IsSpace(r) {
@@ -1778,6 +1829,10 @@ func formatInlineRun(run Run, value, italic string) string {
 	left := len(value) - len(strings.TrimLeftFunc(value, unicode.IsSpace))
 	right := len(strings.TrimRightFunc(value, unicode.IsSpace))
 	if right <= left {
+		if run.Color != "" || run.Background != "" {
+			// A tag has no flanking rules: colored spaces keep their color.
+			return mdext.SpanTag(run.Color, run.Background) + value + "</span>"
+		}
 		return value
 	}
 	before, after := value[:left], value[right:]
@@ -1807,6 +1862,12 @@ func formatInlineRun(run Run, value, italic string) string {
 		value = "~~" + value + "~~"
 	}
 	value = before + value + after
+	if run.Color != "" || run.Background != "" {
+		// Outside the delimiters, so "**" never sits against the tag's
+		// "<" or ">" where it could not open or close; boundary
+		// whitespace stays inside, where its background shows.
+		value = mdext.SpanTag(run.Color, run.Background) + value + "</span>"
+	}
 	if run.Link != "" {
 		value = wrapLink(run, value)
 	}
@@ -2114,6 +2175,15 @@ func sharedEmphasis(runs []Run, i int) (int, string) {
 		"strike":    func(r Run) bool { return r.Strike },
 		"highlight": func(r Run) bool { return r.Highlight },
 		"italic":    func(r Run) bool { return r.Italic },
+	}
+	if color, background := runs[i].Color, runs[i].Background; color != "" || background != "" {
+		end := i + 1
+		for end < len(runs) && !plain(runs[end]) && runs[end].Color == color && runs[end].Background == background {
+			end++
+		}
+		if end > i+1 {
+			return end, "span"
+		}
 	}
 	for _, flag := range []string{"bold", "strike", "highlight", "italic"} {
 		if !has[flag](runs[i]) || !has[flag](runs[i+1]) {

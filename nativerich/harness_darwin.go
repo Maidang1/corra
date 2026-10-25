@@ -147,6 +147,25 @@ func nativeTestFormatBar(e *Editor) (open bool, active []string, frame, window, 
 	return state.Open, state.Active, state.Frame, state.Window, state.Anchor
 }
 
+// nativeTestFormatBarPalette reports the format bar's color palette: whether
+// it is unfolded and the selection's uniform colors.
+func nativeTestFormatBarPalette(e *Editor) (open bool, color, background string) {
+	value := C.cr_test_format_bar(e.native)
+	if value == nil {
+		return false, "", ""
+	}
+	defer C.free(unsafe.Pointer(value))
+	var state struct {
+		Palette    bool   `json:"palette"`
+		Color      string `json:"color"`
+		Background string `json:"background"`
+	}
+	if json.Unmarshal([]byte(C.GoString(value)), &state) != nil {
+		return false, "", ""
+	}
+	return state.Palette, state.Color, state.Background
+}
+
 // nativeTestEmoji reports the emoji menu: open state, filter and names.
 func nativeTestEmoji(e *Editor) (open bool, filter string, selected int, items []string) {
 	value := C.cr_test_emoji(e.native)
@@ -189,6 +208,48 @@ func nativeTestLink(e *Editor) (open bool, filter string, selected int, items []
 		return false, "", 0, nil
 	}
 	return state.Open, state.Filter, state.Selected, state.Items
+}
+
+// nativeTestLinkMode reports whether the open link menu answers an "@"
+// mention and whether its pick becomes a page card.
+func nativeTestLinkMode(e *Editor) (mention, card bool) {
+	value := C.cr_test_link(e.native)
+	if value == nil {
+		return false, false
+	}
+	defer C.free(unsafe.Pointer(value))
+	var state struct {
+		Mention bool `json:"mention"`
+		Card    bool `json:"card"`
+	}
+	if json.Unmarshal([]byte(C.GoString(value)), &state) != nil {
+		return false, false
+	}
+	return state.Mention, state.Card
+}
+
+// nativePageCard is one page card as the editor shows it.
+type nativePageCard struct {
+	Target  string `json:"target"`
+	Figure  bool   `json:"figure"`
+	Title   string `json:"title"`
+	Excerpt string `json:"excerpt"`
+	Missing bool   `json:"missing"`
+}
+
+func nativeTestPageCards(e *Editor) []nativePageCard {
+	value := C.cr_test_page_cards(e.native)
+	if value == nil {
+		return nil
+	}
+	defer C.free(unsafe.Pointer(value))
+	var state struct {
+		Cards []nativePageCard `json:"cards"`
+	}
+	if json.Unmarshal([]byte(C.GoString(value)), &state) != nil {
+		return nil
+	}
+	return state.Cards
 }
 
 func nativeTestLinkShot(e *Editor, path string) bool {

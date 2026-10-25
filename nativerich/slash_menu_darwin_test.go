@@ -93,7 +93,7 @@ func TestNativeSlashMenuOpensAndFilters(t *testing.T) {
 			t.Errorf("open=%v filter=%q selected=%d", open, filter, selected)
 			return
 		}
-		if len(items) != 23 {
+		if len(items) != 25 {
 			t.Errorf("palette has %d entries: %v", len(items), items)
 			return
 		}

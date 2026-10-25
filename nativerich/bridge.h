@@ -49,6 +49,7 @@ int cr_test_slash_shot(uintptr_t editor, const char *path);
 char *cr_test_format_bar(uintptr_t editor);
 char *cr_test_emoji(uintptr_t editor);
 char *cr_test_link(uintptr_t editor);
+char *cr_test_page_cards(uintptr_t editor);
 int cr_test_link_shot(uintptr_t editor, const char *path);
 int cr_test_emoji_shot(uintptr_t editor, const char *path);
 char *cr_test_hover(uintptr_t editor);

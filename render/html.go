@@ -292,6 +292,15 @@ func (r *mdHTMLRenderer) RegisterFuncs(reg renderer.NodeRendererFuncRegisterer) 
 	reg.Register(mdext.KindSuperscript, wrapHTML("<sup>", "</sup>"))
 	reg.Register(mdext.KindSubscript, wrapHTML("<sub>", "</sub>"))
 	reg.Register(mdext.KindKbd, wrapHTML("<kbd>", "</kbd>"))
+	reg.Register(mdext.KindSpan, func(w util.BufWriter, source []byte, n gast.Node, entering bool) (gast.WalkStatus, error) {
+		if entering {
+			span := n.(*mdext.Span)
+			_, _ = w.WriteString(mdext.SpanTag(span.Color, span.Background))
+		} else {
+			_, _ = w.WriteString("</span>")
+		}
+		return gast.WalkContinue, nil
+	})
 }
 
 func wrapHTML(open, close string) renderer.NodeRendererFunc {

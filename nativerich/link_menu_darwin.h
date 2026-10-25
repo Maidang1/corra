@@ -4,10 +4,17 @@
 
 #pragma once
 
+- (NSRange)linkMenuQueryRange {
+    return [self linkMenuQueryRange:NULL];
+}
+
 // linkMenuQueryRange locates a "[[query" the caret sits at the end of. The
 // query may contain spaces (note titles do); it stops at brackets or a line
-// break. Returns {NSNotFound, 0} elsewhere and inside protected blocks.
-- (NSRange)linkMenuQueryRange {
+// break. Failing that it locates an "@query" page mention, which stops at
+// whitespace and must not follow a word ("a@b.com" is an address). Returns
+// {NSNotFound, 0} elsewhere and inside protected blocks.
+- (NSRange)linkMenuQueryRange:(BOOL *)mention {
+    if (mention) *mention = NO;
     if (!_text.editable || _text.hasMarkedText || _suppress) return NSMakeRange(NSNotFound, 0);
     if (_text.selectedRange.length) return NSMakeRange(NSNotFound, 0);
     NSString *string = _text.string;
@@ -18,18 +25,35 @@
     NSDictionary *info = CRParagraphAt(self, content.location);
     if (CRKind(info, @"code") || CRKind(info, @"source") || CRKind(info, @"opaque") ||
         CRKind(info, @"math") || CRKind(info, @"image") || CRKind(info, @"diagram") ||
-        CRKind(info, @"toc") || CRCellAt(self, content.location) || [info[@"footnoteId"] length]) {
+        CRKind(info, @"toc") || CRKind(info, @"page") || CRCellAt(self, content.location) || [info[@"footnoteId"] length]) {
         return NSMakeRange(NSNotFound, 0);
     }
     NSString *prefix = [string substringWithRange:NSMakeRange(content.location, caret - content.location)];
     NSRange opener = [prefix rangeOfString:@"[[" options:NSBackwardsSearch];
-    if (opener.location == NSNotFound) return NSMakeRange(NSNotFound, 0);
-    NSString *query = [prefix substringFromIndex:NSMaxRange(opener)];
-    if (query.length > 40) return NSMakeRange(NSNotFound, 0);
-    if ([query rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:@"[]\n\r"]].location != NSNotFound) {
-        return NSMakeRange(NSNotFound, 0);
+    if (opener.location != NSNotFound) {
+        NSString *query = [prefix substringFromIndex:NSMaxRange(opener)];
+        if (query.length <= 40 && [query rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:@"[]\n\r"]].location == NSNotFound) {
+            NSUInteger start = content.location + opener.location;
+            return NSMakeRange(start, caret - start);
+        }
     }
-    NSUInteger start = content.location + opener.location;
+    NSRange at = [prefix rangeOfString:@"@" options:NSBackwardsSearch];
+    if (at.location == NSNotFound) return NSMakeRange(NSNotFound, 0);
+    NSString *query = [prefix substringFromIndex:NSMaxRange(at)];
+    NSMutableCharacterSet *stops = [NSMutableCharacterSet whitespaceAndNewlineCharacterSet];
+    [stops addCharactersInString:@"\u2028[]()#@"];
+    if (query.length > 30 || [query rangeOfCharacterFromSet:stops].location != NSNotFound) return NSMakeRange(NSNotFound, 0);
+    if (at.location > 0) {
+        unichar before = [prefix characterAtIndex:at.location - 1];
+        if (before < 0x80 && ([[NSCharacterSet alphanumericCharacterSet] characterIsMember:before] || strchr("._-/:+=&%~\\`", before))) {
+            return NSMakeRange(NSNotFound, 0);
+        }
+    }
+    NSUInteger start = content.location + at.location;
+    // An "@" already inside a link, code or a mention is text.
+    NSDictionary *attrs = [_text.textStorage attributesAtIndex:start effectiveRange:NULL];
+    if (attrs[NSLinkAttributeName] || [attrs[CRCode] boolValue] || [attrs[CRMention] boolValue] || attrs[CRInlineSource]) return NSMakeRange(NSNotFound, 0);
+    if (mention) *mention = YES;
     return NSMakeRange(start, caret - start);
 }
 
@@ -68,15 +92,20 @@
 
 - (void)linkMenuQueryChanged {
     if (_suppress || _text.hasMarkedText) return;
-    NSRange range = [self linkMenuQueryRange];
-    if (range.location == NSNotFound) {
+    BOOL mention = NO;
+    NSRange range = [self linkMenuQueryRange:&mention];
+    if (range.location == NSNotFound || (_linkPanel && mention != _linkMention)) {
         [self linkMenuClose];
-        return;
+        if (range.location == NSNotFound) return;
     }
+    // A card waits on the "@" the slash menu typed, nowhere else.
+    if (_linkCard && (!mention || range.location != _linkCardAt)) _linkCard = NO;
     [self slashClose];
     [self emojiMenuClose];
     [self formatBarHide];
-    NSString *filter = [_text.string substringWithRange:NSMakeRange(range.location + 2, range.length - 2)];
+    _linkMention = mention;
+    NSUInteger opener = mention ? 1 : 2;
+    NSString *filter = [_text.string substringWithRange:NSMakeRange(range.location + opener, range.length - opener)];
     [self linkMenuOpenWithFilter:filter range:range];
 }
 
@@ -87,6 +116,11 @@
     }
     _linkQuery = range;
     NSArray *items = [self linkMenuItemsForFilter:_linkFilter];
+    if (_linkMention && !_linkCard && !items.count) {
+        // A typed "@handle" that names no note is just text.
+        [self linkMenuClose];
+        return;
+    }
     if (!_linkPanel) {
         CRLinkMenuView *view = [[CRLinkMenuView alloc] initWithOwner:self];
         CRLinkPanel *panel = [[CRLinkPanel alloc] initWithContentRect:NSMakeRect(0, 0, CRLinkWidth, 120)
@@ -193,11 +227,19 @@
 - (void)linkMenuChoose:(NSDictionary *)item {
     if (!item || !_linkPanel) return;
     NSRange range = _linkQuery;
+    BOOL mention = _linkMention, card = _linkCard && range.location == _linkCardAt;
     [self linkMenuClose];
     if (!_text.editable || _text.hasMarkedText || range.location == NSNotFound) return;
     NSString *title = item[@"title"] ?: @"";
     NSString *path = item[@"path"] ?: @"";
     if (!path.length) return;
+    if (mention) {
+        title = [title stringByReplacingOccurrencesOfString:@"\n" withString:@" "];
+        if (!title.length) title = path.lastPathComponent.stringByDeletingPathExtension;
+        if (card && [self insertPageCard:title path:path replacing:range]) return;
+        [self insertMention:title path:path replacing:range];
+        return;
+    }
     // The link is inserted as a rendered run, not as literal Markdown: the
     // serializer then writes [title](path) itself and the text stays clickable.
     title = [title stringByReplacingOccurrencesOfString:@"\n" withString:@" "];
@@ -226,6 +268,7 @@
 }
 
 - (void)linkMenuClose {
+    _linkCard = NO;
     if (!_linkPanel) return;
     [[NSNotificationCenter defaultCenter] removeObserver:self name:NSViewBoundsDidChangeNotification object:_scroll.contentView];
     [[NSNotificationCenter defaultCenter] removeObserver:self name:NSViewFrameDidChangeNotification object:_scroll];
@@ -253,5 +296,63 @@
 - (NSDictionary *)linkMenuState {
     NSMutableArray *titles = [NSMutableArray array];
     for (NSDictionary *item in _linkView.items ?: @[]) [titles addObject:item[@"title"] ?: @""];
-    return @{@"open": (_linkPanel ? @YES : @NO), @"filter": _linkFilter ?: @"", @"selected": @(_linkSelected), @"items": titles};
+    return @{@"open": (_linkPanel ? @YES : @NO), @"filter": _linkFilter ?: @"", @"selected": @(_linkSelected), @"items": titles,
+             @"mention": (_linkPanel && _linkMention ? @YES : @NO), @"card": (_linkPanel && _linkCard ? @YES : @NO)};
+}
+
+// MARK: - Page mentions
+
+// insertMention replaces the typed "@query" with a "@Title" chip linked to the
+// note, followed by a plain space so typing carries on outside it.
+- (void)insertMention:(NSString *)title path:(NSString *)path replacing:(NSRange)range {
+    NSDictionary *attrs = range.location < _text.string.length
+        ? [_text.textStorage attributesAtIndex:range.location effectiveRange:NULL]
+        : _text.typingAttributes;
+    NSMutableDictionary *plain = [attrs mutableCopy];
+    for (NSString *key in @[CRBold, CRItalic, CRCode, CRUnderline, CRKbd, CRHighlight, CRSup, CRSub, CRColor, CRBackground,
+                            NSStrikethroughStyleAttributeName, NSLinkAttributeName, CRLinkTitle, CRMention, CRInlineSource]) {
+        [plain removeObjectForKey:key];
+    }
+    NSDictionary *paragraph = CRParagraphAt(self, range.location);
+    NSMutableDictionary *chip = [plain mutableCopy];
+    chip[NSLinkAttributeName] = path;
+    chip[CRMention] = @YES;
+    NSMutableAttributedString *value = [[NSMutableAttributedString alloc] initWithString:[@"@" stringByAppendingString:title] attributes:[self visual:chip paragraph:paragraph]];
+    // An existing space after the query keeps its place; otherwise add one.
+    NSUInteger end = NSMaxRange(range);
+    BOOL spaced = end < _text.string.length && [[NSCharacterSet whitespaceAndNewlineCharacterSet] characterIsMember:[_text.string characterAtIndex:end]];
+    if (!spaced) [value appendAttributedString:[[NSAttributedString alloc] initWithString:@" " attributes:[self visual:plain paragraph:paragraph]]];
+    [self beginStructuralCommand];
+    [_undo beginUndoGrouping];
+    [self replace:range with:value selection:NSMakeRange(range.location + value.length + (spaced ? 1 : 0), 0)];
+    _text.typingAttributes = [[self visual:plain paragraph:CRParagraphAt(self, range.location)] mutableCopy];
+    [_undo endUndoGrouping];
+}
+
+// mentionRangeAt is the whole mention covering location, or NSNotFound.
+- (NSRange)mentionRangeAt:(NSUInteger)location {
+    if (location >= _text.string.length || ![[_text.textStorage attribute:CRMention atIndex:location effectiveRange:NULL] boolValue]) return NSMakeRange(NSNotFound, 0);
+    id link = [_text.textStorage attribute:NSLinkAttributeName atIndex:location effectiveRange:NULL];
+    if (!link) return NSMakeRange(NSNotFound, 0);
+    NSRange mention, linked;
+    [_text.textStorage attribute:CRMention atIndex:location longestEffectiveRange:&mention inRange:CRContent(_text.string, [_text.string paragraphRangeForRange:NSMakeRange(location, 0)])];
+    [_text.textStorage attribute:NSLinkAttributeName atIndex:location longestEffectiveRange:&linked inRange:mention];
+    return linked;
+}
+
+// deleteMentionBefore removes a whole mention when Backspace lands on its
+// last character: a page reference goes away in one piece, as in Notion.
+- (BOOL)deleteMentionBefore:(NSUInteger)location {
+    NSRange mention = [self mentionRangeAt:location - 1];
+    if (mention.location == NSNotFound || NSMaxRange(mention) != location) return NO;
+    [self beginStructuralCommand];
+    [self replace:mention with:[NSAttributedString new] selection:NSMakeRange(mention.location, 0)];
+    return YES;
+}
+
+// openDocumentLink follows a mention or any note link inside the app.
+- (BOOL)openDocumentLink:(id)link {
+    if (!_callback || !CRLocalDocument(link)) return NO;
+    NSString *target = [link isKindOfClass:NSURL.class] ? [(NSURL *)link absoluteString] : [link description];
+    return cr_open_document(_callback, target.UTF8String) != 0;
 }

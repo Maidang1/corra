@@ -63,14 +63,25 @@ no JavaScript. Go draws the shell on the GPU; macOS uses an AppKit
 - **Emoji picker** — type `:` at a word start for a shortcode list (`:smi` →
   😄); keep typing to filter, arrows to browse, Return to insert, Escape to
   dismiss
+- **Page mentions** — type `@` to pick a note; it becomes an `@Title` chip
+  saved as `[@Title](note.md)`, opens the note on click and deletes as one
+  unit with Backspace
+- **Page cards** — a paragraph holding only `![Title](note.md)` embeds that
+  note as a card with its live title and first lines (missing notes are
+  flagged); click the card to open the note. Insert one from the slash menu's
+  “页面卡片”
 - **Slash menu** — type `/` on an empty line for a Notion-style block picker
   (headings, lists, quotes, callouts, code, math, tables, TOC, footnotes,
-  images, page breaks), grouped into sections; filter by name or keyword,
+  images, page breaks, page mentions and cards), grouped into sections; filter by name or keyword,
   navigate with arrows, confirm with Return, dismiss with Escape; the
   matched part of a title is highlighted as you filter
 - **Selection toolbar** — selecting prose raises a floating pill with bold,
-  italic, underline, strike, inline code, highlight, link and clear;
+  italic, underline, strike, inline code, highlight, color, link and clear;
   active traits are highlighted, and the link prompt accepts or removes a URL
+- **Text and background colors** — the toolbar's “A” unfolds Notion's nine
+  colors for text and for background; they save as
+  `<span style="color:#d44c47">` / `background-color`, adapt to dark mode,
+  and export to HTML
 - **Block actions** — move a paragraph, list item, code block or table past
   its neighbour (Cmd+Shift+↑/↓), duplicate it (Cmd+D), delete it
   (Cmd+Shift+⌫), or turn it into another block kind from the context menu;
@@ -201,10 +212,17 @@ JavaScript。Go 在 GPU 上绘制外壳，macOS 编辑区使用 AppKit 原生富
 - **表情选择器**：在词首输入 `:` 打开 shortcode 列表（`:smi` → 😄），
   继续输入即过滤，方向键浏览，回车插入，Esc 关闭
 - **斜杠菜单**：在空行输入 `/` 打开 Notion 风格块选择面板（标题、列表、
-  引用、提示卡片、代码、公式、表格、目录、脚注、图片、分页符），按标题分组，
+  引用、提示卡片、代码、公式、表格、目录、脚注、图片、分页符、提及页面、页面卡片），按标题分组，
   按名称或关键词过滤（命中的标题片段会高亮），方向键选择，回车应用，Esc 关闭
 - **选区浮动工具栏**：选中正文即浮出格式药丸（粗体、斜体、下划线、删除线、
-  行内代码、高亮、链接、清除格式），已生效格式会高亮，链接支持输入或移除
+  行内代码、高亮、颜色、链接、清除格式），已生效格式会高亮，链接支持输入或移除
+- **文字颜色与背景色**：工具栏的「A」展开 Notion 同款九色调色板，分文字色与
+  背景色两行；保存为 `<span style="color:#d44c47">` / `background-color`，
+  深色模式自动换成对应深色，导出 HTML 时保留
+- **提及页面**：输入 `@` 选择文档，插入 `@标题` 胶囊（保存为
+  `[@标题](note.md)`），点击直接打开该文档，退格一次整体删除
+- **页面卡片**：只含 `![标题](note.md)` 的段落渲染为文档卡片，显示目标文档的
+  实时标题与开头内容（文档不存在会标红提示），点击打开；可从斜杠菜单「页面卡片」插入
 - **块操作**：段落、列表项、代码块、表格整体上移 / 下移（Cmd+Shift+↑/↓）、
   复制（Cmd+D）、删除（Cmd+Shift+⌫），右键菜单还可「转换为」其他块类型；
   悬停时左边距出现六点块手柄，点开是同一套块菜单，拖动即可重排（带插入
