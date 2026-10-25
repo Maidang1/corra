@@ -52,7 +52,7 @@ type View struct {
 	focusEditor    bool
 	// focusNotePath is the sidebar note whose row takes the keyboard focus
 	// next frame, so arrow-key navigation keeps walking the list.
-	focusNotePath string
+	focusNotePath  string
 	focusSearch    bool
 	FolderDialog   string
 	FolderDraft    string
@@ -100,11 +100,11 @@ type View struct {
 	OnExportPandoc    func(label, ext, pandocArg string)
 	// PandocPath resolves the pandoc binary for the export panel; nil falls
 	// back to app.PandocPath. Tests stub it for a deterministic panel.
-	PandocPath func() string
-	OnCopyHTML        func() ([]byte, error)
-	OnSave            func() bool
-	OnOpen            func()
-	OnInsertImage     func()
+	PandocPath    func() string
+	OnCopyHTML    func() ([]byte, error)
+	OnSave        func() bool
+	OnOpen        func()
+	OnInsertImage func()
 	// OnNoteSaved restarts the file watcher after an autosave so the
 	// change we wrote ourselves is not reported as external.
 	OnNoteSaved func()

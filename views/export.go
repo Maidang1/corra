@@ -90,6 +90,6 @@ func (v *View) exportCard(c *ui.Context, icon *ui.SVG, title, detail string, ena
 			ui.Text(c, detail).FontSize(11).TextColor(t.TextMuted)
 		})
 		ui.Spacer(c)
-		ui.Button(c, "导出").Label("导出 "+title).Disabled(!enabled).OnClick(fn)
+		ui.Button(c, "导出").Label("导出 " + title).Disabled(!enabled).OnClick(fn)
 	})
 }
