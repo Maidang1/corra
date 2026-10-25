@@ -1,5 +1,9 @@
 // Footnote numbering and hover help are presentation derived from live runs.
 // Source tokens and definition identities stay in the Markdown model.
+- (instancetype)init {
+    if ((self=[super init])) _footnoteBack=NSNotFound;
+    return self;
+}
 - (NSArray *)footnoteRuns:(NSArray *)runs {
     NSMutableArray *result=[NSMutableArray array];
     for (NSDictionary *run in runs) {
@@ -95,8 +99,22 @@
         if ([run[@"footnote"] isEqual:label]) { target=range.location; *stop=YES; }
     }];
     if (target==NSNotFound) return;
+    _footnoteBack=_text.selectedRange.location; // remember where the jump started
     [_text.window makeFirstResponder:_text]; _text.selectedRange=NSMakeRange(target,0);
     [_text scrollRangeToVisible:_text.selectedRange];
+}
+// footnoteNavigateBack returns to where the last footnote jump started. The
+// current spot becomes the new return point, so ⌘⌥← toggles between the two.
+- (void)clearFootnoteBack { _footnoteBack=NSNotFound; }
+- (BOOL)footnoteCanNavigateBack { return _footnoteBack!=NSNotFound; }
+- (BOOL)footnoteNavigateBack {
+    if (_text.hasMarkedText || _footnoteBack==NSNotFound) return NO;
+    [self finishInlineSource:YES];
+    NSUInteger here=_text.selectedRange.location, there=MIN(_footnoteBack,_text.string.length);
+    _footnoteBack=here;
+    [_text.window makeFirstResponder:_text]; _text.selectedRange=NSMakeRange(there,0);
+    [_text scrollRangeToVisible:_text.selectedRange];
+    return YES;
 }
 - (NSString *)footnoteLabelAt:(NSUInteger)location {
     if (location>_text.string.length) return nil;

@@ -26,6 +26,7 @@ var (
 	iconSun        = ui.MustParseSVG([]byte(`<svg ` + iconStroke + `><circle cx="12" cy="12" r="4"/><path d="M12 2.8v2M12 19.2v2M2.8 12h2M19.2 12h2M5.2 5.2l1.4 1.4M17.4 17.4l1.4 1.4M18.8 5.2l-1.4 1.4M6.6 17.4l-1.4 1.4"/></svg>`))
 	iconGear       = ui.MustParseSVG([]byte(`<svg ` + iconStroke + `><circle cx="12" cy="12" r="3.1"/><path d="M19.2 12a7.2 7.2 0 0 0-.1-1.2l2-1.6a.5.5 0 0 0 .1-.6l-1.9-3.3a.5.5 0 0 0-.6-.2l-2.4 1a7.2 7.2 0 0 0-2-1.2L13.9 2.4a.5.5 0 0 0-.5-.4h-3.8a.5.5 0 0 0-.5.4L8.7 4.9a7.2 7.2 0 0 0-2 1.2l-2.4-1a.5.5 0 0 0-.6.2L1.8 8.6a.5.5 0 0 0 .1.6l2 1.6a7.2 7.2 0 0 0 0 2.4l-2 1.6a.5.5 0 0 0-.1.6l1.9 3.3c.1.2.4.3.6.2l2.4-1a7.2 7.2 0 0 0 2 1.2l.4 2.5c0 .2.3.4.5.4h3.8c.2 0 .5-.2.5-.4l.4-2.5a7.2 7.2 0 0 0 2-1.2l2.4 1c.2.1.5 0 .6-.2l1.9-3.3a.5.5 0 0 0-.1-.6l-2-1.6c.1-.4.1-.8.1-1.2Z"/></svg>`))
 	iconCode       = ui.MustParseSVG([]byte(`<svg ` + iconStroke + `><path d="m8.5 7-5 5 5 5M15.5 7l5 5-5 5"/></svg>`))
+	iconStats      = ui.MustParseSVG([]byte(`<svg ` + iconStroke + `><path d="M5 20v-6M12 20V5M19 20v-9"/><path d="M3 20h18"/></svg>`))
 	iconDoc        = ui.MustParseSVG([]byte(`<svg ` + iconStroke + `><rect x="5" y="3.5" width="14" height="17" rx="2"/><path d="M9 8.5h6M9 12h6M9 15.5h4"/></svg>`))
 )
 

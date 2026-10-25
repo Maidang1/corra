@@ -107,6 +107,29 @@ static NSString *CRImageSizedRaw(NSString *raw, NSString *spec) {
     return [raw stringByReplacingCharactersInRange:NSMakeRange(start, close.location - start) withString:updated];
 }
 
+// CRImageReplacedRaw swaps the URL of an image's source, keeping the quoted
+// title and the size suffix that were there. A URL holding whitespace is
+// wrapped in angle brackets, the way CRImageSizedDestination writes it.
+static NSString *CRImageReplacedRaw(NSString *raw, NSString *url) {
+    if (![raw hasPrefix:@"!["]) return raw;
+    NSRange open = [raw rangeOfString:@"]("];
+    if (open.location == NSNotFound) return raw;
+    NSUInteger start = NSMaxRange(open);
+    NSRange close = [raw rangeOfString:@")" options:0 range:NSMakeRange(start, raw.length - start)];
+    if (close.location == NSNotFound) return raw;
+    NSString *destination = [raw substringWithRange:NSMakeRange(start, close.location - start)];
+    NSString *previous = nil, *title = nil, *spec = nil;
+    CRImageDestinationParts(destination, &previous, &title, &spec);
+    NSString *updated = url;
+    if ([updated rangeOfCharacterFromSet:NSCharacterSet.whitespaceCharacterSet].location != NSNotFound) {
+        updated = [NSString stringWithFormat:@"<%@>", updated];
+    }
+    if (title.length) updated = [updated stringByAppendingFormat:@" %@", title];
+    if (spec.length) updated = [updated stringByAppendingFormat:@" =%@", spec];
+    if ([updated isEqual:destination]) return raw;
+    return [raw stringByReplacingCharactersInRange:NSMakeRange(start, close.location - start) withString:updated];
+}
+
 // CRImagePart reads one side of a "WxH" spec; an absent side stays 0.
 static CGFloat CRImagePart(NSString *s) { return s.length ? (CGFloat)s.integerValue : 0; }
 
@@ -218,4 +241,35 @@ static NSString *CRImageRawURL(NSString *raw) {
     [_undo beginUndoGrouping];
     [self restore:after selection:_text.selectedRange typing:_text.typingAttributes ending:_emptyParagraph];
     [_undo endUndoGrouping];
+}
+
+// replaceImageAtLocation swaps the figure's file for another URL, keeping the
+// alt text, the quoted title and the size suffix, and redraws the figure the
+// same way setImageSize does. The reader picked a new picture, not a new
+// layout, so everything around the URL survives.
+- (BOOL)replaceImageAtLocation:(NSUInteger)caret withURL:(NSString *)url {
+    if (!_text.editable || _text.hasMarkedText || !url.length) return NO;
+    // A file inside the document's folder is written relative, so the note
+    // survives being moved with its assets.
+    if (_baseDir.length && [url hasPrefix:[_baseDir stringByAppendingString:@"/"]]) {
+        url = [url substringFromIndex:_baseDir.length + 1];
+    }
+    NSDictionary *found = [self imageFigureAt:caret];
+    if (!found) return NO;
+    NSMutableDictionary *paragraph = [found mutableCopy];
+    NSString *raw = [paragraph[@"raw"] isKindOfClass:NSString.class] ? paragraph[@"raw"] : @"";
+    NSString *updated = CRImageReplacedRaw(raw, url);
+    if ([updated isEqual:raw]) return NO;
+    paragraph[@"raw"] = updated;
+    NSMutableAttributedString *after = [_text.textStorage mutableCopy];
+    NSRange content = CRContent(_text.string, [_text.string paragraphRangeForRange:NSMakeRange(caret, 0)]);
+    [after addAttribute:CRParagraph value:paragraph range:content];
+    NSAttributedString *figure = [self figure:paragraph];
+    NSTextAttachment *attachment = figure.length ? [figure attribute:NSAttachmentAttributeName atIndex:0 effectiveRange:NULL] : nil;
+    if (attachment) [after addAttribute:NSAttachmentAttributeName value:attachment range:content];
+    [self beginStructuralCommand];
+    [_undo beginUndoGrouping];
+    [self restore:after selection:_text.selectedRange typing:_text.typingAttributes ending:_emptyParagraph];
+    [_undo endUndoGrouping];
+    return YES;
 }

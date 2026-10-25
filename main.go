@@ -53,6 +53,7 @@ func main() {
 		})
 		mainWindow = win
 		if native := nativerich.New(win.NativeHandle(), view.NativeChanged, view.EditSource); native != nil {
+			native.OnLinkCandidates = view.LinkCandidates
 			view.AttachRichEditor(native)
 		}
 
@@ -75,6 +76,16 @@ func main() {
 		view.OnExportPDF = func() {
 			if view.SyncBuffer() {
 				fileOps.ExportPDF(exportPDF)
+			}
+		}
+		view.OnExportHTML = func() {
+			if view.SyncBuffer() {
+				fileOps.ExportHTML(exportHTML)
+			}
+		}
+		view.OnExportPandoc = func(label, ext, pandocArg string) {
+			if view.SyncBuffer() {
+				fileOps.ExportPandoc(label, ext, pandocArg)
 			}
 		}
 		view.OnSave = func() bool {

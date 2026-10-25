@@ -6,147 +6,30 @@
 
 #pragma once
 
-// MARK: - Panel
-
-// CRSlashPanel never takes key status: the editor keeps the focus, so typed
-// characters keep filtering the query and Enter/Escape reach the text view.
-@interface CRSlashPanel : NSPanel
-@end
-@implementation CRSlashPanel
-- (BOOL)canBecomeKey { return NO; }
-- (BOOL)canBecomeMain { return NO; }
-@end
-
-// MARK: - List view
-
-@interface CRSlashMenuView : NSView
-@property(nonatomic, weak) CREditor *owner;
-@property(copy) NSArray *items; // filtered item dictionaries (already capped)
-@property NSInteger selected;   // highlighted row, -1 none
-@property NSInteger hovered;    // mouse hover row, -1 none
-@end
-
-@implementation CRSlashMenuView {
-    NSTrackingArea *_tracking;
-}
-static const CGFloat CRSlashRowHeight = 30;
-static const CGFloat CRSlashPad = 6;
-static const CGFloat CRSlashWidth = 268;
-static const NSInteger CRSlashMaxRows = 9;
-
-- (instancetype)initWithOwner:(CREditor *)owner {
-    self = [super initWithFrame:NSMakeRect(0, 0, CRSlashWidth, CRSlashRowHeight + 2 * CRSlashPad)];
-    self.owner = owner;
-    _hovered = -1;
-    return self;
-}
-- (BOOL)isFlipped { return YES; }
-- (void)setItems:(NSArray *)items {
-    _items = [items copy];
-    [self setFrameSize:NSMakeSize(CRSlashWidth, MAX(1, MIN(CRSlashMaxRows, (NSInteger)items.count)) * CRSlashRowHeight + 2 * CRSlashPad)];
-}
-- (NSInteger)rowAtPoint:(NSPoint)point {
-    if (!self.items.count) return -1;
-    NSInteger row = (NSInteger)((point.y - CRSlashPad) / CRSlashRowHeight);
-    return row >= 0 && row < (NSInteger)self.items.count ? row : -1;
-}
-- (void)drawRect:(NSRect)dirty {
-    BOOL dark = self.owner.dark;
-    NSRect bounds = self.bounds;
-    NSBezierPath *outline = [NSBezierPath bezierPathWithRoundedRect:NSInsetRect(bounds, 0.5, 0.5) xRadius:10 yRadius:10];
-    [outline addClip];
-    [(dark ? [NSColor colorWithWhite:0.16 alpha:1] : [NSColor whiteColor]) setFill];
-    [NSBezierPath fillRect:bounds];
-    [[(dark ? [NSColor whiteColor] : [NSColor blackColor]) colorWithAlphaComponent:0.12] setStroke];
-    [outline setLineWidth:1];
-    [outline stroke];
-    if (!self.items.count) {
-        NSDictionary *attrs = @{NSFontAttributeName: [NSFont systemFontOfSize:12], NSForegroundColorAttributeName: [NSColor secondaryLabelColor]};
-        NSString *text = @"无匹配结果";
-        NSSize size = [text sizeWithAttributes:attrs];
-        [text drawAtPoint:NSMakePoint((bounds.size.width - size.width) / 2, (bounds.size.height - size.height) / 2) withAttributes:attrs];
-        return;
-    }
-    NSColor *ink = dark ? [NSColor colorWithWhite:0.94 alpha:1] : [NSColor colorWithWhite:0.16 alpha:1];
-    NSColor *muted = dark ? [NSColor colorWithWhite:0.60 alpha:1] : [NSColor colorWithWhite:0.45 alpha:1];
-    for (NSInteger row = 0; row < (NSInteger)self.items.count; row++) {
-        NSDictionary *item = self.items[row];
-        NSRect rowRect = NSMakeRect(4, CRSlashPad + row * CRSlashRowHeight, bounds.size.width - 8, CRSlashRowHeight);
-        if (row == self.selected) {
-            [[(dark ? [NSColor whiteColor] : [NSColor blackColor]) colorWithAlphaComponent:dark ? 0.10 : 0.07] setFill];
-            [[NSBezierPath bezierPathWithRoundedRect:rowRect xRadius:6 yRadius:6] fill];
-        } else if (row == self.hovered) {
-            [[(dark ? [NSColor whiteColor] : [NSColor blackColor]) colorWithAlphaComponent:0.05] setFill];
-            [[NSBezierPath bezierPathWithRoundedRect:rowRect xRadius:6 yRadius:6] fill];
-        }
-        // Icon: a quiet rounded tile carrying an SF Symbol.
-        NSRect iconBox = NSMakeRect(NSMinX(rowRect) + 6, NSMidY(rowRect) - 10, 20, 20);
-        [[(dark ? [NSColor whiteColor] : [NSColor blackColor]) colorWithAlphaComponent:0.08] setFill];
-        [[NSBezierPath bezierPathWithRoundedRect:iconBox xRadius:5 yRadius:5] fill];
-        NSImage *symbol = nil;
-        for (NSString *name in item[@"icons"]) {
-            symbol = [NSImage imageWithSystemSymbolName:name accessibilityDescription:nil];
-            if (symbol) break;
-        }
-        if (symbol) {
-            symbol = [symbol imageWithSymbolConfiguration:[NSImageSymbolConfiguration configurationWithPointSize:12 weight:NSFontWeightMedium]];
-            symbol.template = YES;
-            NSSize size = symbol.size;
-            [muted set];
-            [symbol drawInRect:NSMakeRect(NSMidX(iconBox) - size.width / 2, NSMidY(iconBox) - size.height / 2, size.width, size.height)
-                      fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1 respectFlipped:YES hints:nil];
-        }
-        NSDictionary *titleAttrs = @{NSFontAttributeName: [NSFont systemFontOfSize:13], NSForegroundColorAttributeName: ink};
-        NSString *title = item[@"title"] ?: @"";
-        NSSize titleSize = [title sizeWithAttributes:titleAttrs];
-        [title drawAtPoint:NSMakePoint(NSMaxX(iconBox) + 8, NSMidY(rowRect) - titleSize.height / 2) withAttributes:titleAttrs];
-        NSString *subtitle = item[@"subtitle"] ?: @"";
-        if (subtitle.length) {
-            NSMutableParagraphStyle *right = [NSMutableParagraphStyle new];
-            right.alignment = NSTextAlignmentRight;
-            NSDictionary *subtitleAttrs = @{NSFontAttributeName: [NSFont systemFontOfSize:11], NSForegroundColorAttributeName: muted, NSParagraphStyleAttributeName: right};
-            [subtitle drawInRect:NSMakeRect(NSMinX(rowRect) + 96, NSMidY(rowRect) - 7, NSMaxX(rowRect) - 102, 14) withAttributes:subtitleAttrs];
-        }
-    }
-}
-- (void)updateTrackingAreas {
-    [super updateTrackingAreas];
-    if (_tracking) [self removeTrackingArea:_tracking];
-    _tracking = [[NSTrackingArea alloc] initWithRect:self.bounds options:NSTrackingMouseMovedAndEntered | NSTrackingActiveAlways owner:self userInfo:nil];
-    [self addTrackingArea:_tracking];
-}
-- (void)mouseExited:(NSEvent *)event { self.hovered = -1; }
-- (void)mouseMoved:(NSEvent *)event { self.hovered = [self rowAtPoint:[self convertPoint:event.locationInWindow fromView:nil]]; }
-- (void)mouseDown:(NSEvent *)event {
-    NSInteger row = [self rowAtPoint:[self convertPoint:event.locationInWindow fromView:nil]];
-    if (row >= 0 && row < (NSInteger)self.items.count) [self.owner slashChoose:self.items[row]];
-}
-- (void)setSelected:(NSInteger)selected { _selected = selected; [self setNeedsDisplay:YES]; }
-- (void)setHovered:(NSInteger)hovered { _hovered = hovered; [self setNeedsDisplay:YES]; }
-@end
-
 // MARK: - CREditor
 
-@implementation CREditor (SlashMenu)
+// The methods below are included inside @implementation CREditor, so they
+// share its ivars and transactions with the rest of the editor.
 
 // slashBuildItems is the fixed block palette: title, Markdown spelling,
 // SF Symbol fallback chain, lowercase filter keywords, editor command.
 - (NSArray *)slashBuildItems {
     NSArray *raw = @[
-        @[@"一级标题", @"#", @[@"textformat.header.1"], @[@"h1", @"heading", @"bt", @"biaoti", @"title"], @"heading1"],
-        @[@"二级标题", @"##", @[@"textformat.header.2"], @[@"h2", @"heading", @"bt", @"biaoti", @"title"], @"heading2"],
-        @[@"三级标题", @"###", @[@"textformat.header.3"], @[@"h3", @"heading", @"bt", @"biaoti", @"title"], @"heading3"],
-        @[@"四级标题", @"####", @[@"textformat.header.4"], @[@"h4", @"heading", @"bt", @"biaoti", @"title"], @"heading4"],
-        @[@"五级标题", @"#####", @[@"textformat.header.5"], @[@"h5", @"heading", @"bt", @"biaoti", @"title"], @"heading5"],
-        @[@"六级标题", @"######", @[@"textformat.header.6"], @[@"h6", @"heading", @"bt", @"biaoti", @"title"], @"heading6"],
-        @[@"无序列表", @"-", @[@"list.bullet"], @[@"ul", @"list", @"lb", @"liebiao", @"wuxu"], @"bullet"],
-        @[@"有序列表", @"1.", @[@"list.number"], @[@"ol", @"list", @"lb", @"liebiao", @"youxu"], @"ordered"],
-        @[@"任务列表", @"[ ]", @[@"checklist", @"checkmark.square"], @[@"todo", @"task", @"renwu", @"dbrw"], @"checklist"],
+        @[@"一级标题", @"#", @[], @[@"h1", @"heading", @"bt", @"biaoti", @"title"], @"heading1", @"H1"],
+        @[@"二级标题", @"##", @[], @[@"h2", @"heading", @"bt", @"biaoti", @"title"], @"heading2", @"H2"],
+        @[@"三级标题", @"###", @[], @[@"h3", @"heading", @"bt", @"biaoti", @"title"], @"heading3", @"H3"],
+        @[@"四级标题", @"####", @[], @[@"h4", @"heading", @"bt", @"biaoti", @"title"], @"heading4", @"H4"],
+        @[@"五级标题", @"#####", @[], @[@"h5", @"heading", @"bt", @"biaoti", @"title"], @"heading5", @"H5"],
+        @[@"六级标题", @"######", @[], @[@"h6", @"heading", @"bt", @"biaoti", @"title"], @"heading6", @"H6"],
+        @[@"无序列表", @"-", @[@"list.bullet"], @[@"bullet", @"ul", @"list", @"lb", @"liebiao", @"wuxu"], @"bullet"],
+        @[@"有序列表", @"1.", @[@"list.number"], @[@"ordered", @"ol", @"num", @"list", @"lb", @"liebiao", @"youxu"], @"ordered"],
+        @[@"任务列表", @"[ ]", @[@"checklist", @"checkmark.square"], @[@"checklist", @"todo", @"task", @"renwu", @"dbrw"], @"checklist"],
         @[@"引用", @">", @[@"text.quote"], @[@"quote", @"yinyong", @"yyl"], @"quote"],
         @[@"分割线", @"---", @[@"minus"], @[@"divider", @"hr", @"fgx", @"fenge", @"line"], @"divider"],
-        @[@"代码块", @"```", @[@"chevron.left.forward"], @[@"code", @"daima", @"dmk"], @"code"],
+        @[@"代码块", @"```", @[@"chevron.left.forwardslash.chevron.right", @"curlybraces"], @[@"code", @"daima", @"dmk"], @"code"],
         @[@"公式块", @"$$", @[@"x.squareroot", @"function"], @[@"math", @"gs", @"gongshi", @"formula"], @"math"],
-        @[@"表格", @"| | |", @[@"tablecells", @"tablecell"], @[@"table", @"bg", @"biaoge"], @"table"],
+        @[@"表格", @"| | |", @[@"tablecells", @"square.grid.2x2"], @[@"table", @"bg", @"biaoge"], @"table"],
+        @[@"分页符", @"page", @[@"rectangle.split.1x2"], @[@"pagebreak", @"page", @"fy", @"fenyefu", @"break"], @"pagebreak"],
         @[@"目录", @"[TOC]", @[@"list.bullet.indent"], @[@"toc", @"ml", @"mulu", @"catalog"], @"toc"],
         @[@"脚注", @"[^]", @[@"note.text", @"doc.plaintext"], @[@"footnote", @"jz", @"jiaozhu"], @"footnote:insert"],
         @[@"图片", @"![]()", @[@"photo"], @[@"image", @"img", @"tp", @"tupian", @"picture"], @"image"],
@@ -158,26 +41,38 @@ static const NSInteger CRSlashMaxRows = 9;
     ];
     NSMutableArray *items = [NSMutableArray array];
     for (NSArray *entry in raw) {
-        [items addObject:@{@"title": entry[0], @"subtitle": entry[1], @"icons": entry[2], @"keywords": entry[3], @"command": entry[4]}];
+        NSString *command = entry[4];
+        [items addObject:@{@"title": entry[0], @"subtitle": entry[1], @"icons": entry[2], @"keywords": entry[3],
+                           @"command": command, @"glyph": entry.count > 5 ? entry[5] : @"",
+                           @"section": [self slashSectionForCommand:command]}];
     }
     return items;
 }
 
-// slashFiltered matches the query against titles and keywords. The result is
-// capped: the panel has no scroller, so extra matches would be unreachable.
+// slashSectionForCommand groups the palette like Notion's basic/media/advanced
+// headings, so a long list stays scannable.
+- (NSString *)slashSectionForCommand:(NSString *)command {
+    if ([command hasPrefix:@"heading"]) return @"标题";
+    if ([command isEqual:@"bullet"] || [command isEqual:@"ordered"] || [command isEqual:@"checklist"]) return @"列表";
+    if ([command hasPrefix:@"callout:"]) return @"提示卡片";
+    return @"块";
+}
+
+// slashFiltered matches the query against titles and keywords.
 - (NSArray *)slashFiltered:(NSString *)filter {
     if (!filter.length) return _slashItems;
+    NSString *query = filter.lowercaseString;
     NSMutableArray *result = [NSMutableArray array];
     for (NSDictionary *item in _slashItems) {
         NSString *title = item[@"title"];
-        if ([title.lowercaseString containsString:filter]) { [result addObject:item]; continue; }
+        if ([title.lowercaseString containsString:query]) { [result addObject:item]; continue; }
         BOOL hit = NO;
         for (NSString *keyword in item[@"keywords"]) {
-            if ([keyword containsString:filter] || [filter containsString:keyword]) { hit = YES; break; }
+            if ([keyword containsString:query] || [query containsString:keyword]) { hit = YES; break; }
         }
         if (hit) [result addObject:item];
     }
-    return result.count > CRSlashMaxRows ? [result subarrayWithRange:NSMakeRange(0, CRSlashMaxRows)] : result;
+    return result;
 }
 
 // slashQueryRange locates a "/query" the caret sits at the end of: the whole
@@ -192,7 +87,9 @@ static const NSInteger CRSlashMaxRows = 9;
     NSUInteger caret = MIN(selection.location, string.length);
     NSRange paragraph = [string paragraphRangeForRange:NSMakeRange(caret, 0)];
     NSRange content = CRContent(string, paragraph);
-    if (!content.length || caret < content.location || caret > NSMaxRange(content)) return NSMakeRange(NSNotFound, 0);
+    // The caret must sit at the end of the line: moving it into the middle of
+    // "/query" dismisses the menu instead of filtering a prefix.
+    if (!content.length || caret != NSMaxRange(content)) return NSMakeRange(NSNotFound, 0);
     if ([string characterAtIndex:content.location] != '/') return NSMakeRange(NSNotFound, 0);
     NSDictionary *p = CRParagraphAt(self, content.location);
     if (!CRKind(p, @"body") || CRCellAt(self, content.location) || [p[@"footnoteId"] length]) return NSMakeRange(NSNotFound, 0);
@@ -216,6 +113,9 @@ static const NSInteger CRSlashMaxRows = 9;
 }
 
 - (void)slashOpenWithFilter:(NSString *)filter {
+    [self formatBarHide];
+    [self emojiMenuClose];
+    [self linkMenuClose];
     if (!filter) filter = @"";
     if (_slashFilter != filter && ![_slashFilter isEqualToString:filter]) {
         _slashFilter = [filter copy];
@@ -232,6 +132,7 @@ static const NSInteger CRSlashMaxRows = 9;
         panel.opaque = NO;
         panel.backgroundColor = NSColor.clearColor;
         panel.hasShadow = YES;
+        panel.alphaValue = 0;
         panel.contentView = view;
         _slashPanel = panel;
         _slashView = view;
@@ -240,9 +141,13 @@ static const NSInteger CRSlashMaxRows = 9;
         _scroll.postsFrameChangedNotifications = YES;
         [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(slashParentChanged:) name:NSViewBoundsDidChangeNotification object:_scroll.contentView];
         [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(slashParentChanged:) name:NSViewFrameDidChangeNotification object:_scroll];
+        // Losing key focus (another window, another app) dismisses the panel,
+        // so it never floats over a window that no longer owns the editor.
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(slashClose) name:NSWindowDidResignKeyNotification object:_window];
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(slashClose) name:NSApplicationDidResignActiveNotification object:nil];
         [_window addChildWindow:panel ordered:NSWindowAbove];
     }
-    _slashPanel.appearance = _window.appearance;
+    _slashPanel.appearance = [NSAppearance appearanceNamed:_dark ? NSAppearanceNameDarkAqua : NSAppearanceNameAqua];
     _slashView.items = items;
     if (_slashSelected >= (NSInteger)items.count) _slashSelected = 0;
     _slashView.selected = _slashSelected;
@@ -250,12 +155,20 @@ static const NSInteger CRSlashMaxRows = 9;
     [_slashPanel setContentSize:_slashView.bounds.size];
     [_slashPanel orderFront:nil];
     [self slashPositionPanel];
+    if (_slashPanel.alphaValue < 1) {
+        [NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
+            context.duration = 0.09;
+            _slashPanel.animator.alphaValue = 1;
+        }];
+    }
 }
 
 - (void)slashClose {
     if (!_slashPanel) return;
     [[NSNotificationCenter defaultCenter] removeObserver:self name:NSViewBoundsDidChangeNotification object:_scroll.contentView];
     [[NSNotificationCenter defaultCenter] removeObserver:self name:NSViewFrameDidChangeNotification object:_scroll];
+    [[NSNotificationCenter defaultCenter] removeObserver:self name:NSWindowDidResignKeyNotification object:_window];
+    [[NSNotificationCenter defaultCenter] removeObserver:self name:NSApplicationDidResignActiveNotification object:nil];
     [_window removeChildWindow:_slashPanel];
     [_slashPanel close];
     _slashPanel = nil;
@@ -367,15 +280,31 @@ static const NSInteger CRSlashMaxRows = 9;
     if ([command isEqual:@"math"]) { [self insertBlock:@"$$"]; return; }
     if ([command isEqual:@"table"]) { [self insertBlock:@"|  |  |"]; return; }
     if ([command isEqual:@"toc"]) { [self insertBlock:@"[TOC]"]; return; }
+    if ([command isEqual:@"pagebreak"]) { [self insertMarkdownText:@"<div style=\"page-break-after: always\"></div>"]; return; }
     if ([command isEqual:@"image"]) { [self insertMarkdownText:@"![图片]()"]; return; }
     [self format:command]; // heading1..6, bullet, ordered, checklist, quote, footnote:insert
+}
+
+// slashSnapshotTo renders the palette to a PNG for visual checks (the panel
+// lives in its own window, so the editor screenshot does not include it).
+- (BOOL)slashSnapshotTo:(NSString *)path {
+    if (!_slashView) return NO;
+    NSRect bounds = _slashView.bounds;
+    NSBitmapImageRep *rep = [_slashView bitmapImageRepForCachingDisplayInRect:bounds];
+    if (!rep) return NO;
+    [_slashView cacheDisplayInRect:bounds toBitmapImageRep:rep];
+    NSData *png = [rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
+    return png && [png writeToFile:path atomically:YES];
+}
+
+// slashFilterText lets the palette highlight the matched part of a title.
+- (NSString *)slashFilterText {
+    return _slashFilter ?: @"";
 }
 
 // slashState exposes the panel to the Go test harness.
 - (NSDictionary *)slashState {
     NSMutableArray *titles = [NSMutableArray array];
     for (NSDictionary *item in _slashView.items ?: @[]) [titles addObject:item[@"title"] ?: @""];
-    return @{@"open": @(_slashPanel != nil), @"filter": _slashFilter ?: @"", @"selected": @(_slashSelected), @"items": titles};
+    return @{@"open": (_slashPanel ? @YES : @NO), @"filter": _slashFilter ?: @"", @"selected": @(_slashSelected), @"offset": @(_slashView.offset), @"items": titles};
 }
-
-@end

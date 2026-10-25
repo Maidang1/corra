@@ -177,6 +177,99 @@ func TestNativeImageSizeKeepsDestination(t *testing.T) {
 	})
 }
 
+// Replacing a figure swaps its file but keeps everything around the URL: the
+// alt text, the quoted title and the size suffix, which now scales the new
+// picture. Undo brings the original file back.
+func TestNativeImageReplaceKeepsDestination(t *testing.T) {
+	nativeTestMain(func() {
+		window := nativeTestWindow()
+		defer nativeTestCloseWindow(window)
+		e := New(window, nil, nil)
+		defer e.Close()
+		oldPath := writeTestPNG(t, 400, 300, "replace-old")
+		defer os.Remove(oldPath)
+		newPath := writeTestPNG(t, 200, 100, "replace-new")
+		defer os.Remove(newPath)
+		original := "![alt](" + oldPath + " \"a title\" =50%)"
+		e.Load(original)
+		if !nativeTestImageReplace(e, newPath) {
+			t.Errorf("replace failed")
+			return
+		}
+		want := "![alt](" + newPath + " \"a title\" =50%)"
+		if got, _, _ := e.Snapshot(); got != want {
+			t.Errorf("replace wrote %q, want %q", got, want)
+		}
+		figures := readNativeImages(t, e)
+		if len(figures) != 1 || figures[0].URL != newPath || figures[0].Spec != "50%" || figures[0].Width != 100 || figures[0].Height != 50 {
+			t.Errorf("replaced figure not redrawn from the new file: %+v", figures)
+		}
+		nativeTestAction(e, "undo", "")
+		if got, _, _ := e.Snapshot(); got != original {
+			t.Errorf("undo lost the original file: %q", got)
+		}
+		if figures = readNativeImages(t, e); len(figures) != 1 || figures[0].URL != oldPath {
+			t.Errorf("undo did not restore the figure: %+v", figures)
+		}
+	})
+}
+
+// A no-op replacement (same URL, or no figure at the caret) changes nothing
+// and reports failure, so the panel flow can tell apart a cancel.
+func TestNativeImageReplaceRejectsNoop(t *testing.T) {
+	nativeTestMain(func() {
+		window := nativeTestWindow()
+		defer nativeTestCloseWindow(window)
+		e := New(window, nil, nil)
+		defer e.Close()
+		path := writeTestPNG(t, 400, 300, "replace-noop")
+		defer os.Remove(path)
+		original := "![alt](" + path + " =200x)"
+		e.Load(original)
+		if nativeTestImageReplace(e, path) {
+			t.Errorf("same-URL replace reported a change")
+		}
+		if got, dirty, _ := e.Snapshot(); got != original || dirty {
+			t.Errorf("no-op replace touched the document: %q dirty=%v", got, dirty)
+		}
+		e.Load("just text")
+		if nativeTestImageReplace(e, path) {
+			t.Errorf("replace ran without a figure")
+		}
+		if got, _, _ := e.Snapshot(); got != "just text" {
+			t.Errorf("replace changed prose: %q", got)
+		}
+	})
+}
+
+// A replacement file inside the document's folder is written as a relative
+// path, so the note keeps working when the folder moves.
+func TestNativeImageReplaceWritesRelativePath(t *testing.T) {
+	nativeTestMain(func() {
+		window := nativeTestWindow()
+		defer nativeTestCloseWindow(window)
+		e := New(window, nil, nil)
+		defer e.Close()
+		oldPath := writeTestPNG(t, 400, 300, "rel-old")
+		defer os.Remove(oldPath)
+		newPath := writeTestPNG(t, 200, 100, "rel-new")
+		defer os.Remove(newPath)
+		e.SetBaseDir(filepath.Dir(newPath))
+		e.Load("![alt](" + oldPath + ")")
+		if !nativeTestImageReplace(e, newPath) {
+			t.Errorf("replace failed")
+			return
+		}
+		want := "![alt](" + filepath.Base(newPath) + ")"
+		if got, _, _ := e.Snapshot(); got != want {
+			t.Errorf("replace wrote %q, want relative %q", got, want)
+		}
+		if figures := readNativeImages(t, e); len(figures) != 1 || figures[0].Width != 200 {
+			t.Errorf("relative figure not redrawn: %+v", figures)
+		}
+	})
+}
+
 // A path holding a space only loads inside angle brackets, and the brackets
 // have to come back when the size is rewritten.
 func TestNativeImageSizeBracketedDestination(t *testing.T) {

@@ -61,6 +61,7 @@ func buildMenu() *mygo.Menu {
 		Submenu: []*mygo.MenuItem{
 			item("新建文档", "CmdOrCtrl+N", func() { view.NewNoteAction() }),
 			item("新建文件夹…", "CmdOrCtrl+Shift+N", func() { view.NewFolderAction() }),
+			item("快速打开…", "CmdOrCtrl+Shift+P", func() { view.QuickOpenAction() }),
 			item("打开…", "CmdOrCtrl+O", func() { fileOps.Open() }),
 			{Label: "最近打开", Submenu: recentItems(item)},
 			disabled("导入（Word / EPUB / HTML…）", !pandoc, func() { fileOps.Import() }),
@@ -102,6 +103,7 @@ func buildMenu() *mygo.Menu {
 			role(mygo.RoleSelectAll),
 			mygo.Separator(),
 			item("文档内查找…", "CmdOrCtrl+F", func() { view.FindAction() }),
+			item("查找并替换…", "", func() { view.FindReplaceAction() }),
 			mygo.Separator(),
 			item("复制 Markdown", "", func() { view.CopyMarkdown() }),
 			item("复制 HTML", "", func() { view.CopyHTML() }),
@@ -145,6 +147,13 @@ func buildMenu() *mygo.Menu {
 			item("插入代码块", "CmdOrCtrl+Alt+C", func() { view.InsertMarkdown("\n```\n\n```\n") }),
 			item("插入数学公式块", "CmdOrCtrl+Alt+M", func() { view.InsertMarkdown("\n$$\n\n$$\n") }),
 			item("插入水平分割线", "CmdOrCtrl+Shift+_", func() { view.InsertMarkdown("\n---\n") }),
+			mygo.Separator(),
+			{Label: "块操作", Submenu: []*mygo.MenuItem{
+				item("上移块", "", func() { view.BlockAction("block-up") }),
+				item("下移块", "", func() { view.BlockAction("block-down") }),
+				item("复制块", "", func() { view.BlockAction("block-duplicate") }),
+				item("删除块", "", func() { view.BlockAction("block-delete") }),
+			}},
 		},
 	}
 

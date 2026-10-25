@@ -195,6 +195,15 @@ func (v *View) formatSelection(prefix, suffix string) {
 
 func (v *View) FormatAction(prefix, suffix string) { v.formatSelection(prefix, suffix) }
 
+// BlockAction runs a native structural block command (block-up, block-down,
+// block-duplicate, block-delete) on the rich editor.
+func (v *View) BlockAction(command string) {
+	if v.rich == nil || !v.canEdit() || !v.flushAutosave() {
+		return
+	}
+	v.rich.Format(command)
+}
+
 func (v *View) deleteDialog(c *ui.Context) {
 	open := true
 	ui.Modal(c, &open, func() {

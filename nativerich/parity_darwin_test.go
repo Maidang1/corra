@@ -464,6 +464,15 @@ func TestNativeParityFindBarAndSpellcheck(t *testing.T) {
 		if !nativeTestHasTraits(e, "findbar") {
 			t.Error("find bar not enabled")
 		}
+		// The replace mode shows a second editable field without touching the
+		// document.
+		e.ShowFindReplaceBar()
+		if !nativeTestHasTraits(e, "replacebar") {
+			t.Error("find bar did not switch to replace mode")
+		}
+		if got, dirty, _ := e.Snapshot(); got != "find me" || dirty {
+			t.Errorf("replace bar touched the document: %q dirty=%v", got, dirty)
+		}
 		// Spellcheck composes with IME marked text.
 		e.SetSpellcheck(true)
 		nativeTestSelect(e, 7, 0)

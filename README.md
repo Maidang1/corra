@@ -15,7 +15,9 @@ no JavaScript. Go draws the shell on the GPU; macOS uses an AppKit
 
 - **Document library and editing workspace** — folders and a
   document list grouped by modification date in the sidebar, with an editor
-  showing the document's modification date and an optional outline
+  showing the document's modification date and an optional outline; the list
+  is keyboard-driven like Apple Notes: arrows walk it while a row or the
+  search field has the focus, and Return hands the found note to the editor
 - **Native WYSIWYG on macOS** — edit headings, body text, inline styles and
   checklists directly, with native selection, clipboard and undo/redo. Documents
   still autosave as Markdown files. Requires a cgo-enabled macOS build.
@@ -43,14 +45,60 @@ no JavaScript. Go draws the shell on the GPU; macOS uses an AppKit
   GitHub repo via the Contents API; a CDN link (jsDelivr by default,
   configurable) is inserted. The token never leaves your machine (0600
   file)
-- **Export PDF / HTML / Word…** — PDF embeds document images and honors
-  page-break markers; HTML is standalone with KaTeX/mermaid CDN; docx/EPUB/
-  LaTeX/RTF/ODT and imports run through pandoc when it is installed
+- **Export PDF / HTML / Word…** — the share menu and command palette open an
+  export panel with one described card per format; PDF embeds document
+  images and honors page-break markers; HTML is standalone with
+  KaTeX/mermaid CDN; docx/EPUB/LaTeX/RTF/ODT and imports run through pandoc
+  when it is installed (the panel says how to install it otherwise)
 - **Copy as HTML / Markdown**, smart paste from web pages (HTML → Markdown)
+- **Quick open / command palette** — `⌘⇧P` filters the library by title,
+  folder or path; an empty query groups recently opened notes above the rest;
+  type `>` to switch to actions (new note, insert table,
+  export, theme, settings…) with their menu shortcuts; Return runs the
+  highlighted row and Escape dismisses
+- **Link completion** — type `[[` before a note name to search the library;
+  the list shows titles and relative paths, Return inserts a Markdown link to
+  that note (`[Beta](sub/beta.md)`), and the path stays clickable; `[[#` lists
+  the current note's headings and inserts an anchor link (`[Setup](#setup)`)
+- **Emoji picker** — type `:` at a word start for a shortcode list (`:smi` →
+  😄); keep typing to filter, arrows to browse, Return to insert, Escape to
+  dismiss
+- **Slash menu** — type `/` on an empty line for a Notion-style block picker
+  (headings, lists, quotes, callouts, code, math, tables, TOC, footnotes,
+  images, page breaks), grouped into sections; filter by name or keyword,
+  navigate with arrows, confirm with Return, dismiss with Escape; the
+  matched part of a title is highlighted as you filter
+- **Selection toolbar** — selecting prose raises a floating pill with bold,
+  italic, underline, strike, inline code, highlight, link and clear;
+  active traits are highlighted, and the link prompt accepts or removes a URL
+- **Block actions** — move a paragraph, list item, code block or table past
+  its neighbour (Cmd+Shift+↑/↓), duplicate it (Cmd+D), delete it
+  (Cmd+Shift+⌫), or turn it into another block kind from the context menu;
+  a six-dot handle in the left margin opens that menu, and dragging the handle
+  reorders blocks with a live insertion line (one undo step)
+- **Code block comforts** — hover a fenced block for a one-click copy button
+  (with a checkmark flash) and a clickable language tag that swaps the fence
+  language; the tag makes room for the button
+- **Image controls** — hover an image for a size pill (original / 25 / 50 /
+  75 / 100%); the current size is highlighted, and replace / copy / delete
+  buttons sit after a divider so the image can be managed without selecting
+  its block; replacing keeps the alt text, title and size, and writes a
+  relative path for files inside the document's folder
+- **Document stats** — click the word count in the status bar for a strip of
+  chips: words, characters, lines, headings, links, images, tasks, code
+  blocks and reading time, counted outside fenced code
+- **Table controls** — hovering a table raises a "+" under it (add row) and
+  at its right edge (add column), so a table grows without the context menu
+- **Footnote preview** — hovering a footnote reference raises a readable card
+  with its definition instead of waiting for the system tooltip; the card's
+  "跳到定义" link jumps straight there, ⌘⌥↓/⌘⌥↑ jump between a reference and
+  its definition, and ⌘⌥← returns to where the last jump started (press
+  again to toggle)
 - **Writer comforts** — word count (CJK-aware, reading minutes), outline
   panel with jump-to-heading, focus mode, typewriter mode, spell checking,
   auto-pairing, smart punctuation, code-fence line numbers, heading
-  auto-numbering, native printing on macOS
+  auto-numbering, native printing on macOS, find (`⌘F`) and find-and-replace
+  (edit menu / command palette; replace mode opens directly)
 - **Deep native integration** — system dark mode, drag & drop, file
   associations, external-change detection with a conflict dialog, global
   menu with accelerators
@@ -116,7 +164,8 @@ JavaScript。Go 在 GPU 上绘制外壳，macOS 编辑区使用 AppKit 原生富
 ### 功能
 
 - **文档库与编辑工作区**：侧栏提供文件夹和按修改日期分组的文档列表，
-  编辑区显示文档修改时间，并可开启大纲
+  编辑区显示文档修改时间，并可开启大纲；列表对齐 Apple Notes 的键盘操作：
+  列表行或搜索框聚焦时 ↑↓ 遍历文档（循环），回车把焦点交给编辑器
 - **macOS 原生所见即所得**：直接编辑标题、正文、文字格式和任务清单，
   使用原生选区、剪贴板和撤销重做，自动保存为 Markdown 文件。需启用 cgo。
 - **源码和阅读视图**：`Cmd+E` 切换富文本 / Markdown 源码；文档菜单
@@ -137,13 +186,44 @@ JavaScript。Go 在 GPU 上绘制外壳，macOS 编辑区使用 AppKit 原生富
   的 `assets/` 文件夹
 - **GitHub 图床**：插入图片即通过 Contents API 上传到指定仓库并回插
   CDN 链接（默认 jsDelivr，可自定义反代）；token 只存本机（0600 权限）
-- **导出 PDF / HTML / Word 等**：PDF 嵌入正文图片并支持分页符；HTML 为
-  独立页面（KaTeX/mermaid CDN）；docx/EPUB/LaTeX/RTF/ODT 与反向导入
-  经由 pandoc（检测到才可用）
+- **导出 PDF / HTML / Word 等**：分享菜单与命令面板打开导出面板，每种格式
+  一张说明卡片；PDF 嵌入正文图片并支持分页符；HTML 为独立页面
+  （KaTeX/mermaid CDN）；docx/EPUB/LaTeX/RTF/ODT 与反向导入经由 pandoc
+  （未安装时面板会给出安装提示）
 - **复制为 HTML / Markdown**，网页智能粘贴（HTML → Markdown）
+- **快速打开 / 命令面板**：`⌘⇧P` 按标题/文件夹/路径即时筛选文档，空查询时
+  顶部按「最近打开 / 全部文档」分组；输入 `>`
+  切换为命令模式（新建、插入表格、导出、主题、设置…并显示对应快捷键），
+  回车执行首项，Esc 关闭，不会改动当前文档
+- **文档链接补全**：输入 `[[` 即可按标题检索文档库，列表显示标题与相对路径，
+  回车插入指向该文档的 Markdown 链接（`[Beta](sub/beta.md)`），可直接点击跳转；
+  `[[#` 列出当前文档的标题并插入锚点链接（`[Setup](#setup)`）
+- **表情选择器**：在词首输入 `:` 打开 shortcode 列表（`:smi` → 😄），
+  继续输入即过滤，方向键浏览，回车插入，Esc 关闭
+- **斜杠菜单**：在空行输入 `/` 打开 Notion 风格块选择面板（标题、列表、
+  引用、提示卡片、代码、公式、表格、目录、脚注、图片、分页符），按标题分组，
+  按名称或关键词过滤（命中的标题片段会高亮），方向键选择，回车应用，Esc 关闭
+- **选区浮动工具栏**：选中正文即浮出格式药丸（粗体、斜体、下划线、删除线、
+  行内代码、高亮、链接、清除格式），已生效格式会高亮，链接支持输入或移除
+- **块操作**：段落、列表项、代码块、表格整体上移 / 下移（Cmd+Shift+↑/↓）、
+  复制（Cmd+D）、删除（Cmd+Shift+⌫），右键菜单还可「转换为」其他块类型；
+  悬停时左边距出现六点块手柄，点开是同一套块菜单，拖动即可重排（带插入
+  指示线，一次撤销可还原）
+- **代码块体验**：悬停围栏代码块出现一键复制按钮（带勾选反馈），
+  语言标签可点击切换语言，并会给复制按钮让位
+- **图片控制**：悬停图片出现尺寸条（原图 / 25% / 50% / 75% / 100%）、
+  分隔线与替换/复制/删除按钮，当前尺寸高亮，点击即改尺寸或管理图片；
+  替换图片保留替代文本、标题与尺寸，文档目录内的文件写入相对路径
+- **文档统计**：点击状态栏的字数展开统计条，显示字数、字符、行数、标题、
+  链接、图片、任务、代码块与阅读时间（统计时跳过围栏代码）
+- **表格控制**：悬停表格时下方出现「+」加行、右侧出现「+」加列，无需右键菜单
+- **脚注预览**：悬停脚注引用即浮出定义卡片，无需等待系统提示；卡片上的
+  「跳到定义」链接直达定义，⌘⌥↓/⌘⌥↑ 在引用与定义之间跳转，⌘⌥← 回到上次
+  跳转的起点（再按一次往返切换）
 - **写作体验**：字数统计（中英混排、阅读时长）、大纲面板点击跳转、
   专注模式、打字机模式、拼写检查、括号自动配对、智能标点、代码块行号、
-  标题自动编号、macOS 原生打印
+  标题自动编号、macOS 原生打印、查找（`⌘F`）与查找替换（编辑菜单/命令面板，
+  直接打开替换模式）
 - **深度系统集成**：系统深浅色、拖放打开、文件关联、外部修改检测
   与冲突处理、全局菜单与快捷键
 - **设置面板（Cmd+,）**：外观（跟随系统 / 浅色 / 深色）、正文与代码

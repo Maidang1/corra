@@ -121,7 +121,10 @@ static NSColor *CRAlertTint(NSString *label, BOOL dark) {
     NSDictionary *attrs = content.length
         ? [_text.textStorage attributesAtIndex:content.location effectiveRange:NULL]
         : _text.typingAttributes;
-    [after replaceCharactersInRange:(content.length ? content : paragraph)
+    // On an empty line insert before the line break: replacing the whole
+    // paragraph would swallow it and merge the following line into the card.
+    NSRange target = content.length ? content : NSMakeRange(content.location, 0);
+    [after replaceCharactersInRange:target
               withAttributedString:[[NSAttributedString alloc] initWithString:updated attributes:attrs]];
     NSUInteger caretAfter = paragraph.location + updated.length;
     [self replace:NSMakeRange(0, _text.string.length) with:after selection:NSMakeRange(caretAfter, 0)];

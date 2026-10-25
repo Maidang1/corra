@@ -55,7 +55,7 @@ func (v *View) foldersSidebar(c *ui.Context) {
 			// center line as the workspace card's header.
 			ui.Row(c).FillWidth().Height(topRowH).AlignItems(ui.Center).DragWindow().
 				Padding(0, 8, 0, max(12, c.TitleBar().Left-8)).Children(func() {
-				iconButton(c, iconSidebar, "切换边栏", v.toggleSidebar)
+				iconButton(c, iconSidebar, "收起边栏", v.toggleSidebar)
 			})
 			ui.Column(c).FillWidth().Gap(1).Padding(2, 4, 8, 6).Children(func() {
 				ui.Text(c, "本地文档库").FontSize(12).Bold().TextColor(t.TextMuted).Padding(0, 7, 5, 7)
@@ -147,18 +147,57 @@ func (v *View) searchBox(c *ui.Context) {
 	t := c.Theme()
 	// The filter field lives inside the sidebar, directly above the notes
 	// list it filters — the way Apple Notes scopes search to its list.
-	ui.Box(c).FillWidth().Padding(4, 8, 6, 8).Children(func() {
+	box := ui.Box(c).FillWidth().Padding(4, 8, 6, 8)
+	box.Children(func() {
 		ui.Row(c).Key("search").FillWidth().Height(28).Gap(6).Padding(0, 10).Radius(14).
 			Background(fieldFill(t)).Children(func() {
 			ui.Icon(c, iconSearch).Size(14, 14).TextColor(t.TextMuted)
 			field := ui.TextInputBase(c, &v.App.Query).Label("搜索文档").Placeholder("搜索").FillWidth().FontSize(13).
 				OnChange(func() { v.reconcileSelection() })
+			if field.Submitted() {
+				// Return picks the found note for writing: the editor takes
+				// the focus while the selection already followed the query.
+				v.focusEditor = true
+				v.App.InvalidateUI()
+			}
 			if v.focusSearch {
 				field.Focus()
 				v.focusSearch = false
 			}
 		})
 	})
+	// Arrows move the found selection without leaving the field, the way
+	// Apple Notes walks its list while the search keeps the caret.
+	if box.Shortcut(0, ui.KeyDown) {
+		v.moveNoteSelection(1, false)
+	}
+	if box.Shortcut(0, ui.KeyUp) {
+		v.moveNoteSelection(-1, false)
+	}
+}
+
+// moveNoteSelection selects the note delta steps from the current one in the
+// sidebar's list order, wrapping at the ends, and opens it. focusRow moves
+// the keyboard focus onto the new row, so the next arrow keeps walking the
+// list; the search field passes false to keep its caret.
+func (v *View) moveNoteSelection(delta int, focusRow bool) {
+	notes := v.App.VisibleNotes()
+	if len(notes) == 0 {
+		return
+	}
+	index := 0
+	for i, n := range notes {
+		if n.Path == v.App.SelNote {
+			index = i
+			break
+		}
+	}
+	index = (index + delta + len(notes)) % len(notes)
+	v.openNote(notes[index].Path)
+	if focusRow && v.App.SelNote == notes[index].Path {
+		v.focusNotePath = notes[index].Path
+	}
+	v.App.InvalidateUI()
 }
 
 func (v *View) sidebarNotes(c *ui.Context) {
@@ -177,7 +216,8 @@ func (v *View) sidebarNotes(c *ui.Context) {
 		})
 		return
 	}
-	ui.Scroll(c).Fill().Children(func() {
+	list := ui.Scroll(c).Fill()
+	list.Children(func() {
 		ui.Column(c).FillWidth().Gap(1).Padding(0, 4, 0, 8).Children(func() {
 			for _, g := range v.App.NoteGroups() {
 				ui.Text(c, g.Label).FontSize(11).Bold().TextColor(t.TextMuted).Padding(12, 10, 4, 10)
@@ -187,6 +227,14 @@ func (v *View) sidebarNotes(c *ui.Context) {
 			}
 		})
 	})
+	// Arrows walk the list while a note row has the keyboard focus; the
+	// editor's keys never reach here because focus stays out of the sidebar.
+	if list.Shortcut(0, ui.KeyDown) {
+		v.moveNoteSelection(1, true)
+	}
+	if list.Shortcut(0, ui.KeyUp) {
+		v.moveNoteSelection(-1, true)
+	}
 }
 
 // noteRow renders one note of the sidebar list the way Apple Notes does:
@@ -230,6 +278,10 @@ func (v *View) noteRow(c *ui.Context, n app.Note) {
 		}
 		v.noteMenu(m)
 	})
+	if v.focusNotePath == n.Path {
+		row.Focus()
+		v.focusNotePath = ""
+	}
 }
 
 // noteTime formats a note's time the way the list does: the clock time

@@ -1,12 +1,57 @@
 package views
 
 import (
+	"encoding/json"
+	"path/filepath"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
 
 	"github.com/Maidang1/corra/app"
 )
+
+// LinkCandidates returns note suggestions for the rich editor's "[[" link
+// completion as JSON [{"title","path"}], with paths relative to the open note.
+func (v *View) LinkCandidates(query string) string {
+	notes := v.App.VisibleNotes()
+	if len(notes) == 0 {
+		return "[]"
+	}
+	q := strings.ToLower(strings.TrimSpace(query))
+	base := filepath.Dir(v.App.Path)
+	type candidate struct {
+		Title string `json:"title"`
+		Path  string `json:"path"`
+	}
+	out := make([]candidate, 0, 24)
+	for _, note := range notes {
+		if note.Path == v.App.Path {
+			continue
+		}
+		if q != "" {
+			title := strings.ToLower(note.Title)
+			name := strings.ToLower(filepath.Base(note.Path))
+			if !strings.Contains(title, q) && !strings.Contains(name, q) {
+				continue
+			}
+		}
+		rel := note.Path
+		if v.App.Path != "" {
+			if value, err := filepath.Rel(base, note.Path); err == nil {
+				rel = value
+			}
+		}
+		out = append(out, candidate{Title: note.Title, Path: filepath.ToSlash(rel)})
+		if len(out) >= 24 {
+			break
+		}
+	}
+	data, err := json.Marshal(out)
+	if err != nil {
+		return "[]"
+	}
+	return string(data)
+}
 
 // LinkDialog state for 插入链接 (Cmd+K).
 

@@ -42,7 +42,7 @@ func (v *View) header(c *ui.Context) {
 			// Collapsed: the leading slot hosts the expand control,
 			// offset past the traffic lights (the toolbar starts at x=0).
 			ui.Row(c).FillHeight().AlignItems(ui.Center).Padding(0, 4, 0, max(0, c.TitleBar().Left-16)).Children(func() {
-				iconButton(c, iconSidebar, "切换边栏", v.toggleSidebar)
+				iconButton(c, iconSidebar, "展开边栏", v.toggleSidebar)
 			})
 		}
 		if v.App.Sidebar {
@@ -70,10 +70,8 @@ func (v *View) header(c *ui.Context) {
 						c.Services().WriteClipboard(v.App.Source)
 					}
 				}
-				if m.Item("导出 PDF…").Disabled(v.OnExportPDF == nil).Chosen() {
-					if v.syncEditor() {
-						v.OnExportPDF()
-					}
+				if m.Item("导出…").Chosen() {
+					v.OpenExport()
 				}
 			})
 			iconButton(c, iconEllipsis, "文档选项", nil).Menu(func(m *ui.Menu) {

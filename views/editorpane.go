@@ -80,9 +80,25 @@ func (v *View) statusBar(c *ui.Context) {
 		return
 	}
 	t := c.Theme()
-	ui.Row(c).FillWidth().Padding(3, 22, 6, 22).Children(func() {
+	wc := countWords(v.App.CurrentSource())
+	if v.StatsOpen {
+		v.statsStrip(c, wc)
+	}
+	ui.Row(c).FillWidth().Padding(3, 22, 6, 22).AlignItems(ui.Center).Children(func() {
 		ui.Spacer(c)
-		ui.Text(c, countWords(v.App.CurrentSource()).String()).FontSize(11).TextColor(t.TextMuted).NoWrap()
+		button := ui.ButtonBase(c).Key("stats").Label("文档统计").Padding(2, 8).Radius(6)
+		if v.StatsOpen || button.Hovered() {
+			button = button.Background(sidebarHover(t))
+		}
+		button.Children(func() {
+			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+				ui.Icon(c, iconStats).Size(12, 12).TextColor(t.TextMuted)
+				ui.Text(c, wc.String()).FontSize(11).TextColor(t.TextMuted).NoWrap()
+			})
+		}).OnClick(func() {
+			v.StatsOpen = !v.StatsOpen
+			v.App.InvalidateUI()
+		})
 	})
 }
 

@@ -17,6 +17,7 @@ type fakeRichEditor struct {
 	err                      error
 	x, y, width, height      float64
 	codeLineNumbers          bool
+	findBar, replaceBar      bool
 }
 
 func (e *fakeRichEditor) Load(s string) { e.source = s; e.changed = false; e.loads++ }
@@ -34,7 +35,8 @@ func (e *fakeRichEditor) SetFont(body, mono string)                  {}
 func (e *fakeRichEditor) SetSpellcheck(bool)                         {}
 func (e *fakeRichEditor) SetFocusMode(bool)                          {}
 func (e *fakeRichEditor) SetTypewriter(bool)                         {}
-func (e *fakeRichEditor) ShowFindBar()                               {}
+func (e *fakeRichEditor) ShowFindBar()                               { e.findBar = true }
+func (e *fakeRichEditor) ShowFindReplaceBar()                        { e.replaceBar = true }
 func (e *fakeRichEditor) RevealHeading(int)                          {}
 func (e *fakeRichEditor) Print()                                     {}
 

@@ -98,6 +98,256 @@ func nativeTestTOC(e *Editor) string {
 	return C.GoString(value)
 }
 
+// nativeTestSlash reports the slash menu: open state, filter, highlighted row,
+// first visible row (the palette scrolls) and entries.
+func nativeTestSlash(e *Editor) (open bool, filter string, selected, offset int, items []string) {
+	value := C.cr_test_slash(e.native)
+	if value == nil {
+		return false, "", 0, 0, nil
+	}
+	defer C.free(unsafe.Pointer(value))
+	var state struct {
+		Open     bool     `json:"open"`
+		Filter   string   `json:"filter"`
+		Selected int      `json:"selected"`
+		Offset   int      `json:"offset"`
+		Items    []string `json:"items"`
+	}
+	if json.Unmarshal([]byte(C.GoString(value)), &state) != nil {
+		return false, "", 0, 0, nil
+	}
+	return state.Open, state.Filter, state.Selected, state.Offset, state.Items
+}
+
+// nativeTestFormatBar reports the floating format bar: visible state and the
+// traits active on the selection.
+type nativeRect struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+	W float64 `json:"w"`
+	H float64 `json:"h"`
+}
+
+func nativeTestFormatBar(e *Editor) (open bool, active []string, frame, window, anchor nativeRect) {
+	value := C.cr_test_format_bar(e.native)
+	if value == nil {
+		return false, nil, nativeRect{}, nativeRect{}, nativeRect{}
+	}
+	defer C.free(unsafe.Pointer(value))
+	var state struct {
+		Open   bool       `json:"open"`
+		Active []string   `json:"active"`
+		Frame  nativeRect `json:"frame"`
+		Window nativeRect `json:"window"`
+		Anchor nativeRect `json:"anchor"`
+	}
+	if json.Unmarshal([]byte(C.GoString(value)), &state) != nil {
+		return false, nil, nativeRect{}, nativeRect{}, nativeRect{}
+	}
+	return state.Open, state.Active, state.Frame, state.Window, state.Anchor
+}
+
+// nativeTestEmoji reports the emoji menu: open state, filter and names.
+func nativeTestEmoji(e *Editor) (open bool, filter string, selected int, items []string) {
+	value := C.cr_test_emoji(e.native)
+	if value == nil {
+		return false, "", 0, nil
+	}
+	defer C.free(unsafe.Pointer(value))
+	var state struct {
+		Open     bool     `json:"open"`
+		Filter   string   `json:"filter"`
+		Selected int      `json:"selected"`
+		Items    []string `json:"items"`
+	}
+	if json.Unmarshal([]byte(C.GoString(value)), &state) != nil {
+		return false, "", 0, nil
+	}
+	return state.Open, state.Filter, state.Selected, state.Items
+}
+
+func nativeTestEmojiShot(e *Editor, path string) bool {
+	p, free := stringArg(path)
+	defer free()
+	return C.cr_test_emoji_shot(e.native, p) != 0
+}
+
+// nativeTestLink reports the link completion menu.
+func nativeTestLink(e *Editor) (open bool, filter string, selected int, items []string) {
+	value := C.cr_test_link(e.native)
+	if value == nil {
+		return false, "", 0, nil
+	}
+	defer C.free(unsafe.Pointer(value))
+	var state struct {
+		Open     bool     `json:"open"`
+		Filter   string   `json:"filter"`
+		Selected int      `json:"selected"`
+		Items    []string `json:"items"`
+	}
+	if json.Unmarshal([]byte(C.GoString(value)), &state) != nil {
+		return false, "", 0, nil
+	}
+	return state.Open, state.Filter, state.Selected, state.Items
+}
+
+func nativeTestLinkShot(e *Editor, path string) bool {
+	p, free := stringArg(path)
+	defer free()
+	return C.cr_test_link_shot(e.native, p) != 0
+}
+
+// nativeTestHover reports the margin handle and code copy button.
+func nativeTestHover(e *Editor) (copyButton, handle bool) {
+	value := C.cr_test_hover(e.native)
+	if value == nil {
+		return false, false
+	}
+	defer C.free(unsafe.Pointer(value))
+	var state struct {
+		Copy   bool `json:"copy"`
+		Handle bool `json:"handle"`
+	}
+	if json.Unmarshal([]byte(C.GoString(value)), &state) != nil {
+		return false, false
+	}
+	return state.Copy, state.Handle
+}
+
+// nativeTestHoverCode hovers the first code block's copy button; with activate
+// it copies the block and reports success.
+func nativeTestHoverCode(e *Editor, activate bool) bool {
+	return C.cr_test_hover_code(e.native, boolInt(activate)) != 0
+}
+
+// nativeTestClickCodeText clicks inside the first code block's text (not the
+// copy button) and reports where the caret landed, or -1 when outside it.
+func nativeTestClickCodeText(e *Editor) int {
+	return int(C.cr_test_click_code_text(e.native))
+}
+
+// nativeTestDragBlock drags a paragraph's handle onto another block, dropping
+// before or after it.
+func nativeTestDragBlock(e *Editor, from, to int, after bool) bool {
+	return C.cr_test_drag_block(e.native, C.int(from), C.int(to), boolInt(after)) != 0
+}
+
+// nativeTestHoverImage hovers the first image; with buttonIndex it applies
+// that size preset (0 = original, 1..4 = 25/50/75/100%).
+func nativeTestImageCopy(e *Editor) bool {
+	return C.cr_test_image_copy(e.native) != 0
+}
+
+func nativeTestImageDelete(e *Editor) bool {
+	return C.cr_test_image_delete(e.native) != 0
+}
+
+// nativeTestImageReplace swaps the first figure's file for a given path, the
+// way the replace button does once the open panel returns.
+func nativeTestImageReplace(e *Editor, path string) bool {
+	p, free := stringArg(path)
+	defer free()
+	return C.cr_test_image_replace(e.native, p) != 0
+}
+
+// nativeTestClickImageButton sends a real mouse event to a pill button:
+// 0..4 are the size presets, 5 copy, 6 delete.
+func nativeTestClickImageButton(e *Editor, index int) bool {
+	return C.cr_test_click_image_button(e.native, C.int(index)) != 0
+}
+
+// nativeTestClickTableButton sends a real mouse event to the hovered table's
+// add-row (0) / add-column (1) button.
+func nativeTestClickTableButton(e *Editor, kind int) bool {
+	return C.cr_test_click_table_button(e.native, C.int(kind)) != 0
+}
+
+// nativeTestClipboardImage reports whether the pasteboard holds an image.
+func nativeTestClipboardImage() bool {
+	return C.cr_test_clipboard_image() != 0
+}
+
+func nativeTestHoverTable(e *Editor) bool {
+	return C.cr_test_hover_table(e.native) != 0
+}
+
+// nativeTestTableButton adds a row (0) or column (1) to the hovered table.
+func nativeTestTableButton(e *Editor, kind int) bool {
+	return C.cr_test_table_button(e.native, C.int(kind)) != 0
+}
+
+func nativeTestHoverImage(e *Editor, buttonIndex int, activate bool) bool {
+	return C.cr_test_hover_image(e.native, C.int(buttonIndex), boolInt(activate)) != 0
+}
+
+// nativeTestHoverFootnote hovers the first footnote reference.
+func nativeTestHoverFootnote(e *Editor) bool {
+	return C.cr_test_hover_footnote(e.native) != 0
+}
+
+// nativeTestFootnoteCard reports the hover card: open state, heading, body
+// and whether its jump-to-definition button is showing.
+func nativeTestFootnoteCard(e *Editor) (open bool, heading, body string, jump bool) {
+	value := C.cr_test_footnote_card(e.native)
+	if value == nil {
+		return false, "", "", false
+	}
+	defer C.free(unsafe.Pointer(value))
+	var state struct {
+		Open    bool   `json:"open"`
+		Heading string `json:"heading"`
+		Body    string `json:"body"`
+		Jump    bool   `json:"jump"`
+	}
+	if json.Unmarshal([]byte(C.GoString(value)), &state) != nil {
+		return false, "", "", false
+	}
+	return state.Open, state.Heading, state.Body, state.Jump
+}
+
+// nativeTestFootnoteCardJump clicks the card's jump-to-definition button.
+func nativeTestFootnoteCardJump(e *Editor) bool {
+	return C.cr_test_footnote_card_jump(e.native) != 0
+}
+
+func nativeTestFootnoteShot(e *Editor, path string) bool {
+	p, free := stringArg(path)
+	defer free()
+	return C.cr_test_footnote_shot(e.native, p) != 0
+}
+
+func nativeTestLanguageHover(e *Editor) bool {
+	return C.cr_test_language_hover(e.native) != 0
+}
+
+func nativeTestLanguagePick(e *Editor, language string) bool {
+	p, free := stringArg(language)
+	defer free()
+	return C.cr_test_language_pick(e.native, p) != 0
+}
+
+func nativeTestDragPreview(e *Editor, from, to int, after bool) bool {
+	return C.cr_test_drag_preview(e.native, C.int(from), C.int(to), boolInt(after)) != 0
+}
+
+// nativeTestHoverBlock hovers a paragraph's margin handle; with activate it
+// selects that block, the way clicking the handle does.
+func nativeTestHoverBlock(e *Editor, paragraph int, activate bool) bool {
+	return C.cr_test_hover_block(e.native, C.int(paragraph), boolInt(activate)) != 0
+}
+
+func nativeTestFormatBarShot(e *Editor, path string) bool {
+	p, free := stringArg(path)
+	defer free()
+	return C.cr_test_format_bar_shot(e.native, p) != 0
+}
+
+func nativeTestSlashShot(e *Editor, path string) bool {
+	p, free := stringArg(path)
+	defer free()
+	return C.cr_test_slash_shot(e.native, p) != 0
+}
+
 func nativeTestClipboardText() string {
 	value := C.cr_test_clipboard_text()
 	defer C.free(unsafe.Pointer(value))

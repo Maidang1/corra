@@ -50,6 +50,9 @@ type View struct {
 	autosaveSource string
 	SaveError      string
 	focusEditor    bool
+	// focusNotePath is the sidebar note whose row takes the keyboard focus
+	// next frame, so arrow-key navigation keeps walking the list.
+	focusNotePath  string
 	focusSearch    bool
 	FolderDialog   string
 	FolderDraft    string
@@ -69,6 +72,17 @@ type View struct {
 	// Settings modal (preferences: appearance, fonts, writing aids).
 	SettingsOpen bool
 
+	// Export panel: one card per output format (PDF, HTML, pandoc).
+	ExportOpen bool
+
+	// Quick switcher (Cmd+Shift+P): filter the library by title or path.
+	QuickOpen  bool
+	QuickQuery string
+	QuickIndex int
+
+	// StatsOpen expands the status bar's document statistics strip.
+	StatsOpen bool
+
 	// windowW is the window's width as of the last frame, for the
 	// toolbar's compact layout.
 	windowW float32
@@ -82,10 +96,15 @@ type View struct {
 	OnSaveSettings    func()
 	OnOpenRecent      func(path string)
 	OnExportPDF       func()
-	OnCopyHTML        func() ([]byte, error)
-	OnSave            func() bool
-	OnOpen            func()
-	OnInsertImage     func()
+	OnExportHTML      func()
+	OnExportPandoc    func(label, ext, pandocArg string)
+	// PandocPath resolves the pandoc binary for the export panel; nil falls
+	// back to app.PandocPath. Tests stub it for a deterministic panel.
+	PandocPath    func() string
+	OnCopyHTML    func() ([]byte, error)
+	OnSave        func() bool
+	OnOpen        func()
+	OnInsertImage func()
 	// OnNoteSaved restarts the file watcher after an autosave so the
 	// change we wrote ourselves is not reported as external.
 	OnNoteSaved func()
@@ -167,6 +186,9 @@ func (v *View) Build(c *ui.Context) {
 	if v.SettingsOpen {
 		v.settingsDialog(c)
 	}
+	if v.ExportOpen {
+		v.exportDialog(c)
+	}
 	if v.FolderDialog != "" {
 		v.folderDialog(c)
 	}
@@ -175,5 +197,8 @@ func (v *View) Build(c *ui.Context) {
 	}
 	if v.LinkOpen {
 		v.linkDialog(c)
+	}
+	if v.QuickOpen {
+		v.quickOpenDialog(c)
 	}
 }

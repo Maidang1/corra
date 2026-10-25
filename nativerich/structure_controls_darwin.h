@@ -1,6 +1,9 @@
 // Included in CRTextView's implementation so context actions and keys share
 // the same transaction paths as toolbar commands.
 - (BOOL)handleStructureKey:(NSEvent *)event {
+    if ([self.owner slashHandleKey:event]) return YES;
+    if ([self.owner emojiMenuHandleKey:event]) return YES;
+    if ([self.owner linkMenuHandleKey:event]) return YES;
     if (self.hasMarkedText) return NO;
     NSEventModifierFlags modifiers=event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
     modifiers &= ~(NSEventModifierFlagCapsLock | NSEventModifierFlagNumericPad | NSEventModifierFlagFunction);
@@ -8,6 +11,7 @@
     if (modifiers==(NSEventModifierFlagCommand|NSEventModifierFlagOption) && ([@[@"\uf700",@"\uf701"] containsObject:key]) && [self.owner footnoteLabelAt:self.selectedRange.location]) {
         [self.owner navigateFootnote:[key isEqual:@"\uf701"] atLocation:self.selectedRange.location]; return YES;
     }
+    if (modifiers==(NSEventModifierFlagCommand|NSEventModifierFlagOption) && [key isEqual:@"\uf702"]) return [self.owner footnoteNavigateBack];
     if (!self.editable) return NO;
     BOOL table=CRCellAt(self.owner,self.selectedRange.location)!=nil;
     if (modifiers==NSEventModifierFlagOption && [key isEqual:@"\r"] && CRList(CRParagraphAt(self.owner,self.selectedRange.location))) {
@@ -22,6 +26,18 @@
         [self.owner tableCommand:@"table:delete-row"]; return YES;
     }
     NSDictionary *paragraph=CRParagraphAt(self.owner,self.selectedRange.location);
+    // Notion-style block actions: move the block past its neighbour, duplicate
+    // or delete it. These mirror the context menu's 块 entries.
+    if (self.editable && !self.hasMarkedText && modifiers==(NSEventModifierFlagCommand|NSEventModifierFlagShift) && ([@[@"\uf700",@"\uf701"] containsObject:key])) {
+        [self.owner format:[key isEqual:@"\uf700"] ? @"block-up" : @"block-down"];
+        return YES;
+    }
+    if (self.editable && !self.hasMarkedText && modifiers==NSEventModifierFlagCommand && [key isEqual:@"d"]) {
+        [self.owner format:@"block-duplicate"]; return YES;
+    }
+    if (self.editable && !self.hasMarkedText && modifiers==(NSEventModifierFlagCommand|NSEventModifierFlagShift) && [key isEqual:@"\x7f"]) {
+        [self.owner format:@"block-delete"]; return YES;
+    }
     if (modifiers==NSEventModifierFlagCommand && ([@[@"[",@"]"] containsObject:key]) && (CRList(paragraph) || CRKind(paragraph,@"code") || CRKind(paragraph,@"quote"))) {
         [self.owner format:[key isEqual:@"["] ? @"outdent" : @"indent"]; return YES;
     }
@@ -48,8 +64,10 @@
 - (void)structuralAction:(NSMenuItem *)item { [self.owner format:item.representedObject]; }
 - (void)footnoteAction:(NSMenuItem *)item {
     NSDictionary *target=item.representedObject;
+    if (self.hasMarkedText || [target[@"revision"] unsignedIntegerValue]!=self.owner.documentRevision) return;
+    if ([target[@"command"] isEqual:@"footnote:back"]) { [self.owner footnoteNavigateBack]; return; }
     NSUInteger location=[target[@"location"] unsignedIntegerValue];
-    if (self.hasMarkedText || [target[@"revision"] unsignedIntegerValue]!=self.owner.documentRevision || ![[self.owner footnoteLabelAt:location] isEqual:target[@"label"]]) return;
+    if (![[self.owner footnoteLabelAt:location] isEqual:target[@"label"]]) return;
     [self.owner navigateFootnote:[target[@"command"] isEqual:@"footnote:definition"] atLocation:location];
 }
 - (void)codeLanguageAction:(NSMenuItem *)item {
@@ -118,6 +136,9 @@
     [self.owner revealSourceAt:location];
 }
 - (NSMenu *)menuForEvent:(NSEvent *)event {
+    [self.owner formatBarHide];
+    [self.owner emojiMenuClose];
+    [self.owner linkMenuClose];
     NSMenu *menu=[[super menuForEvent:event] copy] ?: [NSMenu new];
     NSPoint point=[self convertPoint:event.locationInWindow fromView:nil];
     NSUInteger location=[self characterIndexForInsertionAtPoint:point];
@@ -158,6 +179,11 @@
             item.target=self; item.representedObject=@{@"command":entry[1],@"location":@(location),@"revision":@(self.owner.documentRevision),@"label":footnote};
             [menu addItem:item];
         }
+        if ([self.owner footnoteCanNavigateBack]) {
+            NSMenuItem *back=[[NSMenuItem alloc] initWithTitle:@"返回跳转前位置" action:@selector(footnoteAction:) keyEquivalent:@""];
+            back.target=self; back.representedObject=@{@"command":@"footnote:back",@"revision":@(self.owner.documentRevision)};
+            [menu addItem:back];
+        }
     }
     if (CRKind(CRParagraphAt(self.owner,location),@"code")) {
         [menu addItem:NSMenuItem.separatorItem];
@@ -170,7 +196,7 @@
         }
         return menu;
     }
-    if (!table && !list) return menu;
+    if (!table && !list) { [self appendBlockActions:menu]; return menu; }
     [menu addItem:NSMenuItem.separatorItem];
     NSArray *entries=table ? @[
         @[@"在上方插入行",@"table:row-above"], @[@"在下方插入行",@"table:row-below"],
@@ -184,7 +210,32 @@
         item.target=self; item.representedObject=entry[1];
         [menu addItem:item];
     }
+    [self appendBlockActions:menu];
     return menu;
+}
+// appendBlockActions adds 块 commands to a context menu: move, duplicate and
+// delete for every block, plus "转换为" for prose, lists and quotes.
+- (void)appendBlockActions:(NSMenu *)menu {
+    NSUInteger location=self.selectedRange.location;
+    NSTextTableBlock *cell=CRCellAt(self.owner,location);
+    NSDictionary *paragraph=CRParagraphAt(self.owner,location);
+    if (menu.numberOfItems) [menu addItem:NSMenuItem.separatorItem];
+    for (NSArray *entry in @[@[@"上移块",@"block-up"],@[@"下移块",@"block-down"],@[@"复制块",@"block-duplicate"],@[@"删除块",@"block-delete"]]) {
+        NSMenuItem *item=[[NSMenuItem alloc] initWithTitle:entry[0] action:@selector(structuralAction:) keyEquivalent:@""];
+        item.target=self; item.representedObject=entry[1];
+        if (cell && ([entry[1] isEqual:@"block-up"] || [entry[1] isEqual:@"block-down"])) item.enabled=NO;
+        [menu addItem:item];
+    }
+    if (cell || CRFigure(paragraph)) return;
+    NSMenuItem *convert=[[NSMenuItem alloc] initWithTitle:@"转换为" action:NULL keyEquivalent:@""];
+    NSMenu *submenu=[[NSMenu alloc] initWithTitle:@"转换为"];
+    for (NSArray *entry in @[@[@"正文",@"body"],@[@"一级标题",@"heading1"],@[@"二级标题",@"heading2"],@[@"三级标题",@"heading3"],@[@"无序列表",@"bullet"],@[@"有序列表",@"ordered"],@[@"任务列表",@"checklist"],@[@"引用",@"quote"]]) {
+        NSMenuItem *item=[[NSMenuItem alloc] initWithTitle:entry[0] action:@selector(structuralAction:) keyEquivalent:@""];
+        item.target=self; item.representedObject=entry[1];
+        [submenu addItem:item];
+    }
+    convert.submenu=submenu;
+    [menu addItem:convert];
 }
 - (BOOL)validateMenuItem:(NSMenuItem *)item {
     if (item.action==@selector(footnoteAction:)) return !self.hasMarkedText;

@@ -37,6 +37,8 @@ type RichEditor interface {
 	SetFocusMode(enabled bool)
 	SetTypewriter(enabled bool)
 	ShowFindBar()
+	// ShowFindReplaceBar opens the find bar straight in replace mode.
+	ShowFindReplaceBar()
 	// RevealHeading scrolls to the index-th heading paragraph (0-based).
 	RevealHeading(index int)
 	// Print prints the rendered document (macOS native print panel).
@@ -109,7 +111,7 @@ func (v *View) syncEditor() bool {
 func (v *View) richVisible() bool {
 	return v.rich != nil && v.App.Mode == app.ModeRich &&
 		(v.App.Path != "" || v.App.Source != "") &&
-		!v.App.Conflict && !v.HostOpen && !v.SettingsOpen && v.FolderDialog == "" && !v.DeleteOpen
+		!v.App.Conflict && !v.HostOpen && !v.SettingsOpen && !v.ExportOpen && v.FolderDialog == "" && !v.DeleteOpen && !v.QuickOpen
 }
 
 func (v *View) richPane(c *ui.Context) {
