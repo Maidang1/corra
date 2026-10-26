@@ -11,7 +11,7 @@
 // would only offer formats the serializer cannot express.
 static BOOL CRFormatBarBlockedKind(NSDictionary *p) {
     return CRKind(p, @"code") || CRKind(p, @"source") || CRKind(p, @"opaque") ||
-           CRKind(p, @"math") || CRKind(p, @"image") || CRKind(p, @"diagram") || CRKind(p, @"toc");
+           CRKind(p, @"math") || CRKind(p, @"image") || CRKind(p, @"diagram") || CRKind(p, @"toc") || CRKind(p, @"page");
 }
 
 - (NSRange)formatBarSelection {
@@ -44,7 +44,23 @@ static BOOL CRFormatBarBlockedKind(NSDictionary *p) {
         }];
         if (all) [active addObject:command];
     }
+    if ([self formatBarUniform:CRColor in:selection] || [self formatBarUniform:CRBackground in:selection]) [active addObject:@"palette"];
     return active;
+}
+
+// formatBarUniform is the color every character of the range carries, or nil
+// when some carry none or another.
+- (NSString *)formatBarUniform:(NSString *)key in:(NSRange)range {
+    if (range.location == NSNotFound || !range.length || NSMaxRange(range) > _text.string.length) return nil;
+    __block NSString *value = nil;
+    __block BOOL mixed = NO;
+    [_text.textStorage enumerateAttribute:key inRange:range options:0 usingBlock:^(id found, NSRange part, BOOL *stop) {
+        // Line endings never carry a color; they do not make it mixed.
+        if (!found && [[self.text.string substringWithRange:part] stringByTrimmingCharactersInSet:NSCharacterSet.newlineCharacterSet].length == 0) return;
+        if (![found isKindOfClass:NSString.class] || (value && ![value isEqual:found])) { mixed = YES; *stop = YES; return; }
+        value = found;
+    }];
+    return mixed ? nil : value;
 }
 
 - (void)updateFormatBar {
@@ -76,6 +92,9 @@ static BOOL CRFormatBarBlockedKind(NSDictionary *p) {
     }
     _formatPanel.appearance = [NSAppearance appearanceNamed:_dark ? NSAppearanceNameDarkAqua : NSAppearanceNameAqua];
     _formatView.active = [self formatBarActiveCommands];
+    _formatView.currentColor = [self formatBarUniform:CRColor in:selection];
+    _formatView.currentBackground = [self formatBarUniform:CRBackground in:selection];
+    [_formatView setNeedsDisplay:YES];
     [_formatPanel setContentSize:_formatView.bounds.size];
     [_formatPanel orderFront:nil];
     [self formatBarPositionWithSelection:selection];
@@ -151,8 +170,16 @@ static BOOL CRFormatBarBlockedKind(NSDictionary *p) {
 - (void)formatBarApply:(NSString *)command {
     if (![command isKindOfClass:NSString.class] || !command.length) return;
     if ([command isEqual:@"link"]) { [self formatBarPromptLink]; return; }
+    if ([command isEqual:@"palette"]) {
+        if (!_formatView) return;
+        _formatView.paletteOpen = !_formatView.paletteOpen;
+        [self updateFormatBar];
+        return;
+    }
     if (!_text.editable || _text.hasMarkedText) return;
+    BOOL color = [command hasPrefix:@"color:"] || [command hasPrefix:@"background:"];
     [self format:command];
+    if (color && _formatView) _formatView.paletteOpen = NO; // a pick closes the palette, as in Notion
     [self updateFormatBar];
 }
 
@@ -212,7 +239,10 @@ static BOOL CRFormatBarBlockedKind(NSDictionary *p) {
 // formatBarState exposes the bar to the Go test harness.
 - (NSDictionary *)formatBarState {
     NSArray *active = [[[self formatBarActiveCommands] allObjects] sortedArrayUsingSelector:@selector(compare:)];
-    NSMutableDictionary *state = [@{@"open": (_formatPanel ? @YES : @NO), @"active": active} mutableCopy];
+    NSMutableDictionary *state = [@{@"open": (_formatPanel ? @YES : @NO), @"active": active,
+                                    @"palette": (_formatView.paletteOpen ? @YES : @NO),
+                                    @"color": _formatView.currentColor ?: @"",
+                                    @"background": _formatView.currentBackground ?: @""} mutableCopy];
     if (_formatPanel && _window) {
         state[@"frame"] = @{@"x": @(_formatPanel.frame.origin.x), @"y": @(_formatPanel.frame.origin.y),
                             @"w": @(_formatPanel.frame.size.width), @"h": @(_formatPanel.frame.size.height)};

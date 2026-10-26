@@ -33,6 +33,8 @@
         @[@"目录", @"[TOC]", @[@"list.bullet.indent"], @[@"toc", @"ml", @"mulu", @"catalog"], @"toc"],
         @[@"脚注", @"[^]", @[@"note.text", @"doc.plaintext"], @[@"footnote", @"jz", @"jiaozhu"], @"footnote:insert"],
         @[@"图片", @"![]()", @[@"photo"], @[@"image", @"img", @"tp", @"tupian", @"picture"], @"image"],
+        @[@"提及页面", @"@", @[@"at"], @[@"mention", @"page", @"at", @"tj", @"tiji", @"ym", @"yemian"], @"mention"],
+        @[@"页面卡片", @"![](.md)", @[@"doc.text", @"doc"], @[@"page", @"card", @"link", @"ym", @"yemian", @"kp", @"kapian"], @"page-card"],
         @[@"提示卡片", @"[!NOTE]", @[@"info.circle"], @[@"note", @"ts", @"tishi", @"callout"], @"callout:NOTE"],
         @[@"建议卡片", @"[!TIP]", @[@"lightbulb"], @[@"tip", @"jy", @"jianyi", @"callout"], @"callout:TIP"],
         @[@"重要卡片", @"[!IMPORTANT]", @[@"exclamationmark.bubble"], @[@"important", @"zy", @"zhongyao", @"callout"], @"callout:IMPORTANT"],
@@ -55,6 +57,7 @@
     if ([command hasPrefix:@"heading"]) return @"标题";
     if ([command isEqual:@"bullet"] || [command isEqual:@"ordered"] || [command isEqual:@"checklist"]) return @"列表";
     if ([command hasPrefix:@"callout:"]) return @"提示卡片";
+    if ([command isEqual:@"mention"] || [command isEqual:@"page-card"]) return @"页面";
     return @"块";
 }
 
@@ -282,6 +285,7 @@
     if ([command isEqual:@"toc"]) { [self insertBlock:@"[TOC]"]; return; }
     if ([command isEqual:@"pagebreak"]) { [self insertMarkdownText:@"<div style=\"page-break-after: always\"></div>"]; return; }
     if ([command isEqual:@"image"]) { [self insertMarkdownText:@"![图片]()"]; return; }
+    if ([command isEqual:@"mention"] || [command isEqual:@"page-card"]) { [self beginPageReference:[command isEqual:@"page-card"]]; return; }
     [self format:command]; // heading1..6, bullet, ordered, checklist, quote, footnote:insert
 }
 

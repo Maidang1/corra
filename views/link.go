@@ -2,6 +2,8 @@ package views
 
 import (
 	"encoding/json"
+	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -51,6 +53,29 @@ func (v *View) LinkCandidates(query string) string {
 		return "[]"
 	}
 	return string(data)
+}
+
+// ResolveLinkedDocument maps a note link as written in the open note
+// ("other.md", "dir/a%20b.md#part") to the file it names, if one exists.
+func (v *View) ResolveLinkedDocument(target string) (string, bool) {
+	target, _, _ = strings.Cut(target, "#")
+	if decoded, err := url.PathUnescape(target); err == nil {
+		target = decoded
+	}
+	if target == "" {
+		return "", false
+	}
+	path := filepath.FromSlash(target)
+	if !filepath.IsAbs(path) {
+		if v.App.Path == "" {
+			return "", false
+		}
+		path = filepath.Join(filepath.Dir(v.App.Path), path)
+	}
+	if info, err := os.Stat(path); err != nil || info.IsDir() {
+		return "", false
+	}
+	return path, true
 }
 
 // LinkDialog state for 插入链接 (Cmd+K).

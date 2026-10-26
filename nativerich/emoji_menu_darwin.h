@@ -17,7 +17,7 @@
     NSDictionary *paragraphInfo = CRParagraphAt(self, content.location);
     if (CRKind(paragraphInfo, @"code") || CRKind(paragraphInfo, @"source") || CRKind(paragraphInfo, @"opaque") ||
         CRKind(paragraphInfo, @"math") || CRKind(paragraphInfo, @"image") || CRKind(paragraphInfo, @"diagram") ||
-        CRKind(paragraphInfo, @"toc") || CRCellAt(self, content.location) || [paragraphInfo[@"footnoteId"] length]) {
+        CRKind(paragraphInfo, @"toc") || CRKind(paragraphInfo, @"page") || CRCellAt(self, content.location) || [paragraphInfo[@"footnoteId"] length]) {
         return NSMakeRange(NSNotFound, 0);
     }
     NSUInteger index = caret;

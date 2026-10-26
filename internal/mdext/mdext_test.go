@@ -231,3 +231,55 @@ func TestSuperscriptNoSpaceRule(t *testing.T) {
 		t.Fatal("H~2~O should be subscript")
 	}
 }
+
+func TestColoredSpan(t *testing.T) {
+	src := `a <span style="color: #D44C47; background-color:#FBF3DB">red</span> b`
+	n, ok := find(parse(t, src), KindSpan).(*Span)
+	if !ok {
+		t.Fatal("no Span node")
+	}
+	if n.Color != "#d44c47" || n.Background != "#fbf3db" {
+		t.Fatalf("span colors %q %q", n.Color, n.Background)
+	}
+	if got := textOf(n, src); got != "red" {
+		t.Fatalf("span text %q", got)
+	}
+}
+
+func TestOtherSpansStayRaw(t *testing.T) {
+	for _, src := range []string{
+		`a <span class="x">b</span> c`,
+		`a <span style="font-size:20px">b</span> c`,
+		`a <span style="color:red" id="x">b</span> c`,
+		`a <span style="color:url(x)">b</span> c`,
+	} {
+		if find(parse(t, src), KindSpan) != nil {
+			t.Errorf("%s: styled as a color span", src)
+		}
+	}
+}
+
+func TestRawSpanKeepsItsClosingTag(t *testing.T) {
+	// The inner raw span's </span> must not close the colored one.
+	src := `<span style="color:red">a <span class="x">b</span> c</span>`
+	n, ok := find(parse(t, src), KindSpan).(*Span)
+	if !ok {
+		t.Fatal("no Span node")
+	}
+	var raws int
+	for c := n.FirstChild(); c != nil; c = c.NextSibling() {
+		if _, ok := c.(*ast.RawHTML); ok {
+			raws++
+		}
+	}
+	if raws != 2 {
+		t.Fatalf("inner raw tags = %d, want 2", raws)
+	}
+}
+
+func TestSpanTagRoundTrip(t *testing.T) {
+	color, background, ok := SpanStyle(SpanTag("#337ea9", "#fbecdd"))
+	if !ok || color != "#337ea9" || background != "#fbecdd" {
+		t.Fatalf("round trip = %q %q %v", color, background, ok)
+	}
+}

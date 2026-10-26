@@ -172,7 +172,7 @@ static BOOL CRRuleActive(CREditor *e, NSRange paragraph) {
 }
 
 static BOOL CRFigure(NSDictionary *p) {
-    return CRKind(p,@"math") || CRKind(p,@"image") || CRKind(p,@"diagram") || CRKind(p,@"toc");
+    return CRKind(p,@"math") || CRKind(p,@"image") || CRKind(p,@"diagram") || CRKind(p,@"toc") || CRKind(p,@"page");
 }
 
 // openParagraphBesideFigure: a figure is a block, so text typed at its edge

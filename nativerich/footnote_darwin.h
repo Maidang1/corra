@@ -194,7 +194,7 @@
     NSRange selection=_text.selectedRange;
     if (![self allowRange:selection]) return;
     NSDictionary *paragraph=CRParagraphAt(self,selection.location);
-    if ([@[@"code",@"source",@"opaque",@"math",@"image",@"diagram",@"toc"] containsObject:paragraph[@"kind"]]) return;
+    if ([@[@"code",@"source",@"opaque",@"math",@"image",@"diagram",@"toc",@"page"] containsObject:paragraph[@"kind"]]) return;
     NSTextTableBlock *cell=CRCellAt(self,selection.location);
     if (cell && selection.length && [[_text.string substringWithRange:selection] containsString:@"\n"]) return;
     NSMutableSet *used=[NSMutableSet set];

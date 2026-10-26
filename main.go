@@ -54,6 +54,13 @@ func main() {
 		mainWindow = win
 		if native := nativerich.New(win.NativeHandle(), view.NativeChanged, view.EditSource); native != nil {
 			native.OnLinkCandidates = view.LinkCandidates
+			native.OnOpenDocument = func(target string) bool {
+				path, ok := view.ResolveLinkedDocument(target)
+				if ok {
+					fileOps.OpenPath(path)
+				}
+				return ok
+			}
 			view.AttachRichEditor(native)
 		}
 

@@ -46,7 +46,7 @@ CGO_ENABLED=1 go vet ./...
 | `bridge_darwin.m` | `CREditor` 与 `CRTextView` 的实现；include 各功能头文件；输入/选区/生命周期钩子；`cr_*` C 桥；测试桥 |
 | `bridge.h` | 测试桥的 C 声明（`cr_test_*`） |
 | `harness_darwin.go` | Go 测试辅助（`nativeTestMain`、模拟输入、悬停、截图） |
-| `slash_menu_darwin.h` + `slash_menu_view_darwin.h` | `/` 斜杠菜单：23 项、分组、过滤高亮、键盘导航 |
+| `slash_menu_darwin.h` + `slash_menu_view_darwin.h` | `/` 斜杠菜单：25 项、分组、过滤高亮、键盘导航 |
 | `format_bar_darwin.h` + `format_bar_view_darwin.h` | 选区格式浮动条（粗/斜/下划线/删除线/代码/高亮/链接/清除） |
 | `block_actions_darwin.h` | 块级操作：移动、复制、删除、块矩形、拖动排序 |
 | `hover_controls_darwin.h` | 悬停控件：块手柄、代码复制/语言、图片尺寸/复制/删除、表格加行/加列、脚注卡片触发 |
@@ -55,6 +55,9 @@ CGO_ENABLED=1 go vet ./...
 | `footnote_card_view_darwin.h` | 脚注悬停卡片视图（无焦点面板） |
 | `emoji_menu_darwin.h` + `emoji_menu_view_darwin.h` | `:` 表情 shortcode 选择器 |
 | `link_menu_darwin.h` + `link_menu_view_darwin.h` | `[[` 文档补全与 `[[#` 标题锚点补全 |
+| `color_palette_darwin.h` | 文字/背景色调色板（Notion 九色，存浅色 hex，深色模式映射）；格式条「A」按钮展开调色板 |
+| `page_card_darwin.h` | 页面卡片（`![标题](note.md)` → `page` 段落）：读取目标文档标题/摘要（Go `PageInfo`）、绘制、点击打开；`beginPageReference` 供斜杠菜单插入 `@` |
+| `link_menu_darwin.h`（mention） | `@` 触发同一个文档面板的 mention 模式；`CRMention` 胶囊、退格整体删除、`OnOpenDocument` 打开文档 |
 | `toc_darwin.h` | 目录图、标题条目（`tocEntriesFromText`）、`CRSlug`、锚点跳转 |
 | `structure_controls_darwin.h` | 键盘处理（块快捷键、面板按键路由）与右键菜单（表格/列表/块操作） |
 | `table_controls_darwin_test.go` 等 | 各功能测试；`zz_*_shot_darwin_test.go` 为截图入口 |

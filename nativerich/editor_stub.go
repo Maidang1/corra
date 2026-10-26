@@ -6,6 +6,8 @@ package nativerich
 type Editor struct {
 	// OnLinkCandidates mirrors the native editor's "[[" completion hook.
 	OnLinkCandidates func(query string) string
+	// OnOpenDocument mirrors the native editor's mention/page-card hook.
+	OnOpenDocument func(target string) bool
 }
 
 func New(window uintptr, changed, sourceRequested func()) *Editor { return nil }
