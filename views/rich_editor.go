@@ -71,7 +71,9 @@ func (v *View) ensureRichEditor() {
 		return
 	}
 	v.rich.SetBaseDir(dirOf(v.App.Path))
-	v.rich.Load(v.App.Source)
+	meta := v.documentMetadata()
+	v.richMetadataPrefix = meta.prefix
+	v.rich.Load(meta.body)
 	v.richPath, v.richBase, v.richLoaded = v.App.Path, v.App.Source, true
 }
 
@@ -99,6 +101,13 @@ func (v *View) syncEditor() bool {
 		v.richSnapshotError = false
 		v.SaveError = ""
 	}
+	if changed && v.richMetadataPrefix != "" {
+		prefix := v.richMetadataPrefix
+		if source != "" && !strings.HasSuffix(prefix, "\n") {
+			prefix += "\n\n"
+		}
+		source = prefix + source
+	}
 	if changed && source != v.App.Source {
 		v.richBase = source
 		v.App.MarkSourceDirty(source)
@@ -110,6 +119,7 @@ func (v *View) syncEditor() bool {
 
 func (v *View) richVisible() bool {
 	return v.rich != nil && v.App.Mode == app.ModeRich &&
+		!v.App.LibraryLoading && v.App.LibraryLoadError == "" &&
 		(v.App.Path != "" || v.App.Source != "") &&
 		!v.App.Conflict && !v.HostOpen && !v.SettingsOpen && !v.ExportOpen && v.FolderDialog == "" && !v.DeleteOpen && !v.QuickOpen
 }

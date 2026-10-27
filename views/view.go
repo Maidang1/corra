@@ -7,6 +7,7 @@ import (
 	"github.com/egoist/mygo/ui/editor"
 
 	"github.com/Maidang1/corra/app"
+	"github.com/Maidang1/corra/render"
 )
 
 // panelTransition is how the floating panels — the folders sidebar and the
@@ -34,15 +35,26 @@ type View struct {
 
 	// The editor column's code editor (full Markdown editing). The buffer
 	// is the editing surface; syncEditor copies it back into App.Source.
-	edState           *editor.State
-	edPath            string // note path the buffer was built for
-	edBase            string // App.Source the buffer was built from
-	edVer             uint64 // buffer version last synced into App.Source
-	rich              RichEditor
-	richPath          string
-	richBase          string
-	richLoaded        bool
-	richSnapshotError bool
+	edState            *editor.State
+	edPath             string // note path the buffer was built for
+	edBase             string // App.Source the buffer was built from
+	edVer              uint64 // buffer version last synced into App.Source
+	rich               RichEditor
+	richPath           string
+	richBase           string
+	richLoaded         bool
+	richSnapshotError  bool
+	richMetadataPrefix string
+	metadataSource     string
+	metadata           documentMetadata
+	treeLibrary        *app.Library
+	treeQuery          string
+	treeRoot           *folderTreeNode
+	treeLibraryRoot    string
+	folderExpanded     map[string]bool
+	treeVisibleNotes   []app.Note
+	outlineSource      string
+	outlineDoc         *render.Document
 
 	// autosaveTimer debounces writes of the current note to disk.
 	autosaveTimer  *time.Timer
@@ -100,11 +112,13 @@ type View struct {
 	OnExportPandoc    func(label, ext, pandocArg string)
 	// PandocPath resolves the pandoc binary for the export panel; nil falls
 	// back to app.PandocPath. Tests stub it for a deterministic panel.
-	PandocPath    func() string
-	OnCopyHTML    func() ([]byte, error)
-	OnSave        func() bool
-	OnOpen        func()
-	OnInsertImage func()
+	PandocPath         func() string
+	OnCopyHTML         func() ([]byte, error)
+	OnSave             func() bool
+	OnOpen             func()
+	OnOpenFolderPath   func(string)
+	OnCancelFolderLoad func()
+	OnInsertImage      func()
 	// OnNoteSaved restarts the file watcher after an autosave so the
 	// change we wrote ourselves is not reported as external.
 	OnNoteSaved func()
@@ -170,9 +184,6 @@ func (v *View) Build(c *ui.Context) {
 			v.header(c)
 			ui.Row(c).Fill().Gap(0).Children(func() {
 				v.editorPane(c)
-				if v.App.Outline {
-					v.outlinePanel(c)
-				}
 			})
 		})
 	})
@@ -191,6 +202,9 @@ func (v *View) Build(c *ui.Context) {
 	}
 	if v.FolderDialog != "" {
 		v.folderDialog(c)
+	}
+	if v.App.LibraryLoading || v.App.LibraryLoadError != "" {
+		v.libraryLoadingDialog(c)
 	}
 	if v.DeleteOpen {
 		v.deleteDialog(c)

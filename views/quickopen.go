@@ -29,6 +29,8 @@ func (v *View) quickCommandList() []quickCommand {
 	return []quickCommand{
 		{"新建文档", "⌘N", iconCompose, "new note create", v.NewNoteAction},
 		{"新建文件夹…", "⇧⌘N", iconFolder, "new folder", v.NewFolderAction},
+		{"打开文件夹…", "⌥⌘O", iconFolder, "open folder directory library", v.OpenFolderAction},
+		{"目录（TOC）", "", iconTOC, "outline toc headings", v.ToggleOutlineAction},
 		{"保存", "⌘S", iconDoc, "save", func() { v.FlushAutosave() }},
 		{"插入链接…", "⌘K", iconPaperclip, "link insert url", v.InsertLinkAction},
 		{"插入表格", "⌥⌘T", iconTable, "table insert", v.InsertTableAction},

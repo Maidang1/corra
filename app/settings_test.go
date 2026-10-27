@@ -11,7 +11,7 @@ func TestSettingsRoundTrip(t *testing.T) {
 	if s := LoadSettings(dir); s.ThemeMode != ThemeSystem || s.BodyFont != "" || s.MonoFont != "" {
 		t.Fatalf("zero settings expected, got %+v", s)
 	}
-	want := Settings{ThemeMode: ThemeDark, BodyFont: "Songti SC", MonoFont: "Menlo"}
+	want := Settings{ThemeMode: ThemeDark, BodyFont: "Songti SC", MonoFont: "Menlo", LibraryRoot: filepath.Join(t.TempDir(), "文档")}
 	if err := SaveSettings(dir, want); err != nil {
 		t.Fatal(err)
 	}

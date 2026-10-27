@@ -109,6 +109,9 @@ func (e *Editor) Snapshot() (string, bool, error) {
 	if e == nil || e.native == 0 {
 		return "", false, errors.New("native editor is closed")
 	}
+	if !e.dirty {
+		return e.source, false, nil
+	}
 	var marked C.int
 	p := C.cr_snapshot(e.native, &marked)
 	if marked != 0 {

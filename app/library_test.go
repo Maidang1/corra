@@ -70,6 +70,39 @@ func TestScanLibrary(t *testing.T) {
 	})
 }
 
+func TestScanLibraryIgnoresHiddenEntries(t *testing.T) {
+	// An explicitly opened root may itself be hidden.
+	root := filepath.Join(t.TempDir(), ".library")
+	visible := writeNote(t, root, "work/visible.md", "# Visible", 0)
+	trashed := writeNote(t, root, ".trash/deleted.md", "# Deleted", 0)
+	for _, name := range []string{
+		".hidden.md", ".git/nested/internal.md", "work/.draft.md",
+		"work/.private/nested.md", "work/.trash/nested.md",
+		".trash/.hidden.md", ".trash/.private/nested.md",
+	} {
+		writeNote(t, root, name, "# Hidden needle", 0)
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".empty"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lib := ScanLibrary(root)
+	if len(lib.Notes) != 1 || lib.Notes[0].Path != visible {
+		t.Fatalf("visible notes = %+v, want only %s", lib.Notes, visible)
+	}
+	if got := lib.Folders(); !reflect.DeepEqual(got, []string{"work"}) {
+		t.Fatalf("folders = %v, want [work]", got)
+	}
+	if got := lib.Filter("", "needle"); len(got) != 0 {
+		t.Fatalf("hidden documents leaked into search: %+v", got)
+	}
+	if got := lib.Filter(TrashName, ""); len(got) != 1 || got[0].Path != trashed {
+		t.Fatalf("trash notes = %+v, want only %s", got, trashed)
+	}
+	if got := TrashCount(root); got != 1 {
+		t.Fatalf("trash count = %d, want 1", got)
+	}
+}
+
 func TestFilter(t *testing.T) {
 	root := t.TempDir()
 	writeNote(t, root, "a.md", "# 苹果\n\n红色水果", time.Hour)
@@ -343,5 +376,20 @@ func TestAppNoteFlow(t *testing.T) {
 	}
 	if a.CurrentPath() == "" {
 		t.Fatal("no note opened after delete")
+	}
+}
+
+func TestNoteMetaSkipsYAMLProperties(t *testing.T) {
+	title, snippet := NoteMeta("---\ntitle: 图解 Transformer\nauthor: Jay Alammar\nsource: https://example.com\n---\n\n# 图解 Transformer\n\n正文摘要。")
+	if title != "图解 Transformer" || snippet != "正文摘要。" {
+		t.Fatalf("metadata leaked into title or preview: %q %q", title, snippet)
+	}
+}
+
+func TestLibraryFolderFilterIncludesDescendants(t *testing.T) {
+	root := t.TempDir()
+	writeNote(t, root, "work/research/note.md", "# Nested", 0)
+	if got := len(ScanLibrary(root).Filter("work", "")); got != 1 {
+		t.Fatalf("parent folder hides nested documents: %d", got)
 	}
 }

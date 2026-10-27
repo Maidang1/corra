@@ -6,6 +6,10 @@ import (
 	"strings"
 )
 
+func (v *View) OpenFolderAction() {
+	v.openFolderDialog("打开文件夹", v.App.LibraryRoot)
+}
+
 func (v *View) openNote(path string) {
 	if path == v.App.Path {
 		return
@@ -56,6 +60,9 @@ func (v *View) reconcileSelection() {
 // the menu's target: the sidebar row's folder, not the selected one, so a
 // right-click acts on the row under the pointer.
 func (v *View) folderMenuItems(m *ui.Menu, folder string) {
+	if m.Item("打开文件夹…").Chosen() {
+		v.OpenFolderAction()
+	}
 	if m.Item("新建文件夹…").Chosen() {
 		v.openFolderDialog("新建文件夹", "")
 	}
@@ -256,6 +263,10 @@ func (v *View) removeFolder(folder string) {
 	v.reconcileSelection()
 }
 func (v *View) folderDialog(c *ui.Context) {
+	if v.FolderDialog == "打开文件夹" {
+		v.openLibraryDialog(c)
+		return
+	}
 	open := true
 	ui.Modal(c, &open, func() {
 		ui.Column(c).Width(360).Padding(22).Gap(14).Radius(16).Background(c.Theme().Surface).Children(func() {

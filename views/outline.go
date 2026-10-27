@@ -1,34 +1,30 @@
 package views
 
 import (
+	"strings"
+
 	"github.com/egoist/mygo/ui"
 
 	"github.com/Maidang1/corra/app"
 	"github.com/Maidang1/corra/render"
 )
 
-// outlinePanel is Typora's outline panel, shaped like a macOS 26 inspector:
-// a floating inset panel that mirrors the sidebar, listing the document's
-// headings; clicking one jumps to it in the active mode.
-func (v *View) outlinePanel(c *ui.Context) {
-	t := c.Theme()
-	ui.Box(c).Key("outline").Width(236).FillHeight().Padding(0, 8, 8, 0).
-		Transition(panelTransition).Children(func() {
-		ui.Column(c).Fill().Gap(0).Radius(16).Clip().Background(sidebarBackground(t)).
-			Border(1, cardBorder(t)).Shadow(0, 6, 18, 0, cardShadow(t)).Children(func() {
-			ui.Text(c, "大纲").FontSize(12).Bold().TextColor(t.TextMuted).Padding(12, 14, 6, 14)
-			v.outlineEntries(c)
-		})
-	})
+func (v *View) currentOutlineDocument() *render.Document {
+	if v.outlineDoc == nil || v.outlineSource != v.App.Source {
+		v.outlineSource = v.App.Source
+		v.outlineDoc = render.ParseOptions(v.App.Source, v.App.SmartPunct)
+	}
+	return v.outlineDoc
 }
 
 func (v *View) outlineEntries(c *ui.Context) {
 	t := c.Theme()
+	doc := v.currentOutlineDocument()
 	ui.Scroll(c).Fill().ScrollbarInsets(6, 4, 12, 6).Children(func() {
 		ui.Column(c).FillWidth().Gap(1).Padding(4, 6).Children(func() {
 			headingIdx := -1
-			for i := range v.App.Doc.Blocks {
-				b := &v.App.Doc.Blocks[i]
+			for i := range doc.Blocks {
+				b := &doc.Blocks[i]
 				if b.Kind != render.KindHeading {
 					continue
 				}
@@ -49,6 +45,9 @@ func (v *View) outlineEntries(c *ui.Context) {
 					}
 				}).OnClick(func() { v.jumpToHeading(idx, hIdx) })
 			}
+			if headingIdx < 0 {
+				ui.Text(c, "本文暂无标题").FontSize(13).TextColor(t.TextMuted).Padding(12, 8)
+			}
 		})
 	})
 }
@@ -56,10 +55,15 @@ func (v *View) outlineEntries(c *ui.Context) {
 // jumpToHeading reveals the blockIdx-th block (the headingIdx-th heading) in
 // whichever editor surface is active.
 func (v *View) jumpToHeading(blockIdx, headingIdx int) {
+	doc := v.currentOutlineDocument()
+	if blockIdx < 0 || blockIdx >= len(doc.Blocks) {
+		return
+	}
+	v.App.OutlineSel = headingIdx
 	switch {
 	case v.App.Mode == app.ModeEdit && v.edState != nil:
-		b := &v.App.Doc.Blocks[blockIdx]
-		start := b.Start
+		b := &doc.Blocks[blockIdx]
+		start := len(strings.ReplaceAll(v.App.Source[:b.Start], "\r\n", "\n"))
 		if start > v.edState.Buffer.Len() {
 			start = v.edState.Buffer.Len()
 		}

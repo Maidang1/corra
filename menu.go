@@ -63,6 +63,7 @@ func buildMenu() *mygo.Menu {
 			item("新建文件夹…", "CmdOrCtrl+Shift+N", func() { view.NewFolderAction() }),
 			item("快速打开…", "CmdOrCtrl+Shift+P", func() { view.QuickOpenAction() }),
 			item("打开…", "CmdOrCtrl+O", func() { fileOps.Open() }),
+			item("打开文件夹…", "CmdOrCtrl+Alt+O", func() { view.OpenFolderAction() }),
 			{Label: "最近打开", Submenu: recentItems(item)},
 			disabled("导入（Word / EPUB / HTML…）", !pandoc, func() { fileOps.Import() }),
 			mygo.Separator(),
@@ -162,7 +163,7 @@ func buildMenu() *mygo.Menu {
 		Submenu: []*mygo.MenuItem{
 			item("切换源码 / 文稿", "CmdOrCtrl+E", func() { view.ToggleModeAction() }),
 			item("显示 / 隐藏边栏", "CmdOrCtrl+Alt+S", func() { view.ToggleSidebarAction() }),
-			item("大纲", "CmdOrCtrl+Ctrl+1", func() { view.App.Outline = !view.App.Outline; editorApp.InvalidateUI() }),
+			item("目录（TOC）", "CmdOrCtrl+Ctrl+1", func() { view.ToggleOutlineAction() }),
 			item("搜索文档", "CmdOrCtrl+Shift+F", func() { view.SearchAction() }),
 			mygo.Separator(),
 			checked("字数统计", editorApp.WordCount, func() { editorApp.WordCount = !editorApp.WordCount; editorApp.InvalidateUI() }),

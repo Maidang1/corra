@@ -55,9 +55,6 @@ func (v *View) editorPane(c *ui.Context) {
 		if v.App.Sidebar {
 			pane -= sidebarW
 		}
-		if v.App.Outline {
-			pane -= 236
-		}
 		if measure := 760 * float32(v.App.Zoom); pane-measure > 2*side {
 			side = (pane - measure) / 2
 		}
@@ -123,6 +120,9 @@ func (v *View) dateHeader(c *ui.Context) {
 		}
 		if v.App.SelFolder == app.TrashName {
 			ui.Text(c, "已删除的文档 · 恢复后可编辑").FontSize(11).TextColor(t.TextMuted)
+		}
+		if v.App.Mode == app.ModeRich {
+			v.metadataHeader(c)
 		}
 	})
 }

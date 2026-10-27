@@ -92,7 +92,7 @@ func TestCollapsedSidebar(t *testing.T) {
 	if v.App.Sidebar {
 		t.Fatal("sidebar did not collapse")
 	}
-	waitFor(t, tt, "collapse", func() bool { return !tt.HasText("全部文档") && !tt.HasText("搜索文档") })
+	waitFor(t, tt, "collapse", func() bool { return !tt.HasText("搜索文档") })
 	for _, label := range []string{"新建文档 (Cmd+N)", "文本格式", "插入表格", "共享与导出"} {
 		r, ok := tt.Find(label)
 		if !ok || r.X+r.W > 961 || r.W < 25 {
@@ -115,7 +115,7 @@ func TestCollapsedSidebar(t *testing.T) {
 	// The collapsed header hosts its own expand control, so the label tells
 	// the two states apart even while the sidebar is still animating out.
 	click(t, tt, "展开边栏")
-	waitFor(t, tt, "expand", func() bool { return v.App.Sidebar && tt.HasText("全部文档") })
+	waitFor(t, tt, "expand", func() bool { return v.App.Sidebar && tt.HasText("搜索文档") })
 }
 
 func TestFormatControlHasVisibleText(t *testing.T) {
@@ -197,18 +197,22 @@ func TestToolbarMenusAndPersistence(t *testing.T) {
 	}
 }
 
-func TestEmptyFolderClearsEditorAndTrashRestores(t *testing.T) {
+func TestEmptyFolderIsHiddenAndTrashRestores(t *testing.T) {
 	v, tt := notesFixture(t)
 	path := v.App.Path
 	if err := v.App.CreateFolder("Empty"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	click(t, tt, "文件夹：Empty")
-	if v.App.Path != "" || !tt.HasText("未选择文档") {
-		t.Fatal("empty folder shows unrelated note")
+	if _, ok := tt.Find("文件夹：Empty"); ok {
+		t.Fatal("empty folder is visible")
 	}
-	click(t, tt, "文件夹：全部文档")
+	if _, ok := tt.Find("文件夹：全部文档"); ok {
+		t.Fatal("all-documents sidebar entry is still visible")
+	}
+	if v.App.Path != path {
+		t.Fatal("creating an empty folder changed the current document")
+	}
 	if err := v.App.DeleteSelectedNote(); err != nil {
 		t.Fatal(err)
 	}
@@ -240,7 +244,7 @@ func TestSaveFailurePreventsNavigationAndResurrection(t *testing.T) {
 	}
 	v.App.AppendBlock("unsaved")
 	tt.Frame()
-	click(t, tt, "文件夹：Empty")
+	click(t, tt, "文件夹：最近删除")
 	if v.App.Path != path || v.App.SelFolder != "" || !v.App.Dirty {
 		t.Fatal("failed save navigated away")
 	}
