@@ -154,9 +154,13 @@ agents cannot create workflow files, so they ship in `setup/`):
 sh setup/install-ci.sh
 ```
 
-Push a `v*` tag: GitHub Actions builds signed-ready packages for macOS,
-Windows and Linux in parallel and uploads them to a draft release
-(see `.github/workflows/release.yml`).
+Every push to `main` and every pull request packages macOS, Windows and
+Linux and uploads the installers as workflow artifacts
+(see `.github/workflows/ci.yml`). Push a tag that matches `version` in
+`mygo.json`, such as `v0.1.0`: GitHub Actions builds the same installers
+and publishes the GitHub release
+(see `.github/workflows/release.yml`). macOS builds are ad-hoc signed, so
+Gatekeeper asks before opening them on another Mac.
 
 ### Known limits (v0.2)
 
@@ -292,9 +296,12 @@ make build          # 打包当前平台
 sh setup/install-ci.sh
 ```
 
-推送 `v*` 标签，GitHub Actions 会自动并行构建 macOS / Windows /
-Linux 三平台安装包并上传到草稿 Release（见
-`.github/workflows/release.yml`）。
+每次推送到 `main` 和每个 pull request 都会打包 macOS、Windows 和
+Linux，并把安装包上传为工作流 artifact（见 `.github/workflows/ci.yml`）。
+推送与 `mygo.json` 里 `version` 一致的标签（例如 `v0.1.0`）后，GitHub
+Actions 会构建同样的安装包并公开发布 Release（见
+`.github/workflows/release.yml`）。macOS 安装包是 ad-hoc 签名，在另一台
+Mac 上打开时 Gatekeeper 会要求确认。
 
 ### 已知限制（v0.2）
 

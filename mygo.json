@@ -1,5 +1,10 @@
 {
   "name": "Corra",
-  "id": "dev.maidang1.corra",
-  "version": "0.1.0"
+  "identifier": "dev.maidang1.corra",
+  "version": "0.1.0",
+  "linux": {
+    "comment": "Native Markdown editor",
+    "categories": ["Office"],
+    "command": "corra"
+  }
 }

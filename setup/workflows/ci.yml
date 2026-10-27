@@ -33,3 +33,49 @@ jobs:
         run: go test ./...
       - name: build
         run: go build ./...
+
+  # Proves the installers that a release publishes still build. Artifacts
+  # are the disk images, Windows installers, Debian packages and Linux
+  # archives, not the loose app bundles.
+  package:
+    name: package ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: macOS, os: macos-latest, platform: "darwin/arm64,darwin/amd64" }
+          - { name: Windows, os: ubuntu-latest, platform: "windows/amd64,windows/arm64" }
+          - { name: Linux, os: ubuntu-latest, platform: "linux/amd64,linux/arm64" }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Resolve modules (regenerate go.sum)
+        run: go mod tidy
+      - name: Generate the app icon
+        run: go run ./internal/genicon
+      - name: Install NSIS, for the Windows installers
+        if: matrix.name == 'Windows'
+        run: sudo apt-get update && sudo apt-get install -y nsis
+      - name: Package
+        run: |
+          if [ "${{ matrix.name }}" = "macOS" ]; then export CGO_ENABLED=1; fi
+          go tool mygo build -platform "${{ matrix.platform }}" -o dist
+      - name: Collect installers
+        run: |
+          mkdir -p installers
+          find dist -type f \( -name '*.dmg' -o -name '*.deb' -o -name '*.tar.gz' -o -name '*Setup*.exe' \) -exec cp {} installers/ \;
+          find installers -type f -print
+          test -n "$(find installers -type f -print -quit)"
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: corra-${{ matrix.name }}
+          if-no-files-found: error
+          path: installers

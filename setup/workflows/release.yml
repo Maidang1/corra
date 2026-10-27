@@ -1,36 +1,42 @@
 name: Release
 
 # Builds packaged apps for macOS, Windows and Linux when a version tag is
-# pushed, and uploads them to a draft release (per MyGo's GitHub Actions
-# guide). Publish the draft from the release page.
+# pushed, attaches the installers to that release, and publishes it.
+# The tag must be v<version> from mygo.json.
 #
 # Native UI app: no Bun, no frontend; the mygo CLI is pinned as a Go tool in
-# go.mod and runs as `go tool mygo`.
+# go.mod and runs as `go tool mygo`. macOS packaging needs cgo for the
+# AppKit editor. There is no auto-update key, so the workflow uploads the
+# installers with gh instead of `mygo build -upload`.
 
 on:
   push:
     tags: ["v*"]
 
 permissions:
-  contents: write # the draft release, and the uploads to it
+  contents: write # the release, and the uploads to it
 
 jobs:
   draft-release:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v7
+      - name: Check the version
+        run: test "$GITHUB_REF_NAME" = "v$(jq -r .version mygo.json)"
       - name: Create the draft release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           if ! gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
-              --draft --verify-tag --title "$GITHUB_REF_NAME" --generate-notes
+              --draft --verify-tag --title "Corra ${GITHUB_REF_NAME#v}" --generate-notes
           fi
 
   build:
     needs: draft-release
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -50,9 +56,31 @@ jobs:
       - name: Install NSIS, for the Windows installers
         if: matrix.name == 'Windows'
         run: sudo apt-get update && sudo apt-get install -y nsis
-      - name: Build and upload
+      - name: Package
+        run: |
+          if [ "${{ matrix.name }}" = "macOS" ]; then export CGO_ENABLED=1; fi
+          go tool mygo build -platform "${{ matrix.platform }}" -o dist
+      - name: Upload installers
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if [ "${{ matrix.name }}" = "macOS" ]; then export CGO_ENABLED=1; fi
-          go tool mygo build -platform "${{ matrix.platform }}" -upload
+          files=()
+          while IFS= read -r -d '' f; do
+            files+=("$f")
+          done < <(find dist -type f \( -name '*.dmg' -o -name '*.deb' -o -name '*.tar.gz' -o -name '*Setup*.exe' \) -print0)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "no installers in dist"
+            find dist -type f -print
+            exit 1
+          fi
+          printf 'upload %s\n' "${files[@]}"
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber "${files[@]}"
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false
