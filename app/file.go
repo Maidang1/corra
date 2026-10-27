@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -19,7 +20,11 @@ type FileOps struct {
 	BeforeOpen func() bool
 	// OnOpened, when set, is called after a path is loaded (restart
 	// the external-change watcher, for example).
-	OnOpened func(path string)
+	OnOpened         func(path string)
+	OnLibraryOpened  func(root string)
+	Dispatch         func(func())
+	folderLoadID     uint64
+	cancelFolderLoad context.CancelFunc
 }
 
 var mdFilters = []mygo.FileFilter{
@@ -37,8 +42,15 @@ func (f *FileOps) Open() {
 	f.OpenPath(paths[0])
 }
 
-// OpenPath loads a file by path.
+// OpenPath opens a document, or adopts a directory as the document library.
 func (f *FileOps) OpenPath(path string) {
+	if info, err := os.Stat(path); err == nil && info.IsDir() {
+		f.OpenFolderPath(path)
+		return
+	}
+	if f.App.LibraryLoading {
+		f.CancelFolderLoad()
+	}
 	if f.BeforeOpen != nil && !f.BeforeOpen() {
 		return
 	}
@@ -53,6 +65,10 @@ func (f *FileOps) OpenPath(path string) {
 
 // OpenDropped opens a file dropped onto the window (called from OnFileDrop).
 func (f *FileOps) OpenDropped(path string) {
+	if info, err := os.Stat(path); err == nil && info.IsDir() {
+		f.OpenPath(path)
+		return
+	}
 	lower := strings.ToLower(path)
 	if strings.HasSuffix(lower, ".md") || strings.HasSuffix(lower, ".markdown") ||
 		strings.HasSuffix(lower, ".mdx") || strings.HasSuffix(lower, ".txt") {

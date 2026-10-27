@@ -98,6 +98,22 @@ func TestQuickOpenCommands(t *testing.T) {
 	}
 }
 
+func TestQuickOpenFolderCommand(t *testing.T) {
+	v, tt := notesFixture(t)
+	v.QuickOpenAction()
+	tt.Frame()
+	tt.Type(">open folder")
+	tt.Frame()
+	if !tt.HasText("打开文件夹…") {
+		t.Fatal("open folder command missing")
+	}
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+	if v.FolderDialog != "打开文件夹" || v.QuickOpen {
+		t.Fatal("folder command did not dispatch and close palette")
+	}
+}
+
 func TestQuickOpenCommandExport(t *testing.T) {
 	v, tt := notesFixture(t)
 	v.QuickOpenAction()

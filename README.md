@@ -14,8 +14,9 @@ no JavaScript. Go draws the shell on the GPU; macOS uses an AppKit
 ### Highlights
 
 - **Document library and editing workspace** — folders and a
-  document list grouped by modification date in the sidebar, with an editor
-  showing the document's modification date and an optional outline; the list
+  document tree with collapsible folders in the sidebar, with an editor
+  showing the document's modification date; the sidebar’s Contents tab lists clickable
+  headings (also available from the toolbar’s TOC button); navigation
   is keyboard-driven like Apple Notes: arrows walk it while a row or the
   search field has the focus, and Return hands the found note to the editor
 - **Native WYSIWYG on macOS** — edit headings, body text, inline styles and
@@ -124,11 +125,20 @@ Documents live in a plain folder of Markdown files
 Anything that edits the files on disk (Sync, git, other editors) shows up in
 the app; the app autosaves back to the same files.
 
+Choose **File → Open Folder…** (`⌘⌥O` on macOS, `Ctrl+Alt+O` elsewhere)
+and enter its path, then press Return. Corra scans and parses in the background,
+shows a loading indicator, and lets you cancel. It recursively lists its
+Markdown files and saves edits directly to their original paths. The last selected
+folder is restored on launch. You can also drop a folder onto the window or run
+`corra /path/to/folder`. The command palette (`⌘⇧P`, then `>open folder`) offers
+the same action. To discover files created externally, use **Refresh Library** in
+the sidebar folder context menu.
+
 ### Build
 
 ```sh
 go mod tidy             # resolve modules (go.sum is not committed)
-go run ./internal/genicon  # draw the app icon (pure Go, no binary assets)
+go run ./internal/genicon  # write the app icon to resources/icon.png
 go build ./...          # compile
 go test ./...           # includes AppKit harness on macOS (no AX permission)
 make dev               # macOS: enables cgo for the native rich editor
@@ -174,8 +184,9 @@ JavaScript。Go 在 GPU 上绘制外壳，macOS 编辑区使用 AppKit 原生富
 
 ### 功能
 
-- **文档库与编辑工作区**：侧栏提供文件夹和按修改日期分组的文档列表，
-  编辑区显示文档修改时间，并可开启大纲；列表对齐 Apple Notes 的键盘操作：
+- **文档库与编辑工作区**：侧栏以可展开的文件夹树展示文档，
+  编辑区显示文档修改时间；左侧「目录」页签和工具栏的 TOC 按钮可打开可跳转的大纲；
+  文档树支持键盘操作：
   列表行或搜索框聚焦时 ↑↓ 遍历文档（循环），回车把焦点交给编辑器
 - **macOS 原生所见即所得**：直接编辑标题、正文、文字格式和任务清单，
   使用原生选区、剪贴板和撤销重做，自动保存为 Markdown 文件。需启用 cgo。
@@ -254,11 +265,18 @@ JavaScript。Go 在 GPU 上绘制外壳，macOS 编辑区使用 AppKit 原生富
 磁盘上的文件被别的工具（同步、git、其他编辑器）修改会实时反映到应用里；
 应用的自动保存也直接写回同一批文件。
 
+通过 **文件 → 打开文件夹…**（macOS 为 `⌘⌥O`，其他平台为 `Ctrl+Alt+O`）
+输入磁盘上已有文件夹的路径并按回车。应用在后台扫描和解析，显示加载状态并支持取消；
+递归列出其中的 Markdown 文件，编辑后保存回原路径，
+并在下次启动时恢复所选文件夹。也支持把文件夹拖入窗口，或通过
+`corra /path/to/folder` 启动。命令面板中输入 `>打开文件夹` 也可使用此功能。
+AI 或其他工具新建文件后，可从侧栏文件夹的右键菜单选择「刷新文档库」。
+
 ### 构建
 
 ```sh
 go mod tidy                # 解析依赖（go.sum 不入库，由 CI 重新生成）
-go run ./internal/genicon  # 生成应用图标（纯 Go 绘制，无二进制资源）
+go run ./internal/genicon  # 把应用图标写成 resources/icon.png
 go build ./...
 go test ./...
 make dev            # macOS 自动启用 cgo，使用原生富文本编辑器

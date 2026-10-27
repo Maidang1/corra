@@ -4,6 +4,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"os"
@@ -13,7 +14,9 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/Maidang1/corra/internal/mdext"
 	"github.com/Maidang1/corra/render"
+	"gopkg.in/yaml.v3"
 )
 
 // TrashName is the library's trash subfolder, the "最近删除" of the
@@ -50,27 +53,47 @@ func mdExt(path string) bool {
 	return false
 }
 
-// ScanLibrary walks root recursively and collects every Markdown file.
+// ScanLibrary collects visible Markdown files, skipping dotfiles and hidden
+// directories. The library-owned trash remains available as a separate list.
 // Missing or unreadable roots yield an empty library, not an error.
 func ScanLibrary(root string) *Library {
+	lib, _ := scanLibraryContext(context.Background(), root)
+	return lib
+}
+
+func scanLibraryContext(ctx context.Context, root string) (*Library, error) {
 	lib := &Library{Root: root}
+	if err := ctx.Err(); err != nil {
+		return lib, err
+	}
 	if root == "" {
-		return lib
+		return lib, nil
 	}
 	dir, err := os.OpenRoot(root)
 	if err != nil {
-		return lib
+		return lib, err
 	}
 	defer dir.Close()
-	_ = fs.WalkDir(dir.FS(), ".", func(rel string, d fs.DirEntry, err error) error {
+	err = fs.WalkDir(dir.FS(), ".", func(rel string, d fs.DirEntry, err error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err != nil {
+			if rel == "." {
+				return err
+			}
 			return nil // skip unreadable entries
+		}
+		// Keep the walk root and our own trash; prune other hidden entries
+		// before collecting folders or reading document contents.
+		if rel != "." && rel != TrashName && strings.HasPrefix(d.Name(), ".") {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
 		}
 		inTrash := rel == TrashName || strings.HasPrefix(rel, TrashName+"/")
 		if d.IsDir() {
-			if d.Name() == TrashName && rel != TrashName {
-				return fs.SkipDir
-			}
 			if rel != "." && !inTrash {
 				lib.folders = append(lib.folders, rel)
 			}
@@ -118,7 +141,7 @@ func ScanLibrary(root string) *Library {
 			return notes[i].Path < notes[j].Path
 		})
 	}
-	return lib
+	return lib, err
 }
 
 // Folders returns the distinct folder names, including empty directories,
@@ -141,7 +164,7 @@ func (l *Library) Folders() []string {
 	return out
 }
 
-// Filter returns the notes of a folder ("" = all active notes) whose source
+// Filter returns notes in a folder and its descendants ("" = all active notes) whose source
 // contains query (case-insensitive, empty matches all), keeping the
 // ModTime ordering.
 func (l *Library) Filter(folder, query string) []Note {
@@ -152,7 +175,7 @@ func (l *Library) Filter(folder, query string) []Note {
 	}
 	out := make([]Note, 0, len(notes))
 	for _, n := range notes {
-		if folder != "" && n.Folder != folder {
+		if folder != "" && n.Folder != folder && !strings.HasPrefix(n.Folder, folder+"/") {
 			continue
 		}
 		if q != "" &&
@@ -229,10 +252,22 @@ func isDigits(s string) bool {
 
 func isDigitByte(b byte) bool { return b >= '0' && b <= '9' }
 
-// NoteMeta derives a note's title and snippet from its source: the title
-// is the first heading (markers stripped) or the first non-empty line;
+// NoteMeta skips front matter and uses its title when present, otherwise
+// the first heading (markers stripped) or the first non-empty line;
 // the snippet is the following text, flattened to one line.
 func NoteMeta(src string) (title, snippet string) {
+	fm, rest := mdext.SplitFrontMatter(src)
+	if fm != "" {
+		src = rest
+		start := strings.IndexByte(fm, '\n') + 1
+		end := strings.LastIndex(strings.TrimRight(fm, "\r\n"), "\n") + 1
+		var meta struct {
+			Title string `yaml:"title"`
+		}
+		if yaml.Unmarshal([]byte(fm[start:end]), &meta) == nil {
+			title = strings.TrimSpace(render.PlainText(meta.Title))
+		}
+	}
 	lines := strings.Split(src, "\n")
 	inFence := false
 	var body []string
@@ -374,7 +409,16 @@ func TrashCount(root string) int {
 	defer dir.Close()
 	count := 0
 	_ = fs.WalkDir(dir.FS(), TrashName, func(path string, d fs.DirEntry, err error) error {
-		if err == nil && d.Type().IsRegular() && mdExt(path) {
+		if err != nil {
+			return nil
+		}
+		if path != TrashName && strings.HasPrefix(d.Name(), ".") {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if d.Type().IsRegular() && mdExt(path) {
 			count++
 		}
 		return nil

@@ -64,7 +64,7 @@ func main() {
 			view.AttachRichEditor(native)
 		}
 
-		fileOps = &app.FileOps{App: editorApp, Window: win}
+		fileOps = &app.FileOps{App: editorApp, Window: win, Dispatch: win.Update}
 		fileOps.BeforeOpen = view.FlushAutosave
 		view.OnConflictResolve = func(reload bool) { fileOps.ResolveConflict(reload) }
 		view.OnNoteSaved = watchCurrent // our own autosave: re-arm the watcher
@@ -80,6 +80,10 @@ func main() {
 			}
 		}
 		view.OnOpenRecent = func(path string) { fileOps.OpenPath(path) }
+		fileOps.OnLibraryOpened = func(root string) {
+			libraryRoot = root
+			view.OnSaveSettings()
+		}
 		view.OnExportPDF = func() {
 			if view.SyncBuffer() {
 				fileOps.ExportPDF(exportPDF)
@@ -99,6 +103,8 @@ func main() {
 			return view.FlushAutosave()
 		}
 		view.OnOpen = func() { fileOps.Open() }
+		view.OnOpenFolderPath = fileOps.OpenFolderPath
+		view.OnCancelFolderLoad = fileOps.CancelFolderLoad
 		view.OnInsertImage = func() { insertImageAndUpload(win) }
 		win.OnClose(func(e *mygo.CloseEvent) {
 			if !view.FlushAutosave() {
@@ -106,6 +112,7 @@ func main() {
 			}
 		})
 		win.OnClosed(func() {
+			fileOps.CancelFolderLoad()
 			if watcher != nil {
 				watcher.Close()
 			}
@@ -138,7 +145,7 @@ func main() {
 			}
 		})
 		if !opened {
-			openMostRecent()
+			fileOps.OpenFolderPath(libraryRoot)
 		}
 
 		win.OnFileDrop(func(e *mygo.FileDropEvent) {
@@ -174,11 +181,18 @@ func setupDirs() {
 	}
 }
 
-// setupLibrary points the app at its notes folder (a folder of Markdown
-// files, like Apple Notes' storage) and seeds a welcome note the first
-// time the folder is empty.
+// setupLibrary restores the selected folder, or initializes the default library.
+// Only the default library receives a welcome note on its first launch.
 func setupLibrary() {
 	libraryRoot = filepath.Join(configDir, "备忘录")
+	if root := app.LoadSettings(configDir).LibraryRoot; root != "" {
+		if info, err := os.Stat(root); err == nil && info.IsDir() {
+			libraryRoot = root
+			editorApp.LibraryRoot = root
+			return
+		}
+		fmt.Fprintf(os.Stderr, "saved library unavailable: %s\n", root)
+	}
 	_, statErr := os.Stat(libraryRoot)
 	firstLaunch := os.IsNotExist(statErr)
 	if err := os.MkdirAll(libraryRoot, 0o755); err != nil {
@@ -190,20 +204,6 @@ func setupLibrary() {
 		if err := os.WriteFile(path, []byte(app.Welcome), 0o644); err != nil {
 			fmt.Fprintf(os.Stderr, "seed note: %v\n", err)
 		}
-	}
-	editorApp.ScanLibrary()
-}
-
-// openMostRecent opens the newest library note, if any.
-func openMostRecent() {
-	editorApp.ScanLibrary()
-	notes := editorApp.VisibleNotes()
-	if len(notes) == 0 {
-		editorApp.NewDocument()
-		return
-	}
-	if err := editorApp.OpenNote(notes[0].Path); err != nil {
-		fmt.Fprintf(os.Stderr, "open note: %v\n", err)
 	}
 }
 

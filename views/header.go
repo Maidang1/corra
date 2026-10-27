@@ -32,9 +32,6 @@ func (v *View) header(c *ui.Context) {
 	if v.App.Sidebar {
 		width -= sidebarW
 	}
-	if v.App.Outline {
-		width -= 236
-	}
 	compact := width > 0 && width < 700
 	tight := width > 0 && width < 480
 	bar.Children(func() {
@@ -58,6 +55,7 @@ func (v *View) header(c *ui.Context) {
 			}
 		}
 		ui.Spacer(c)
+		iconButton(c, iconTOC, "显示目录（TOC）", v.ToggleOutlineAction)
 		v.modeSwitcher(c)
 		if !compact {
 			v.formatCapsule(c)
@@ -178,7 +176,15 @@ func itoa(n int) string { return strconv.Itoa(n) }
 func (v *View) toggleSidebar()       { v.App.Sidebar = !v.App.Sidebar; v.App.InvalidateUI() }
 func (v *View) ToggleSidebarAction() { v.toggleSidebar() }
 
+func (v *View) ToggleOutlineAction() {
+	v.App.Outline = !v.App.Sidebar || !v.App.Outline
+	v.App.Sidebar = true
+	v.App.InvalidateUI()
+}
+
 func (v *View) SearchAction() {
+	v.App.Outline = false
+	v.App.Sidebar = true
 	if v.rich != nil {
 		v.rich.Blur()
 	}

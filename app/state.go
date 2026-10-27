@@ -50,7 +50,7 @@ type App struct {
 	MonoFont    string  // source editor / code family ("" = system default)
 	Zoom        float32 // 1 = 100%
 	Sidebar     bool    // navigation sidebar visible (folders + notes list)
-	Outline     bool    // outline (TOC) panel visible
+	Outline     bool    // sidebar shows document headings instead of the file tree
 	OutlineSel  int     // selected outline row
 	FindOpen    bool
 	FindQuery   string
@@ -72,11 +72,14 @@ type App struct {
 	Recent []string
 
 	// Notes library: a folder of Markdown files, listed like Apple Notes.
-	LibraryRoot string
-	Lib         *Library
-	SelFolder   string // selected sidebar folder, "" = all notes
-	SelNote     string // path of the note open in the editor column
-	Query       string // search filter for the notes list
+	LibraryRoot      string
+	Lib              *Library
+	SelFolder        string // selected sidebar folder, "" = all notes
+	SelNote          string // path of the note open in the editor column
+	Query            string // search filter for the notes list
+	LibraryLoading   bool
+	LibraryLoadPath  string
+	LibraryLoadError string
 
 	// External change conflict.
 	Conflict      bool
@@ -217,10 +220,14 @@ func (a *App) SetSourceQuiet(src string, caret int) {
 
 // Loaded resets state for a freshly opened file.
 func (a *App) Loaded(path, src string) {
+	a.loadParsedDocument(path, src, render.ParseOptions(src, a.SmartPunct))
+}
+
+func (a *App) loadParsedDocument(path, src string, doc *render.Document) {
 	a.mu.Lock()
 	a.Path = path
 	a.Source = src
-	a.reparse()
+	a.Doc = doc
 	a.Dirty = false
 	if path == "" {
 		a.Title = "未命名"
@@ -286,7 +293,7 @@ func (a *App) Redo() {
 func (a *App) SnapshotSettings() Settings {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return Settings{ThemeMode: a.ThemeMode, BodyFont: a.BodyFont, MonoFont: a.MonoFont}
+	return Settings{ThemeMode: a.ThemeMode, BodyFont: a.BodyFont, MonoFont: a.MonoFont, LibraryRoot: a.LibraryRoot}
 }
 
 // ApplySettings loads persisted preferences into the app state (startup).

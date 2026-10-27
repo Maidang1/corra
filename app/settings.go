@@ -7,12 +7,13 @@ import (
 )
 
 // Settings is the persisted preferences file (settings.json in the config
-// directory): appearance and editor typography. The window's other toggles
+// directory): selected library, appearance and editor typography. Other toggles
 // stay session-only, as before.
 type Settings struct {
-	ThemeMode ThemeMode `json:"themeMode"`
-	BodyFont  string    `json:"bodyFont"` // rich editor body family, "" = system default
-	MonoFont  string    `json:"monoFont"` // source editor / code family, "" = system default
+	LibraryRoot string    `json:"libraryRoot,omitempty"`
+	ThemeMode   ThemeMode `json:"themeMode"`
+	BodyFont    string    `json:"bodyFont"` // rich editor body family, "" = system default
+	MonoFont    string    `json:"monoFont"` // source editor / code family, "" = system default
 }
 
 // BodyFonts lists the rich editor's body typefaces. macOS families only:
