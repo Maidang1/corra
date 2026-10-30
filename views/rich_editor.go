@@ -125,6 +125,19 @@ func (v *View) richVisible() bool {
 }
 
 func (v *View) richPane(c *ui.Context) {
+	if in, ok := v.rich.(inlineRich); ok {
+		v.ensureRichEditor()
+		v.rich.SetStyle(float64(v.App.Zoom), c.Theme().Dark, v.canEdit())
+		if v.focusEditor {
+			v.rich.Focus()
+			v.focusEditor = false
+		}
+		ui.Column(c).Fill().Gap(0).Children(func() {
+			v.dateHeader(c)
+			ui.Box(c).Fill().Padding(0, 6, 8, 6).Children(func() { in.Render(c) })
+		})
+		return
+	}
 	v.rich.SetMathNumbering(v.App.MathNumbering)
 	v.rich.SetCodeLineNumbers(v.App.CodeLineNumbers)
 	v.ensureRichEditor()
