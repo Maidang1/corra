@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/egoist/mygo/ui"
+
 	"github.com/Maidang1/corra/app"
 )
 
@@ -48,6 +50,13 @@ func (e *fakeRichEditor) Focus()                        { e.focuses++ }
 func (e *fakeRichEditor) Blur()                         {}
 func (e *fakeRichEditor) Close()                        { e.closed = true }
 
+type fakeInlineRichEditor struct {
+	*fakeRichEditor
+	renders int
+}
+
+func (e *fakeInlineRichEditor) Render(*ui.Context) { e.renders++ }
+
 func TestRichDefaultLayoutAndNoReloadOnSave(t *testing.T) {
 	v, tt := notesFixture(t)
 	e := &fakeRichEditor{}
@@ -66,6 +75,41 @@ func TestRichDefaultLayoutAndNoReloadOnSave(t *testing.T) {
 	got, _ := os.ReadFile(v.App.Path)
 	if string(got) != e.source || e.loads != loads {
 		t.Fatalf("save lost native text or reset selection: %q loads=%d", got, e.loads)
+	}
+}
+
+func TestInlineRichEditorSkipsRenderingBehindModal(t *testing.T) {
+	v, tt := notesFixture(t)
+	e := &fakeInlineRichEditor{fakeRichEditor: &fakeRichEditor{}}
+	v.AttachRichEditor(e)
+	tt.Frame()
+	if e.renders == 0 {
+		t.Fatal("inline rich editor was not rendered")
+	}
+	renders := e.renders
+
+	v.HostOpen = true
+	tt.Frame()
+	if e.renders != renders {
+		t.Fatal("inline rich editor kept rendering behind the hosting dialog")
+	}
+	if e.visible {
+		t.Fatal("inline rich editor remained visible behind the hosting dialog")
+	}
+	for range 6 {
+		click(t, tt, "启用图床上传")
+	}
+	if v.HostDraft.Enabled {
+		t.Fatal("rapid switch clicks did not preserve the final disabled state")
+	}
+	if e.renders != renders {
+		t.Fatal("inline rich editor rendered during hosting-switch animation")
+	}
+
+	v.HostOpen = false
+	tt.Frame()
+	if e.renders == renders {
+		t.Fatal("inline rich editor did not resume rendering after the dialog closed")
 	}
 }
 
