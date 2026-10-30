@@ -62,6 +62,18 @@ func main() {
 				return ok
 			}
 			view.AttachRichEditor(native)
+		} else {
+			// Windows and Linux: MyGo's own rich-text component.
+			rich := views.NewMygoRich(view.NativeChanged, images.LoadImageBytes, editorApp.InvalidateUI)
+			rich.OnOpenDocument = func(target string) bool {
+				path, ok := view.ResolveLinkedDocument(target)
+				if ok {
+					fileOps.OpenPath(path)
+				}
+				return ok
+			}
+			rich.OnLinkRequest = view.InsertLinkAction
+			view.AttachRichEditor(rich)
 		}
 
 		fileOps = &app.FileOps{App: editorApp, Window: win, Dispatch: win.Update}
