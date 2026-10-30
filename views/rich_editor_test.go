@@ -96,6 +96,15 @@ func TestInlineRichEditorSkipsRenderingBehindModal(t *testing.T) {
 	if e.visible {
 		t.Fatal("inline rich editor remained visible behind the hosting dialog")
 	}
+	for range 6 {
+		click(t, tt, "启用图床上传")
+	}
+	if v.HostDraft.Enabled {
+		t.Fatal("rapid switch clicks did not preserve the final disabled state")
+	}
+	if e.renders != renders {
+		t.Fatal("inline rich editor rendered during hosting-switch animation")
+	}
 
 	v.HostOpen = false
 	tt.Frame()

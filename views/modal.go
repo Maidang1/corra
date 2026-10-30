@@ -62,7 +62,7 @@ func (v *View) hostingDialog(c *ui.Context) {
 					FontSize(12).TextColor(t.TextMuted).LineHeight(1.5)
 				enabled := v.HostDraft.Enabled
 				ui.Row(c).FillWidth().Gap(8).Children(func() {
-					ui.Switch(c, &enabled).OnChange(func() {
+					ui.Switch(c, &enabled).Label("启用图床上传").OnChange(func() {
 						v.HostDraft.Enabled = enabled
 					})
 					ui.Text(c, "启用图床上传").FontSize(13)
