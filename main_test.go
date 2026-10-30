@@ -78,6 +78,24 @@ func TestBuildMenuSmoke(t *testing.T) {
 	}
 }
 
+func TestTitleBarStyleForPlatform(t *testing.T) {
+	tests := []struct {
+		goos string
+		want mygo.TitleBarStyle
+	}{
+		{goos: "darwin", want: mygo.TitleBarHiddenInset},
+		{goos: "linux", want: mygo.TitleBarDefault},
+		{goos: "windows", want: mygo.TitleBarHiddenInset},
+	}
+	for _, tt := range tests {
+		t.Run(tt.goos, func(t *testing.T) {
+			if got := titleBarStyleForPlatform(tt.goos); got != tt.want {
+				t.Fatalf("titleBarStyleForPlatform(%q) = %q, want %q", tt.goos, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestWelcomeNoteParsesAndRoundTrips(t *testing.T) {
 	doc := render.Parse(app.Welcome)
 	if len(doc.Blocks) < 10 {

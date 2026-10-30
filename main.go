@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/egoist/mygo"
@@ -47,7 +48,7 @@ func main() {
 			MinWidth:             960,
 			MinHeight:            560,
 			Content:              ui.View(buildView),
-			TitleBarStyle:        mygo.TitleBarHiddenInset,
+			TitleBarStyle:        titleBarStyleForPlatform(runtime.GOOS),
 			TrafficLightPosition: &mygo.Point{X: 20, Y: 26},
 			TitleBarHeight:       58,
 		})
@@ -171,6 +172,13 @@ func main() {
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func titleBarStyleForPlatform(goos string) mygo.TitleBarStyle {
+	if goos == "linux" {
+		return mygo.TitleBarDefault
+	}
+	return mygo.TitleBarHiddenInset
 }
 
 // buildView is the MyGo view; it also binds window services on first build.
