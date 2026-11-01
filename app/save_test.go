@@ -23,6 +23,9 @@ func TestSaveExistingNote(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				// On Windows os.Stat loads the file ID from the path on the first
+				// SameFile call; pin it now, before the save replaces the file.
+				os.SameFile(original, original)
 				if err := SaveExistingNote(path, "# New\n"); err != nil {
 					t.Fatal(err)
 				}
