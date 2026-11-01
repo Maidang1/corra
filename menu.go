@@ -158,35 +158,43 @@ func buildMenu() *mygo.Menu {
 		},
 	}
 
-	viewMenu := &mygo.MenuItem{
-		Label: "视图",
-		Submenu: []*mygo.MenuItem{
-			item("切换源码 / 文稿", "CmdOrCtrl+E", func() { view.ToggleModeAction() }),
-			item("显示 / 隐藏边栏", "CmdOrCtrl+Alt+S", func() { view.ToggleSidebarAction() }),
-			item("目录（TOC）", "CmdOrCtrl+Ctrl+1", func() { view.ToggleOutlineAction() }),
-			item("搜索文档", "CmdOrCtrl+Shift+F", func() { view.SearchAction() }),
-			mygo.Separator(),
-			checked("字数统计", editorApp.WordCount, func() { editorApp.WordCount = !editorApp.WordCount; editorApp.InvalidateUI() }),
+	viewItems := []*mygo.MenuItem{
+		item("切换源码 / 文稿", "CmdOrCtrl+E", func() { view.ToggleModeAction() }),
+		item("显示 / 隐藏边栏", "CmdOrCtrl+Alt+S", func() { view.ToggleSidebarAction() }),
+		item("目录（TOC）", "CmdOrCtrl+Ctrl+1", func() { view.ToggleOutlineAction() }),
+		item("搜索文档", "CmdOrCtrl+Shift+F", func() { view.SearchAction() }),
+		mygo.Separator(),
+		checked("字数统计", editorApp.WordCount, func() { editorApp.WordCount = !editorApp.WordCount; editorApp.InvalidateUI() }),
+	}
+	// These only change the AppKit editor; Windows and Linux would show
+	// switches that do nothing.
+	if view.NativeRich() {
+		viewItems = append(viewItems,
 			checked("拼写检查", editorApp.Spellcheck, func() { view.ToggleSpellcheck() }),
 			checked("专注模式", editorApp.FocusMode, func() { view.ToggleFocusMode() }),
 			checked("打字机模式", editorApp.Typewriter, func() { view.ToggleTypewriter() }),
 			mygo.Separator(),
 			checked("代码块显示行号", editorApp.CodeLineNumbers, func() { editorApp.CodeLineNumbers = !editorApp.CodeLineNumbers; editorApp.InvalidateUI() }),
-			checked("智能标点", editorApp.SmartPunct, func() { editorApp.SmartPunct = !editorApp.SmartPunct; editorApp.Refresh() }),
-			{Label: "公式编号", Submenu: []*mygo.MenuItem{
-				checked("不自动编号", editorApp.MathNumbering == "" || editorApp.MathNumbering == "none", func() { editorApp.MathNumbering = "none"; editorApp.InvalidateUI() }),
-				checked("按 AMS 规则编号", editorApp.MathNumbering == "ams", func() { editorApp.MathNumbering = "ams"; editorApp.InvalidateUI() }),
-				checked("全部块公式编号", editorApp.MathNumbering == "all", func() { editorApp.MathNumbering = "all"; editorApp.InvalidateUI() }),
-			}},
-			item("重新排版公式", "CmdOrCtrl+Alt+Shift+M", func() { view.RefreshMath() }),
-			mygo.Separator(),
-			item("放大", "CmdOrCtrl+=", func() { zoomBy(0.1) }),
-			item("缩小", "CmdOrCtrl+-", func() { zoomBy(-0.1) }),
-			item("实际大小", "CmdOrCtrl+Shift+0", func() { view.App.Zoom = 1; editorApp.InvalidateUI() }),
-			mygo.Separator(),
-			role(mygo.RoleToggleFullScreen),
-		},
+		)
+	} else {
+		viewItems = append(viewItems, mygo.Separator())
 	}
+	viewItems = append(viewItems,
+		checked("智能标点", editorApp.SmartPunct, func() { editorApp.SmartPunct = !editorApp.SmartPunct; editorApp.Refresh() }),
+		&mygo.MenuItem{Label: "公式编号", Submenu: []*mygo.MenuItem{
+			checked("不自动编号", editorApp.MathNumbering == "" || editorApp.MathNumbering == "none", func() { editorApp.MathNumbering = "none"; editorApp.InvalidateUI() }),
+			checked("按 AMS 规则编号", editorApp.MathNumbering == "ams", func() { editorApp.MathNumbering = "ams"; editorApp.InvalidateUI() }),
+			checked("全部块公式编号", editorApp.MathNumbering == "all", func() { editorApp.MathNumbering = "all"; editorApp.InvalidateUI() }),
+		}},
+		item("重新排版公式", "CmdOrCtrl+Alt+Shift+M", func() { view.RefreshMath() }),
+		mygo.Separator(),
+		item("放大", "CmdOrCtrl+=", func() { zoomBy(0.1) }),
+		item("缩小", "CmdOrCtrl+-", func() { zoomBy(-0.1) }),
+		item("实际大小", "CmdOrCtrl+Shift+0", func() { view.App.Zoom = 1; editorApp.InvalidateUI() }),
+		mygo.Separator(),
+		role(mygo.RoleToggleFullScreen),
+	)
+	viewMenu := &mygo.MenuItem{Label: "视图", Submenu: viewItems}
 
 	helpMenu := &mygo.MenuItem{
 		Label: "帮助",

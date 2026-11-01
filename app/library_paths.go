@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -103,7 +104,13 @@ func moveLibraryNote(dir *os.Root, source, folder string) (string, error) {
 		dest := filepath.Join(folder, numberedName(filepath.Base(source), i))
 		// Link creates the destination atomically without replacing an existing
 		// file; only remove the source after its contents have another name.
-		if err := dir.Link(source, dest); os.IsExist(err) {
+		err := dir.Link(source, dest)
+		if err != nil && !os.IsExist(err) {
+			// FAT32 and exFAT volumes have no hard links: copy into an
+			// exclusively created file instead.
+			err = copyNoReplace(dir, source, dest)
+		}
+		if os.IsExist(err) {
 			continue
 		} else if err != nil {
 			return "", err
@@ -114,6 +121,32 @@ func moveLibraryNote(dir *os.Root, source, folder string) (string, error) {
 		}
 		return dest, nil
 	}
+}
+
+// copyNoReplace copies source to a new dest; an existing dest is an
+// os.IsExist error and is left untouched.
+func copyNoReplace(dir *os.Root, source, dest string) error {
+	in, err := dir.Open(source)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	info, err := in.Stat()
+	if err != nil {
+		return err
+	}
+	out, err := dir.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_EXCL, info.Mode().Perm())
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(out, in)
+	if closeErr := out.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		_ = dir.Remove(dest)
+	}
+	return err
 }
 
 func renameLibraryFolder(dir *os.Root, old, next string) error {

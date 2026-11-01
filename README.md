@@ -9,7 +9,8 @@
 Corra is a **Markdown desktop editor** with a **fully native UI**, written in
 Go with the [MyGo](https://mygo.egoist.dev) toolkit. No webview, no HTML,
 no JavaScript. Go draws the shell on the GPU; macOS uses an AppKit
-`NSTextView` for rich-text editing.
+`NSTextView` for rich-text editing, Windows and Linux use MyGo's own
+rich-text component.
 
 ### Highlights
 
@@ -22,10 +23,15 @@ no JavaScript. Go draws the shell on the GPU; macOS uses an AppKit
 - **Native WYSIWYG on macOS** — edit headings, body text, inline styles and
   checklists directly, with native selection, clipboard and undo/redo. Documents
   still autosave as Markdown files. Requires a cgo-enabled macOS build.
+- **Rich editing on Windows and Linux** — MyGo's rich-text component edits
+  headings, inline styles, lists, quotes and links in place; tables, math,
+  diagrams and other blocks it cannot show stay intact as blocks, edited in
+  source mode.
+  Spell checking, focus/typewriter modes and code line numbers are
+  macOS-only and hidden elsewhere.
 - **Source and reading modes** — `Cmd+E` switches rich text / Markdown source;
-  the document menu also offers a full reading preview. Other platforms retain
-  source / preview editing. Source mode has syntax highlighting, multiple
-  carets and find & replace (Cmd+F).
+  the document menu also offers a full reading preview. Source mode has
+  syntax highlighting, multiple carets and find & replace (Cmd+F).
 - **GFM complete** — tables, task lists, strikethrough, footnotes
 - **Typora-grade inline styles** — underline `<u>`, highlight `==x==`,
   superscript `^x^`, subscript `~x~`, `<kbd>`, emoji `:codes:`, YAML front
@@ -173,8 +179,10 @@ Gatekeeper asks before opening them on another Mac.
 - Diagrams render on a light card in both themes (by design, like GitHub)
 - Custom CSS themes and embedded web content (iframe/video) need a webview,
   which Corra deliberately does not have
-- Printing uses the native macOS panel; on Windows/Linux use Export PDF
-  (MyGo has no print API there)
+- Printing uses the native macOS panel; on Windows/Linux Print exports a PDF
+  instead (MyGo has no print API there)
+- Text inside math (`\text{中文}`) uses system fonts on Windows/Linux: install
+  a CJK font (Noto CJK, WenQuanYi) on Linux for Chinese/Japanese in formulas
 - PDF bookmarks (outline entries) need gpdf support that does not exist yet
 - See docs/typora-parity.md for the full Typora comparison
 
@@ -184,7 +192,8 @@ Gatekeeper asks before opening them on another Mac.
 
 Corra 是一个**纯原生 UI** 的 Markdown 桌面编辑器，用 Go 基于
 [MyGo](https://mygo.egoist.dev) 工具包编写：无 webview、无 HTML、无
-JavaScript。Go 在 GPU 上绘制外壳，macOS 编辑区使用 AppKit 原生富文本控件。
+JavaScript。Go 在 GPU 上绘制外壳，macOS 编辑区使用 AppKit 原生富文本控件，
+Windows 和 Linux 使用 MyGo 自带的富文本组件。
 
 ### 功能
 
@@ -194,8 +203,11 @@ JavaScript。Go 在 GPU 上绘制外壳，macOS 编辑区使用 AppKit 原生富
   列表行或搜索框聚焦时 ↑↓ 遍历文档（循环），回车把焦点交给编辑器
 - **macOS 原生所见即所得**：直接编辑标题、正文、文字格式和任务清单，
   使用原生选区、剪贴板和撤销重做，自动保存为 Markdown 文件。需启用 cgo。
+- **Windows / Linux 富文本编辑**：MyGo 富文本组件可直接编辑标题、文字格式、
+  列表、引用和链接；表格、公式、图表等无法直接显示的块原样保留，在源码模式中编辑。
+  拼写检查、专注 / 打字机模式和代码行号仅 macOS 提供，其他平台不显示。
 - **源码和阅读视图**：`Cmd+E` 切换富文本 / Markdown 源码；文档菜单
-  可打开完整阅读预览。其他平台保留源码 / 预览。源码模式仍支持语法高亮、
+  可打开完整阅读预览。源码模式仍支持语法高亮、
   多光标和查找替换（Cmd+F）。
 - **GFM 全要素**：表格、任务列表、删除线、脚注
 - **Typora 级内联样式**：下划线 `<u>`、高亮 `==x==`、上标 `^x^`、下标 `~x~`、
@@ -311,7 +323,9 @@ Mac 上打开时 Gatekeeper 会要求确认。
 - mermaid 的 WASM 渲染器与官方不完全像素一致，`%%{init}%%` 指令被忽略
 - 图表在两个主题下都渲染在浅色卡片上（刻意设计，与 GitHub 一致）
 - 自定义 CSS 主题与 iframe/视频嵌入需要 webview，Corra 刻意不含
-- Windows/Linux 使用导出 PDF 代替打印（MyGo 暂无打印接口）
+- Windows/Linux 上「打印」改为导出 PDF（MyGo 暂无打印接口）
+- Windows/Linux 公式内文字（`\text{中文}`）使用系统字体；Linux 需安装中日文
+  字体（Noto CJK、文泉驿）才能在公式中显示中文
 - PDF 书签（大纲）需 gpdf 提供 API，暂不支持
 - 与 Typora 的完整能力对照见 docs/typora-parity.md
 
@@ -328,8 +342,8 @@ folders and deletes empty ones. Search matches the full Markdown source.
 Deleted documents are read-only until restored. Restore currently places the document
 in the library root, adding a suffix when a filename already exists.
 
-- `Cmd/Ctrl+N`: new document (native rich editor on macOS)
-- `Cmd/Ctrl+E`: source editor / rich document (preview on other platforms)
+- `Cmd/Ctrl+N`: new document (opens in the rich editor)
+- `Cmd/Ctrl+E`: source editor / rich document
 - `Cmd/Ctrl+Shift+P`: full reading preview
 - `Cmd/Ctrl+Shift+F`: search documents; `Cmd/Ctrl+F`: find within the source editor
 - `Cmd/Ctrl+Alt+S`: collapse / expand folders
@@ -353,7 +367,7 @@ folder before starting the app. This does not migrate or change the normal libra
 「最近删除」中的文档只读，恢复后放回库根目录，同名时自动添加编号。
 
 编辑和预览勾选均自动保存；保存失败时会显示错误并阻止切换/关闭，
-可用「另存为」将当前内容保存到其他位置。macOS 默认原生富文本编辑，
+可用「另存为」将当前内容保存到其他位置。默认使用富文本编辑，
 Markdown 源码仍可随时切换；不提供 iCloud 同步、Apple 账户或多人协作功能。
 
 ### Rich Editor Boundaries / 富文本编辑范围

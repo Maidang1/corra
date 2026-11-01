@@ -21,6 +21,7 @@ type fakeRichEditor struct {
 	codeLineNumbers          bool
 	findBar, replaceBar      bool
 	revealedHeading          int
+	prints                   int
 }
 
 func (e *fakeRichEditor) Load(s string) { e.source = s; e.changed = false; e.loads++ }
@@ -41,7 +42,7 @@ func (e *fakeRichEditor) SetTypewriter(bool)                         {}
 func (e *fakeRichEditor) ShowFindBar()                               { e.findBar = true }
 func (e *fakeRichEditor) ShowFindReplaceBar()                        { e.replaceBar = true }
 func (e *fakeRichEditor) RevealHeading(index int)                    { e.revealedHeading = index }
-func (e *fakeRichEditor) Print()                                     {}
+func (e *fakeRichEditor) Print()                                     { e.prints++ }
 
 func (e *fakeRichEditor) SetBaseDir(dir string)         {}
 func (e *fakeRichEditor) SetMathNumbering(string)       {}
@@ -279,5 +280,53 @@ func TestRichConflictCannotSavePendingComposition(t *testing.T) {
 	v.saveAndReloadConflict(false)
 	if called || !v.App.Conflict {
 		t.Fatal("conflict overwrites disk with stale uncommitted text")
+	}
+}
+
+// Windows and Linux edit with MyGo's component, which cannot print: Print
+// exports a PDF there and the native-only switches stay out of settings.
+func TestInlineRichPrintsToPDFAndHidesNativeSettings(t *testing.T) {
+	v, tt := notesFixture(t)
+	e := &fakeInlineRichEditor{fakeRichEditor: &fakeRichEditor{}}
+	v.AttachRichEditor(e)
+	var pdf bool
+	v.OnExportPDF = func() { pdf = true }
+	tt.Frame()
+	if v.NativeRich() {
+		t.Fatal("inline editor reported as native")
+	}
+	v.PrintAction()
+	if !pdf || e.prints != 0 {
+		t.Fatalf("print: pdf=%v prints=%d", pdf, e.prints)
+	}
+	v.SettingsOpen = true
+	tt.Frame()
+	if !tt.HasText("字数统计") {
+		t.Fatalf("settings not shown: %v", tt.Texts())
+	}
+	for _, label := range []string{"拼写检查", "专注模式", "打字机模式"} {
+		if tt.HasText(label) {
+			t.Errorf("native-only setting %q shown", label)
+		}
+	}
+}
+
+func TestNativeRichPrintsAndShowsNativeSettings(t *testing.T) {
+	v, tt := notesFixture(t)
+	e := &fakeRichEditor{}
+	v.AttachRichEditor(e)
+	var pdf bool
+	v.OnExportPDF = func() { pdf = true }
+	tt.Frame()
+	v.PrintAction()
+	if pdf || e.prints != 1 {
+		t.Fatalf("print: pdf=%v prints=%d", pdf, e.prints)
+	}
+	v.SettingsOpen = true
+	tt.Frame()
+	for _, label := range []string{"拼写检查", "专注模式", "打字机模式"} {
+		if !tt.HasText(label) {
+			t.Errorf("setting %q missing", label)
+		}
 	}
 }

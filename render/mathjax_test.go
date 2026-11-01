@@ -5,14 +5,13 @@ import (
 	"context"
 	"image/color"
 	"math"
-	"runtime"
 	"strings"
 	"testing"
 )
 
 func TestMathJaxNativeTextInk(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("CoreText font fallback is native to macOS")
+	if _, err := nativeMathTextPath("中", 20, false, false); err != nil {
+		t.Skip("no CJK font installed:", err)
 	}
 	for _, expr := range []string{`\text{中文}`, `x_{\text{中文}}^{\text{日本語}}`, `\frac{\text{中文}}{\text{日本語}}`} {
 		results, err := RenderMathBatch([]MathExpression{{TeX: expr, Display: true}}, MathOptions{}, 20, color.Black)
@@ -42,8 +41,8 @@ func TestMathJaxNativeTextInk(t *testing.T) {
 }
 
 func TestNativeMathTextPreservesTransforms(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("CoreText font fallback is native to macOS")
+	if _, err := nativeMathTextPath("中", 20, false, false); err != nil {
+		t.Skip("no CJK font installed:", err)
 	}
 	const transform = `translate(1700,500) rotate(13) scale(0.5,0.75)`
 	data := []byte(`<svg viewBox="0 0 3000 2500"><g transform="translate(100,1800)"><text transform="` + transform + `" font-size="884px">中文</text></g></svg>`)

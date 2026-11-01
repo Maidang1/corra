@@ -48,6 +48,17 @@ type RichEditor interface {
 	Close()
 }
 
+// NativeRich reports whether rich mode is the AppKit editor. Printing,
+// spell checking, focus/typewriter modes and code line numbers exist only
+// there; MyGo's rich-text component on Windows and Linux has none of them.
+func (v *View) NativeRich() bool {
+	if v == nil || v.rich == nil {
+		return false
+	}
+	_, inline := v.rich.(inlineRich)
+	return !inline
+}
+
 func (v *View) AttachRichEditor(e RichEditor) {
 	v.rich = e
 	if e != nil {

@@ -11,9 +11,13 @@ permissions:
 jobs:
   check:
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -24,6 +28,8 @@ jobs:
       - name: Generate the app icon
         run: go run ./internal/genicon
       - name: gofmt
+        # Windows checkouts use CRLF, which gofmt reports on every file.
+        if: runner.os != 'Windows'
         run: |
           out=$(gofmt -l . | grep -v third_party || true)
           if [ -n "$out" ]; then echo "unformatted: $out"; exit 1; fi
@@ -70,7 +76,7 @@ jobs:
       - name: Collect installers
         run: |
           mkdir -p installers
-          find dist -type f \( -name '*.dmg' -o -name '*.deb' -o -name '*.tar.gz' -o -name '*Setup*.exe' \) -exec cp {} installers/ \;
+          find dist -type f \( -name '*.dmg' -o -name '*.deb' -o -name '*.tar.gz' -o -iname '*setup*.exe' \) -exec cp {} installers/ \;
           find installers -type f -print
           test -n "$(find installers -type f -print -quit)"
       - name: Upload installers
