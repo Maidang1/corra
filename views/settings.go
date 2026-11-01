@@ -56,27 +56,23 @@ func (v *View) settingsDialog(c *ui.Context) {
 					v.App.WordCount = on
 					v.App.InvalidateUI()
 				})
-				settingsSwitch(c, "拼写检查", v.App.Spellcheck, func(on bool) {
-					v.App.Spellcheck = on
-					if v.rich != nil {
+				if v.NativeRich() {
+					settingsSwitch(c, "拼写检查", v.App.Spellcheck, func(on bool) {
+						v.App.Spellcheck = on
 						v.rich.SetSpellcheck(on)
-					}
-					v.App.InvalidateUI()
-				})
-				settingsSwitch(c, "专注模式", v.App.FocusMode, func(on bool) {
-					v.App.FocusMode = on
-					if v.rich != nil {
+						v.App.InvalidateUI()
+					})
+					settingsSwitch(c, "专注模式", v.App.FocusMode, func(on bool) {
+						v.App.FocusMode = on
 						v.rich.SetFocusMode(on)
-					}
-					v.App.InvalidateUI()
-				})
-				settingsSwitch(c, "打字机模式", v.App.Typewriter, func(on bool) {
-					v.App.Typewriter = on
-					if v.rich != nil {
+						v.App.InvalidateUI()
+					})
+					settingsSwitch(c, "打字机模式", v.App.Typewriter, func(on bool) {
+						v.App.Typewriter = on
 						v.rich.SetTypewriter(on)
-					}
-					v.App.InvalidateUI()
-				})
+						v.App.InvalidateUI()
+					})
+				}
 
 				ui.Divider(c).FillWidth()
 				ui.Row(c).FillWidth().Gap(8).Children(func() {

@@ -67,7 +67,7 @@ jobs:
           files=()
           while IFS= read -r -d '' f; do
             files+=("$f")
-          done < <(find dist -type f \( -name '*.dmg' -o -name '*.deb' -o -name '*.tar.gz' -o -name '*Setup*.exe' \) -print0)
+          done < <(find dist -type f \( -name '*.dmg' -o -name '*.deb' -o -name '*.tar.gz' -o -iname '*setup*.exe' \) -print0)
           if [ "${#files[@]}" -eq 0 ]; then
             echo "no installers in dist"
             find dist -type f -print
