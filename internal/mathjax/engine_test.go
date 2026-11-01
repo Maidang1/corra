@@ -83,7 +83,9 @@ func TestCancellationAndConcurrentIsolation(t *testing.T) {
 	if _, err := Render(ctx, []Expression{{TeX: `x`}}, Options{}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancel: %v", err)
 	}
-	ctx, cancel = context.WithTimeout(context.Background(), time.Nanosecond)
+	// Already expired: a 1ns timeout races coarse timers (Windows) and the
+	// render can finish before it fires.
+	ctx, cancel = context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 	defer cancel()
 	if _, err := Render(ctx, []Expression{{TeX: `x`}}, Options{}); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("deadline: %v", err)

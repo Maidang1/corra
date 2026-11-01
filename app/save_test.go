@@ -28,7 +28,9 @@ func TestSaveExistingNote(t *testing.T) {
 				}
 				assertNoteSource(t, path, "# New\n")
 				info, err := os.Stat(path)
-				if err != nil || info.Mode().Perm() != mode {
+				// Compare with what the file system kept: Windows only has a
+				// read-only bit, so 0600 and 0640 read back as 0666.
+				if err != nil || info.Mode().Perm() != original.Mode().Perm() {
 					t.Fatalf("permissions changed: info=%v err=%v", info, err)
 				}
 				if os.SameFile(original, info) {

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -48,6 +49,8 @@ func saveExistingNote(path string, source io.Reader) error {
 	defer func() {
 		_ = temp.Close()
 		if !committed {
+			// Windows will not remove a read-only file.
+			_ = dir.Chmod(tempName, 0o600)
 			_ = dir.Remove(tempName)
 		}
 	}()
@@ -72,7 +75,19 @@ func saveExistingNote(path string, source io.Reader) error {
 		!original.ModTime().Equal(current.ModTime()) || original.Size() != current.Size() {
 		return fmt.Errorf("document changed during save: %s", path)
 	}
+	// Windows will not rename over a read-only file, which Unix replaces
+	// because only the directory's permissions matter there.
+	perm := original.Mode().Perm()
+	readOnly := runtime.GOOS == "windows" && perm&0o200 == 0
+	if readOnly {
+		if err := dir.Chmod(name, perm|0o200); err != nil {
+			return err
+		}
+	}
 	if err := dir.Rename(tempName, name); err != nil {
+		if readOnly {
+			_ = dir.Chmod(name, perm)
+		}
 		return err
 	}
 	committed = true
