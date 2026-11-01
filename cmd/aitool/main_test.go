@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -18,6 +19,9 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	bin = filepath.Join(tmp, "aitool")
+	if runtime.GOOS == "windows" {
+		bin += ".exe"
+	}
 	out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput()
 	if err != nil {
 		panic(string(out))
