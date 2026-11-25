@@ -166,19 +166,15 @@ func buildMenu() *mygo.Menu {
 		mygo.Separator(),
 		checked("字数统计", editorApp.WordCount, func() { editorApp.WordCount = !editorApp.WordCount; editorApp.InvalidateUI() }),
 	}
-	// These only change the AppKit editor; Windows and Linux would show
-	// switches that do nothing.
-	if view.NativeRich() {
-		viewItems = append(viewItems,
-			checked("拼写检查", editorApp.Spellcheck, func() { view.ToggleSpellcheck() }),
-			checked("专注模式", editorApp.FocusMode, func() { view.ToggleFocusMode() }),
-			checked("打字机模式", editorApp.Typewriter, func() { view.ToggleTypewriter() }),
-			mygo.Separator(),
-			checked("代码块显示行号", editorApp.CodeLineNumbers, func() { editorApp.CodeLineNumbers = !editorApp.CodeLineNumbers; editorApp.InvalidateUI() }),
-		)
-	} else {
-		viewItems = append(viewItems, mygo.Separator())
-	}
+	// These change the document editor, the same on every platform.
+	viewItems = append(viewItems,
+		checked("拼写检查", editorApp.Spellcheck, func() { view.ToggleSpellcheck() }),
+		checked("专注模式", editorApp.FocusMode, func() { view.ToggleFocusMode() }),
+		checked("打字机模式", editorApp.Typewriter, func() { view.ToggleTypewriter() }),
+		mygo.Separator(),
+		checked("代码块显示行号", editorApp.CodeLineNumbers, func() { editorApp.CodeLineNumbers = !editorApp.CodeLineNumbers; editorApp.InvalidateUI() }),
+		mygo.Separator(),
+	)
 	viewItems = append(viewItems,
 		checked("智能标点", editorApp.SmartPunct, func() { editorApp.SmartPunct = !editorApp.SmartPunct; editorApp.Refresh() }),
 		&mygo.MenuItem{Label: "公式编号", Submenu: []*mygo.MenuItem{

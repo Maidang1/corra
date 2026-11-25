@@ -164,9 +164,6 @@ func (v *View) Build(c *ui.Context) {
 	if v.syncEditor() {
 		v.processAutosave()
 	}
-	if v.rich != nil {
-		v.rich.SetVisible(v.richVisible())
-	}
 	conflict := v.App.Conflict
 
 	t := c.Theme()

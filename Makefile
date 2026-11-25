@@ -1,6 +1,6 @@
 .PHONY: dev build test
 
-# MyGo defaults to CGO_ENABLED=0; AppKit rich editing requires cgo on macOS.
+# MyGo defaults to CGO_ENABLED=0; math text rendering requires cgo on macOS.
 ifeq ($(shell go env GOOS),darwin)
 export CGO_ENABLED := 1
 endif

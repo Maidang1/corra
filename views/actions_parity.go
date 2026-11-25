@@ -40,20 +40,8 @@ func (v *View) FindReplaceAction() {
 	}
 }
 
-// PrintAction prints via the native print panel in rich mode; other modes
-// export a PDF instead (MyGo has no print API for its own surfaces).
+// PrintAction exports a PDF: MyGo has no print API for its own surfaces.
 func (v *View) PrintAction() {
-	if v.NativeRich() {
-		if !v.flushAutosave() {
-			return
-		}
-		if v.App.Mode != app.ModeRich {
-			v.App.Mode = app.ModeRich
-			v.ensureRichEditor()
-		}
-		v.rich.Print()
-		return
-	}
 	if v.OnExportPDF != nil && v.syncEditor() {
 		v.OnExportPDF()
 	}

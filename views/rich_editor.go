@@ -16,15 +16,14 @@ func dirOf(p string) string {
 	return ""
 }
 
-// RichEditor owns a native editing surface. Calls run on the UI thread; layout
-// uses MyGo's final logical-point rectangle, not guessed column dimensions.
+// RichEditor owns an editing surface drawn inside the MyGo view tree.
+// Calls run on the UI thread; layout uses MyGo's final logical-point
+// rectangle, not guessed column dimensions.
 type RichEditor interface {
 	Load(source string)
 	Snapshot() (source string, changed bool, err error)
 	Format(command string)
 	InsertMarkdown(source string)
-	SetFrame(x, y, width, height float64)
-	SetVisible(bool)
 	SetStyle(zoom float64, dark, editable bool)
 	// SetFont applies the settings' typefaces: body family for prose,
 	// mono family for code; empty keeps the system fonts.
@@ -32,7 +31,6 @@ type RichEditor interface {
 	SetBaseDir(dir string)
 	SetMathNumbering(mode string)
 	SetCodeLineNumbers(enabled bool)
-	// Typora-parity extensions; no-ops on platforms without a rich editor.
 	SetSpellcheck(enabled bool)
 	SetFocusMode(enabled bool)
 	SetTypewriter(enabled bool)
@@ -41,22 +39,14 @@ type RichEditor interface {
 	ShowFindReplaceBar()
 	// RevealHeading scrolls to the index-th heading paragraph (0-based).
 	RevealHeading(index int)
-	// Print prints the rendered document (macOS native print panel).
-	Print()
 	Focus()
 	Blur()
 	Close()
 }
 
-// NativeRich reports whether rich mode is the AppKit editor. Printing,
-// spell checking, focus/typewriter modes and code line numbers exist only
-// there; MyGo's rich-text component on Windows and Linux has none of them.
-func (v *View) NativeRich() bool {
-	if v == nil || v.rich == nil {
-		return false
-	}
-	_, inline := v.rich.(inlineRich)
-	return !inline
+// inlineRich is what the view tree draws: an editor that renders itself.
+type inlineRich interface {
+	Render(c *ui.Context)
 }
 
 func (v *View) AttachRichEditor(e RichEditor) {
@@ -146,49 +136,25 @@ func (v *View) richVisible() bool {
 }
 
 func (v *View) richPane(c *ui.Context) {
-	if in, ok := v.rich.(inlineRich); ok {
-		visible := v.richVisible()
-		if visible {
-			v.ensureRichEditor()
-			v.rich.SetStyle(float64(v.App.Zoom), c.Theme().Dark, v.canEdit())
-			v.rich.SetFont(v.App.BodyFont, v.App.MonoFont)
-			v.rich.SetCodeLineNumbers(v.App.CodeLineNumbers)
-			v.rich.SetMathNumbering(v.App.MathNumbering)
-			if v.focusEditor {
-				v.rich.Focus()
-				v.focusEditor = false
-			}
+	visible := v.richVisible()
+	if visible {
+		v.ensureRichEditor()
+		v.rich.SetStyle(float64(v.App.Zoom), c.Theme().Dark, v.canEdit())
+		v.rich.SetFont(v.App.BodyFont, v.App.MonoFont)
+		v.rich.SetCodeLineNumbers(v.App.CodeLineNumbers)
+		v.rich.SetMathNumbering(v.App.MathNumbering)
+		if v.focusEditor {
+			v.rich.Focus()
+			v.focusEditor = false
 		}
-		ui.Column(c).Fill().Gap(0).Children(func() {
-			v.dateHeader(c)
-			ui.Box(c).Fill().Padding(0, 6, 8, 6).Children(func() {
-				if visible {
-					in.Render(c)
-				}
-			})
-		})
-		return
 	}
-	v.rich.SetMathNumbering(v.App.MathNumbering)
-	v.rich.SetCodeLineNumbers(v.App.CodeLineNumbers)
-	v.ensureRichEditor()
-	v.rich.SetStyle(float64(v.App.Zoom), c.Theme().Dark, v.canEdit())
-	v.rich.SetFont(v.App.BodyFont, v.App.MonoFont)
-	// The native editor is a rectangular hole punched through the window:
-	// inset it from the card's rim so its square corners never cover the
-	// card's rounded ones.
+	in, _ := v.rich.(inlineRich)
 	ui.Column(c).Fill().Gap(0).Children(func() {
 		v.dateHeader(c)
 		ui.Box(c).Fill().Padding(0, 6, 8, 6).Children(func() {
-			ui.Box(c).Key("native-editor").Fill().Draw(func(_ *ui.Painter, r ui.Rect) {
-				v.rich.SetFrame(float64(r.X), float64(r.Y), float64(r.W), float64(r.H))
-				visible := v.richVisible()
-				v.rich.SetVisible(visible)
-				if visible && v.focusEditor {
-					v.rich.Focus()
-					v.focusEditor = false
-				}
-			})
+			if visible && in != nil {
+				in.Render(c)
+			}
 		})
 	})
 }
@@ -202,9 +168,6 @@ func (v *View) EditSource() {
 	v.App.Mode = app.ModeEdit
 	v.ensureEditor()
 	v.focusEditor = true
-	if v.rich != nil {
-		v.rich.SetVisible(false)
-	}
 	v.App.InvalidateUI()
 }
 

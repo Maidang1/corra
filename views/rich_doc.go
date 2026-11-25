@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"unicode/utf8"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/transfer"
@@ -17,8 +18,12 @@ import (
 	"github.com/Maidang1/corra/internal/editor"
 	"github.com/Maidang1/corra/internal/ext"
 	"github.com/Maidang1/corra/internal/ext/std"
-	"github.com/Maidang1/corra/nativerich"
+	"github.com/Maidang1/corra/internal/htmlmd"
+	"github.com/Maidang1/corra/internal/spell"
 )
+
+// richFontSize is the document editor's body size, before zooming.
+const richFontSize = 16
 
 // DocRich is the new document editor (preview): a doc tree edited by
 // internal/editor, drawn by Corra on every platform. Markdown is read
@@ -67,7 +72,8 @@ func NewDocRich(changed func(), images *app.ImageLoader, invalidate func()) *Doc
 	}
 	cfg := k.EditorConfig()
 	cfg.Clipboard = &systemClipboard{}
-	cfg.HTMLToMarkdown = nativerich.HTMLToMarkdown
+	cfg.HTMLToMarkdown = htmlmd.HTMLToMarkdown
+	cfg.Spell = spell.New()
 	cfg.OnLink = func() {
 		if d.OnLinkRequest != nil {
 			d.OnLinkRequest()
@@ -179,9 +185,6 @@ func (d *DocRich) InsertMarkdown(source string) {
 	d.ed.PasteClip(editor.Clip{Markdown: source})
 }
 
-func (d *DocRich) SetFrame(x, y, width, height float64) {}
-func (d *DocRich) SetVisible(bool)                      {}
-
 func (d *DocRich) SetStyle(zoom float64, dark, editable bool) {
 	if zoom > 0 {
 		d.zoom = zoom
@@ -196,7 +199,6 @@ func (d *DocRich) SetCodeLineNumbers(on bool)   { d.lineNumbers = on }
 func (d *DocRich) SetSpellcheck(on bool)        { d.ed.SetSpellcheck(on) }
 func (d *DocRich) SetFocusMode(on bool)         { d.ed.SetFocusMode(on) }
 func (d *DocRich) SetTypewriter(on bool)        { d.ed.SetTypewriter(on) }
-func (d *DocRich) Print()                       {}
 func (d *DocRich) Focus()                       { d.ed.RequestFocus() }
 func (d *DocRich) Blur()                        {}
 func (d *DocRich) Close()                       {}
@@ -243,7 +245,7 @@ func (d *DocRich) Render(c *ui.Context) {
 		MathNumbering:   d.mathNumbering,
 	}
 	d.openURL = c.OpenURL
-	env.Pages = docPages{}
+	env.Pages = docPages{kit: d.kit}
 	if d.images != nil {
 		env.Images = d.images
 		if d.images.loaded.Swap(false) {
@@ -394,16 +396,45 @@ func (i *docImages) Image(src, baseDir string) (*ui.Bitmap, bool) {
 	return e.Result()
 }
 
-// docPages reads notes for page cards.
-type docPages struct{}
+// docPages reads notes for page cards: the first heading (or the file
+// name) as the title, the first prose as the excerpt.
+type docPages struct{ kit *ext.Kit }
 
-func (docPages) Page(target, baseDir string) (string, string, bool) {
+func (p docPages) Page(target, baseDir string) (string, string, bool) {
 	path, _, _ := strings.Cut(target, "#")
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(baseDir, filepath.FromSlash(path))
 	}
-	card := nativerich.PageInfo(path)
-	return card.Title, card.Excerpt, !card.Missing
+	data, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		return "", "", false
+	}
+	var title, excerpt string
+	p.kit.Codec.Parse(string(data)).Walk(func(n *doc.Node) bool {
+		switch n.Type().Name() {
+		case "heading":
+			if title == "" {
+				title = compact(n.Inline().String())
+			}
+		case "paragraph":
+			if excerpt == "" {
+				excerpt = compact(n.Inline().String())
+			}
+		}
+		return title == "" || excerpt == ""
+	})
+	if title == "" {
+		title = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	}
+	if utf8.RuneCountInString(excerpt) > 140 {
+		excerpt = string([]rune(excerpt)[:140]) + "…"
+	}
+	return title, excerpt, true
+}
+
+// compact squeezes a text's whitespace into single spaces.
+func compact(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }
 
 // noteLinks is "[[" completion: notes matching what is typed, inserted as

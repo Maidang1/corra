@@ -14,10 +14,6 @@ type Settings struct {
 	ThemeMode   ThemeMode `json:"themeMode"`
 	BodyFont    string    `json:"bodyFont"` // rich editor body family, "" = system default
 	MonoFont    string    `json:"monoFont"` // source editor / code family, "" = system default
-	// LegacyEditor goes back to the previous editors (AppKit on macOS,
-	// MyGo's rich text elsewhere) instead of the document editor; it
-	// takes effect at the next start.
-	LegacyEditor bool `json:"legacyEditor,omitempty"`
 }
 
 // BodyFonts lists the rich editor's body typefaces. macOS families only:

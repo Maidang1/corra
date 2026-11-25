@@ -10,8 +10,8 @@ import (
 	"github.com/egoist/mygo"
 
 	"github.com/Maidang1/corra/app"
+	"github.com/Maidang1/corra/internal/ext/std"
 	"github.com/Maidang1/corra/render"
-	"github.com/Maidang1/corra/richtext"
 )
 
 func TestSetupLibraryRestoresSelectedFolder(t *testing.T) {
@@ -101,9 +101,12 @@ func TestWelcomeNoteParsesAndRoundTrips(t *testing.T) {
 	if len(doc.Blocks) < 10 {
 		t.Fatalf("welcome blocks: %d", len(doc.Blocks))
 	}
-	rt := richtext.Parse(app.Welcome)
-	if got := richtext.Serialize(rt); got != app.Welcome {
-		t.Fatalf("welcome round trip differs:\n%q", got)
+	// The document editor reads the welcome note and writes it back in one
+	// style; writing again must not change anything further.
+	k := std.Kit()
+	written := k.Codec.Write(k.Codec.Parse(app.Welcome))
+	if again := k.Codec.Write(k.Codec.Parse(written)); again != written {
+		t.Fatalf("welcome write is not a fixpoint:\n%q\n%q", written, again)
 	}
 	if _, err := render.ExportHTML(app.Welcome, "welcome", false); err != nil {
 		t.Fatal(err)

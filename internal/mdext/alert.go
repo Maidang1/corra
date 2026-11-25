@@ -6,7 +6,7 @@ import (
 )
 
 // GitHub renders a blockquote whose first line is [!NOTE] (or TIP, IMPORTANT,
-// WARNING, CAUTION) as a callout instead of a plain quote. richtext, the
+// WARNING, CAUTION) as a callout instead of a plain quote. the
 // preview, the exporters and the native editor all read the label through
 // here so they cannot disagree about what counts as a marker.
 

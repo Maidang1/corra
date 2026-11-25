@@ -18,8 +18,8 @@
 - [x] 阶段 1：`internal/doc` 文档模型
 - [x] 阶段 2：`internal/mdcodec` 与基础扩展（任务列表并入 `ext/list`：checked 属性只能由 list_item 自己声明）
 - [x] 阶段 3：`internal/editor` 编辑器 MVP，接入设置开关（**闸门**：性能和输入法）—— 代码完成；1000 段文档按键+绘制 0.71 ms（无窗口）；三平台手动清单未做
-- [ ] 阶段 4：功能迁移成扩展 —— 大部分完成，未完成项见下方"进度记录"
-- [ ] 阶段 5：切换默认并删除旧实现 —— 未开始：闸门是三平台手动验收（见"进度记录"）
+- [x] 阶段 4：功能迁移成扩展 —— 完成。块手柄、图片粘贴/拖入与图床上传、代码行号与公式编号已随编辑器落地；4.12 拼写检查于 2026-11-25 补上三平台系统接口（见下方进度记录）。已知限制：`goat` 在 oksvg 下栅格化失败（旧实现同样如此）
+- [x] 阶段 5：5.1 切换默认与回退开关已做；5.2 删除旧实现于 2026-11-25 由用户明确指示提前执行（跳过手动验收闸门），见下方进度记录
 - [ ] 阶段 6（可选）：导出直接从树渲染
 
 ---
@@ -400,17 +400,14 @@
 ### 未完成
 
 **阶段 4 剩余**
-- 块手柄（拖动排序、块菜单）。
-- 图片：粘贴、拖入时保存到 `assets/`，图床上传。
-- 代码块行号、公式编号设置。
-- 拼写检查（需要各平台系统接口）。
-- 已知限制：`goat` 图表在 oksvg 下栅格化失败（旧实现同样如此），预览显示错误信息。
+- 已知限制：`goat` 图表在 oksvg 下栅格化失败（旧实现同样如此），预览显示错误信息。其余项目（块手柄、图片保存与上传、代码行号、公式编号、拼写检查）均已完成，见 2026-11-25 的进度记录。
 
 **阶段 0 / 3 的手动验收（这台机器做不了）**
 - 三平台：中文、日文输入法；读屏器；macOS 带 cgo 构建与 `nativerich` 测试；`go tool mygo build` 打包。
 - 三平台手动清单（计划阶段 3 验收表）。
+- 拼写检查的三平台实测：macOS 已在本机验证（NSSpellChecker 真实调用，测试通过）；Windows ISpellChecker、Linux hunspell 只做了交叉编译与 vet，需要在真机上确认。
 
-**阶段 5** 按计划要等上面的手动验收通过、并在一个版本周期内保留回退开关后才能做：切换默认会让 macOS 失去 NSTextView 的拼写检查、听写等系统功能，删除 `nativerich/`、`richtext/`、`internal/mgdoc/` 不可逆。因此本次没有动。
+**阶段 5.2（删除旧实现）** 于 2026-11-25 执行完毕：用户明确指示「直接移除旧版实现」，跳过了原定的三平台手动验收闸门（闸门本意是防止删除不可逆实现后无法回退；接受该风险）。删除内容与善后见下方进度记录。5.1 的 `LegacyEditor` 回退开关随之移除。
 
 **阶段 6（可选）** 没做：新编辑器写出 Markdown 后，导出仍走现有 `render` 管线，可以正常工作。
 
@@ -426,3 +423,44 @@
 - 补全弹层通用化为 `Completion`（`/`、`[[`、`:` 都是它）。
 - 视图的后台工作（图片、图表）通过 `Env.Refresh` 通知编辑器重新排版。
 - 写出器的若干 Markdown 规则都是随机测试发现后加的，例如：强调符号两侧字符编码、相邻同字符分隔符换写法、紧凑列表只在安全时使用、空列表项后不空行、换行延迟写出、文档首行的 `---` 改写为 `***`。
+
+---
+
+## 进度记录（2026-11-25）
+
+### 4.12 拼写检查：三平台系统接口
+
+新包 `internal/spell`，`spell.New()` 在 `views/rich_doc.go` 接到编辑器的 `cfg.Spell`，设置里的"拼写检查"开关从此对新编辑器生效。
+
+| 平台 | 实现 | 说明 |
+|---|---|---|
+| macOS | cgo/ObjC 调 `NSSpellChecker` | 整段一次检查，`checkSpellingOfString:startingAt:` 循环；返回的 NSRange 就是 UTF-16 偏移，与编辑器同单位。经 `mygo.RunOnMain` 保证 AppKit 主线程 |
+| Windows | syscall COM：`ISpellCheckerFactory` → `ISpellChecker::Check` | GUID 与 vtable 顺序对照 mingw-w64 `spellcheck.h` 核实；专用 goroutine `LockOSThread` + STA 公寓串行服务；用户 locale 的语言，退回 en-US |
+| Linux | purego dlopen `libhunspell`（CGO_ENABLED=0 可用） | Go 侧分词（`internal/spell/spell.go`：字母成词、撇号连词、CJK 等无空格文字整段跳过）；词典按 locale 优先在常见发行版路径里找，找不到静默降级 |
+
+- 无后端的平台（含 macOS 无 cgo 交叉编译）`New()` 返回 nil，行为与从前一致。
+- 测试：`spell_test.go` 分词表驱动（UTF-16 偏移、代理对、CJK）；`darwin_cgo_test.go` 真机 NSSpellChecker（无词典环境自动跳过）。`go test ./...` 804 个测试全部通过；三平台 `go build`、`go vet` 通过。
+- 尚未在 Windows/Linux 真机上实测（见上方"未完成"）。
+
+### 5.2 删除旧实现（2026-11-25，用户明确指示执行）
+
+用户指示「直接移除旧版实现」，跳过原定的三平台手动验收闸门（删除不可逆，接受风险）。删除后以 git 历史为准可随时找回。
+
+删除：
+
+- `nativerich/`（整个 AppKit NSTextView 桥，含全部 .h/.m/测试）、`richtext/`、`internal/mgdoc/`、`views/rich_mygo.go`、`views/rich_mygo_test.go`。
+- `LegacyEditor` 设置项与回退分支：`app/settings.go`、`app/state.go`、`views/settings.go`（实验区整节删除）、`menu.go` 的 `NativeRich()` 分支、`main.go` 的双路径初始化。
+- `RichEditor` 接口瘦身：移除 `SetFrame`/`SetVisible`/`Print`/`NativeRich`；可见性改为 `richPane` 内由 `richVisible()` 派生（`inlineRich` 接口保留）。
+
+搬迁（旧包里仍被新编辑器复用的部分）：
+
+- `nativerich/htmlimport.go` → `internal/htmlmd/htmlmd.go`（原样保留，仅改包名）。
+- 侧栏页面卡片的标题/摘要读取改为新树：`views/rich_doc.go` 的 `docPages`（走 `kit.Codec.Parse`，首标题+首段落，140 rune 截断）。
+- `richFontSize` 常量与 `mygoCorpus` 测试语料移入 `views/rich_doc.go` / `rich_doc_test.go`。
+
+验证：
+
+- `go test ./...` 387 个测试全绿；`go vet` 干净；三平台 `go build` 通过（Windows/Linux 为 CGO_ENABLED=0 交叉编译）。
+- 规模：128 个文件改动，删除 28,479 行，新增 178 行 + `internal/spell` 585 行，**净删约 2.77 万行**（PR 描述引用此数）。
+- `Makefile` 注释更新为「数学排版需要 cgo」；CI 本就只在 macOS 开 cgo，无需改动；README 无旧实现引用。
+- `docs/handover.md` 整体重写为新架构版本。

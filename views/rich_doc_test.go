@@ -7,6 +7,9 @@ import (
 	"github.com/Maidang1/corra/internal/doc"
 )
 
+// mygoCorpus covers the syntaxes the editor reads and writes back.
+const mygoCorpus = "# 标题\n\n正文 **粗** ==高亮== x^2^\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\n$$\nx^2\n$$\n\n> [!NOTE]\n> hi\n\n---\n\n```go\nfmt.Println()\n```\n"
+
 func TestDocRichRoundTrip(t *testing.T) {
 	n := 0
 	d := NewDocRich(func() { n++ }, nil, nil)

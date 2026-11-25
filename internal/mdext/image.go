@@ -13,7 +13,7 @@ import (
 //	![alt](photo.png =x200)
 //
 // goldmark only accepts a destination holding a space once it is wrapped in
-// angle brackets, so the bare form above arrives as plain text. richtext, the
+// angle brackets, so the bare form above arrives as plain text. the
 // preview and the exporters all read the suffix through here so they cannot
 // disagree about what counts as a size.
 
