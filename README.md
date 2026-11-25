@@ -20,15 +20,17 @@ rich-text component.
   headings (also available from the toolbar’s TOC button); navigation
   is keyboard-driven like Apple Notes: arrows walk it while a row or the
   search field has the focus, and Return hands the found note to the editor
-- **Native WYSIWYG on macOS** — edit headings, body text, inline styles and
-  checklists directly, with native selection, clipboard and undo/redo. Documents
-  still autosave as Markdown files. Requires a cgo-enabled macOS build.
-- **Rich editing on Windows and Linux** — MyGo's rich-text component edits
-  headings, inline styles, lists, quotes and links in place; tables, math,
-  diagrams and other blocks it cannot show stay intact as blocks, edited in
-  source mode.
-  Spell checking, focus/typewriter modes and code line numbers are
-  macOS-only and hidden elsewhere.
+- **One document editor on every platform** — Corra draws its own editor on
+  macOS, Windows and Linux: headings, lists and tasks, quotes and callouts,
+  tables, math, footnotes, images, diagram and chart previews, all edited in
+  place, with a `/` menu, a format bar, `[[` note links, block dragging,
+  Markdown shortcuts as you type and one undo history shared with source
+  mode. A document is rewritten only after an edit, and its first save
+  normalizes the Markdown spelling (list markers, emphasis, fences, blank
+  lines); the content is kept.
+  Settings → *Use the old editor* goes back to the previous editors (AppKit
+  on macOS, MyGo's rich text elsewhere) for now; on macOS the new editor does
+  not yet have the system spell checker and dictation.
 - **Source and reading modes** — `Cmd+E` switches rich text / Markdown source;
   the document menu also offers a full reading preview. Source mode has
   syntax highlighting, multiple carets and find & replace (Cmd+F).
@@ -201,11 +203,13 @@ Windows 和 Linux 使用 MyGo 自带的富文本组件。
   编辑区显示文档修改时间；左侧「目录」页签和工具栏的 TOC 按钮可打开可跳转的大纲；
   文档树支持键盘操作：
   列表行或搜索框聚焦时 ↑↓ 遍历文档（循环），回车把焦点交给编辑器
-- **macOS 原生所见即所得**：直接编辑标题、正文、文字格式和任务清单，
-  使用原生选区、剪贴板和撤销重做，自动保存为 Markdown 文件。需启用 cgo。
-- **Windows / Linux 富文本编辑**：MyGo 富文本组件可直接编辑标题、文字格式、
-  列表、引用和链接；表格、公式、图表等无法直接显示的块原样保留，在源码模式中编辑。
-  拼写检查、专注 / 打字机模式和代码行号仅 macOS 提供，其他平台不显示。
+- **三平台同一个文档编辑器**：Corra 在 macOS、Windows、Linux 上自绘编辑器，
+  标题、列表和任务、引用和提示块、表格、公式、脚注、图片、图表预览都直接编辑；
+  提供 `/` 菜单、格式条、`[[` 笔记链接、块拖动、边输入边转换的 Markdown 快捷方式，
+  与源码模式共用一份撤销历史。文档只在编辑后才写回，第一次保存会统一
+  Markdown 写法（列表符号、强调符号、代码围栏、空行），内容不变。
+  暂时可以在「设置 → 使用旧编辑器」切回原来的编辑器（macOS 为 AppKit，
+  其他平台为 MyGo 富文本）；macOS 上新编辑器还没有系统拼写检查和听写。
 - **源码和阅读视图**：`Cmd+E` 切换富文本 / Markdown 源码；文档菜单
   可打开完整阅读预览。源码模式仍支持语法高亮、
   多光标和查找替换（Cmd+F）。

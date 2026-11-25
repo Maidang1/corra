@@ -56,12 +56,15 @@ func (v *View) settingsDialog(c *ui.Context) {
 					v.App.WordCount = on
 					v.App.InvalidateUI()
 				})
+				_, docRich := v.rich.(*DocRich)
 				if v.NativeRich() {
 					settingsSwitch(c, "拼写检查", v.App.Spellcheck, func(on bool) {
 						v.App.Spellcheck = on
 						v.rich.SetSpellcheck(on)
 						v.App.InvalidateUI()
 					})
+				}
+				if v.NativeRich() || docRich {
 					settingsSwitch(c, "专注模式", v.App.FocusMode, func(on bool) {
 						v.App.FocusMode = on
 						v.rich.SetFocusMode(on)
@@ -73,6 +76,13 @@ func (v *View) settingsDialog(c *ui.Context) {
 						v.App.InvalidateUI()
 					})
 				}
+
+				ui.Divider(c).FillWidth()
+				ui.Text(c, "实验").FontSize(12).Bold().TextColor(t.TextMuted)
+				settingsSwitch(c, "使用旧编辑器（重启后生效）", v.App.LegacyEditor, func(on bool) {
+					v.App.LegacyEditor = on
+					v.saveSettings()
+				})
 
 				ui.Divider(c).FillWidth()
 				ui.Row(c).FillWidth().Gap(8).Children(func() {

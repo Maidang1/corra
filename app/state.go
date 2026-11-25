@@ -59,6 +59,7 @@ type App struct {
 	// Typora-parity display options.
 	SmartPunct      bool   // typographic quotes/dashes in the source editor & export
 	CodeLineNumbers bool   // line numbers in code fences
+	LegacyEditor    bool   // the previous editors instead of the document editor, from the next start
 	MathNumbering   string // none (default), ams, or all
 	WordCount       bool   // word-count status bar
 	Spellcheck      bool   // continuous spell checking in the native editor
@@ -293,7 +294,7 @@ func (a *App) Redo() {
 func (a *App) SnapshotSettings() Settings {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return Settings{ThemeMode: a.ThemeMode, BodyFont: a.BodyFont, MonoFont: a.MonoFont, LibraryRoot: a.LibraryRoot}
+	return Settings{ThemeMode: a.ThemeMode, BodyFont: a.BodyFont, MonoFont: a.MonoFont, LibraryRoot: a.LibraryRoot, LegacyEditor: a.LegacyEditor}
 }
 
 // ApplySettings loads persisted preferences into the app state (startup).
@@ -302,6 +303,7 @@ func (a *App) ApplySettings(s Settings) {
 	a.ThemeMode = s.ThemeMode
 	a.BodyFont = s.BodyFont
 	a.MonoFont = s.MonoFont
+	a.LegacyEditor = s.LegacyEditor
 	a.mu.Unlock()
 	a.InvalidateUI()
 }

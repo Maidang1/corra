@@ -53,7 +53,22 @@ func main() {
 			TitleBarHeight:       58,
 		})
 		mainWindow = win
-		if native := nativerich.New(win.NativeHandle(), view.NativeChanged, view.EditSource); native != nil {
+		if !app.LoadSettings(configDir).LegacyEditor {
+			// The document editor, the same on every platform; settings can
+			// go back to the previous editors for now.
+			rich := views.NewDocRich(view.NativeChanged, images, editorApp.InvalidateUI)
+			rich.OnOpenDocument = func(target string) bool {
+				path, ok := view.ResolveLinkedDocument(target)
+				if ok {
+					fileOps.OpenPath(path)
+				}
+				return ok
+			}
+			rich.OnLinkRequest = view.InsertLinkAction
+			rich.OnLinkCandidates = view.LinkCandidates
+			rich.Attach = editorApp.SaveAttachment
+			view.AttachRichEditor(rich)
+		} else if native := nativerich.New(win.NativeHandle(), view.NativeChanged, view.EditSource); native != nil {
 			native.OnLinkCandidates = view.LinkCandidates
 			native.OnOpenDocument = func(target string) bool {
 				path, ok := view.ResolveLinkedDocument(target)

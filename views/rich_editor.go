@@ -77,6 +77,10 @@ func (v *View) NativeChanged() {
 	v.App.InvalidateUI()
 }
 
+// reloader is a rich editor that can read a changed source of the same
+// document without losing its undo history.
+type reloader interface{ Reload(source string) }
+
 func (v *View) ensureRichEditor() {
 	if v.richLoaded && v.richPath == v.App.Path && v.richBase == v.App.Source {
 		return
@@ -84,7 +88,13 @@ func (v *View) ensureRichEditor() {
 	v.rich.SetBaseDir(dirOf(v.App.Path))
 	meta := v.documentMetadata()
 	v.richMetadataPrefix = meta.prefix
-	v.rich.Load(meta.body)
+	if r, ok := v.rich.(reloader); ok && v.richLoaded && v.richPath == v.App.Path {
+		// The same document's source changed (source mode, an outside
+		// edit): keep its history and what did not change.
+		r.Reload(meta.body)
+	} else {
+		v.rich.Load(meta.body)
+	}
 	v.richPath, v.richBase, v.richLoaded = v.App.Path, v.App.Source, true
 }
 
@@ -141,6 +151,9 @@ func (v *View) richPane(c *ui.Context) {
 		if visible {
 			v.ensureRichEditor()
 			v.rich.SetStyle(float64(v.App.Zoom), c.Theme().Dark, v.canEdit())
+			v.rich.SetFont(v.App.BodyFont, v.App.MonoFont)
+			v.rich.SetCodeLineNumbers(v.App.CodeLineNumbers)
+			v.rich.SetMathNumbering(v.App.MathNumbering)
 			if v.focusEditor {
 				v.rich.Focus()
 				v.focusEditor = false
