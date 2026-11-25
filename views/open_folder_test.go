@@ -28,26 +28,27 @@ func TestOpenFolderPathSubmitAndLoading(t *testing.T) {
 	}
 }
 
-func TestFolderLoadingAndFailureStayAboveNativeEditor(t *testing.T) {
+func TestFolderLoadingAndFailureStayAboveEditor(t *testing.T) {
 	v, tt := notesFixture(t)
-	e := &fakeRichEditor{}
+	e := &fakeInlineRichEditor{fakeRichEditor: &fakeRichEditor{}}
 	v.AttachRichEditor(e)
 	tt.Frame()
+	renders := e.renders
 	v.App.LibraryLoading = true
 	tt.Frame()
-	if e.visible || !tt.HasText("正在加载文档库…") {
-		t.Fatal("native editor obscures loading state")
+	if e.renders != renders || !tt.HasText("正在加载文档库…") {
+		t.Fatal("editor obscures loading state")
 	}
 	v.App.LibraryLoading = false
 	v.App.LibraryLoadError = "目录不可读"
 	tt.Frame()
-	if e.visible || !tt.HasText("目录不可读") {
+	if e.renders != renders || !tt.HasText("目录不可读") {
 		t.Fatal("load failure is not visible")
 	}
 	v.OnCancelFolderLoad = func() { v.App.LibraryLoadError = "" }
 	click(t, tt, "关闭")
 	tt.Frame()
-	if !e.visible {
+	if e.renders == renders {
 		t.Fatal("previous document did not reappear after dismissing failure")
 	}
 }

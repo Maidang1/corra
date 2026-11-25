@@ -15,7 +15,6 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/Maidang1/corra/app"
-	"github.com/Maidang1/corra/nativerich"
 	"github.com/Maidang1/corra/render"
 	"github.com/Maidang1/corra/views"
 )
@@ -53,29 +52,19 @@ func main() {
 			TitleBarHeight:       58,
 		})
 		mainWindow = win
-		if native := nativerich.New(win.NativeHandle(), view.NativeChanged, view.EditSource); native != nil {
-			native.OnLinkCandidates = view.LinkCandidates
-			native.OnOpenDocument = func(target string) bool {
-				path, ok := view.ResolveLinkedDocument(target)
-				if ok {
-					fileOps.OpenPath(path)
-				}
-				return ok
+		// The document editor, the same on every platform.
+		rich := views.NewDocRich(view.NativeChanged, images, editorApp.InvalidateUI)
+		rich.OnOpenDocument = func(target string) bool {
+			path, ok := view.ResolveLinkedDocument(target)
+			if ok {
+				fileOps.OpenPath(path)
 			}
-			view.AttachRichEditor(native)
-		} else {
-			// Windows and Linux: MyGo's own rich-text component.
-			rich := views.NewMygoRich(view.NativeChanged, images.LoadImageBytes, editorApp.InvalidateUI)
-			rich.OnOpenDocument = func(target string) bool {
-				path, ok := view.ResolveLinkedDocument(target)
-				if ok {
-					fileOps.OpenPath(path)
-				}
-				return ok
-			}
-			rich.OnLinkRequest = view.InsertLinkAction
-			view.AttachRichEditor(rich)
+			return ok
 		}
+		rich.OnLinkRequest = view.InsertLinkAction
+		rich.OnLinkCandidates = view.LinkCandidates
+		rich.Attach = editorApp.SaveAttachment
+		view.AttachRichEditor(rich)
 
 		fileOps = &app.FileOps{App: editorApp, Window: win, Dispatch: win.Update}
 		fileOps.BeforeOpen = view.FlushAutosave

@@ -12,16 +12,14 @@ import (
 )
 
 type fakeRichEditor struct {
-	source                   string
-	changed, visible, closed bool
-	loads, focuses           int
-	command                  string
-	err                      error
-	x, y, width, height      float64
-	codeLineNumbers          bool
-	findBar, replaceBar      bool
-	revealedHeading          int
-	prints                   int
+	source              string
+	changed, closed     bool
+	loads, focuses      int
+	command             string
+	err                 error
+	codeLineNumbers     bool
+	findBar, replaceBar bool
+	revealedHeading     int
 }
 
 func (e *fakeRichEditor) Load(s string) { e.source = s; e.changed = false; e.loads++ }
@@ -32,8 +30,6 @@ func (e *fakeRichEditor) Snapshot() (string, bool, error) {
 }
 func (e *fakeRichEditor) Format(s string)                            { e.command = s }
 func (e *fakeRichEditor) InsertMarkdown(s string)                    { e.source += s; e.changed = true }
-func (e *fakeRichEditor) SetFrame(x, y, w, h float64)                { e.x, e.y, e.width, e.height = x, y, w, h }
-func (e *fakeRichEditor) SetVisible(v bool)                          { e.visible = v }
 func (e *fakeRichEditor) SetStyle(zoom float64, dark, editable bool) {}
 func (e *fakeRichEditor) SetFont(body, mono string)                  {}
 func (e *fakeRichEditor) SetSpellcheck(bool)                         {}
@@ -42,7 +38,6 @@ func (e *fakeRichEditor) SetTypewriter(bool)                         {}
 func (e *fakeRichEditor) ShowFindBar()                               { e.findBar = true }
 func (e *fakeRichEditor) ShowFindReplaceBar()                        { e.replaceBar = true }
 func (e *fakeRichEditor) RevealHeading(index int)                    { e.revealedHeading = index }
-func (e *fakeRichEditor) Print()                                     { e.prints++ }
 
 func (e *fakeRichEditor) SetBaseDir(dir string)         {}
 func (e *fakeRichEditor) SetMathNumbering(string)       {}
@@ -60,11 +55,11 @@ func (e *fakeInlineRichEditor) Render(*ui.Context) { e.renders++ }
 
 func TestRichDefaultLayoutAndNoReloadOnSave(t *testing.T) {
 	v, tt := notesFixture(t)
-	e := &fakeRichEditor{}
+	e := &fakeInlineRichEditor{fakeRichEditor: &fakeRichEditor{}}
 	v.AttachRichEditor(e)
 	tt.Frame()
-	if v.App.Mode != app.ModeRich || !e.visible || e.width <= 0 || e.height <= 0 || e.x < sidebarW {
-		t.Fatalf("native editor not in laid-out pane: mode=%v editor=%+v", v.App.Mode, e)
+	if v.App.Mode != app.ModeRich || e.renders == 0 {
+		t.Fatalf("editor not in laid-out pane: mode=%v renders=%d", v.App.Mode, e.renders)
 	}
 	loads := e.loads
 	e.source = "# Native\n\n中文 😀\n"
@@ -75,7 +70,7 @@ func TestRichDefaultLayoutAndNoReloadOnSave(t *testing.T) {
 	tt.Frame()
 	got, _ := os.ReadFile(v.App.Path)
 	if string(got) != e.source || e.loads != loads {
-		t.Fatalf("save lost native text or reset selection: %q loads=%d", got, e.loads)
+		t.Fatalf("save lost editor text or reset selection: %q loads=%d", got, e.loads)
 	}
 }
 
@@ -93,9 +88,6 @@ func TestInlineRichEditorSkipsRenderingBehindModal(t *testing.T) {
 	tt.Frame()
 	if e.renders != renders {
 		t.Fatal("inline rich editor kept rendering behind the hosting dialog")
-	}
-	if e.visible {
-		t.Fatal("inline rich editor remained visible behind the hosting dialog")
 	}
 	for range 6 {
 		click(t, tt, "启用图床上传")
@@ -146,46 +138,48 @@ func TestRichFootnoteInsertionUsesNativeTransaction(t *testing.T) {
 
 func TestRichSourceSwitchSynchronizesBothDirections(t *testing.T) {
 	v, tt := notesFixture(t)
-	e := &fakeRichEditor{}
+	e := &fakeInlineRichEditor{fakeRichEditor: &fakeRichEditor{}}
 	v.AttachRichEditor(e)
 	tt.Frame()
+	renders := e.renders
 	e.source, e.changed = "# Rich\n", true
 	v.toggleMode()
 	tt.Frame()
-	if v.App.Mode != app.ModeEdit || e.visible || v.edState.Buffer.String() != "# Rich\n" {
-		t.Fatal("source mode missing latest native edits")
+	if v.App.Mode != app.ModeEdit || e.renders != renders || v.edState.Buffer.String() != "# Rich\n" {
+		t.Fatal("source mode missing latest rich edits")
 	}
 	v.edState.Select(0, 0)
 	v.edState.Insert("source ")
 	v.toggleMode()
 	tt.Frame()
-	if v.App.Mode != app.ModeRich || !strings.HasPrefix(e.source, "source ") || !e.visible {
+	if v.App.Mode != app.ModeRich || !strings.HasPrefix(e.source, "source ") || e.renders <= renders {
 		t.Fatal("rich mode missing source edits")
 	}
 }
 
 func TestRichActionsAndModalVisibility(t *testing.T) {
 	v, tt := notesFixture(t)
-	e := &fakeRichEditor{}
+	e := &fakeInlineRichEditor{fakeRichEditor: &fakeRichEditor{}}
 	v.AttachRichEditor(e)
 	tt.Frame()
 	v.formatSelection("**", "**")
 	if e.command != "bold" || v.App.Mode != app.ModeRich {
-		t.Fatal("formatting did not reach native selection")
+		t.Fatal("formatting did not reach the editor")
 	}
 	v.insertSnippet("- [ ] ")
 	if e.command != "checklist" {
 		t.Fatal("checklist toolbar inserts raw markdown")
 	}
+	renders := e.renders
 	v.HostOpen = true
 	tt.Frame()
-	if e.visible {
-		t.Fatal("native view obscures settings modal")
+	if e.renders != renders {
+		t.Fatal("editor rendered behind the hosting modal")
 	}
 	v.HostOpen = false
 	tt.Frame()
-	if !e.visible {
-		t.Fatal("native view not restored after modal")
+	if e.renders <= renders {
+		t.Fatal("editor did not render again after the modal closed")
 	}
 	v.Close()
 	if !e.closed {
@@ -283,35 +277,9 @@ func TestRichConflictCannotSavePendingComposition(t *testing.T) {
 	}
 }
 
-// Windows and Linux edit with MyGo's component, which cannot print: Print
-// exports a PDF there and the native-only switches stay out of settings.
-func TestInlineRichPrintsToPDFAndHidesNativeSettings(t *testing.T) {
-	v, tt := notesFixture(t)
-	e := &fakeInlineRichEditor{fakeRichEditor: &fakeRichEditor{}}
-	v.AttachRichEditor(e)
-	var pdf bool
-	v.OnExportPDF = func() { pdf = true }
-	tt.Frame()
-	if v.NativeRich() {
-		t.Fatal("inline editor reported as native")
-	}
-	v.PrintAction()
-	if !pdf || e.prints != 0 {
-		t.Fatalf("print: pdf=%v prints=%d", pdf, e.prints)
-	}
-	v.SettingsOpen = true
-	tt.Frame()
-	if !tt.HasText("字数统计") {
-		t.Fatalf("settings not shown: %v", tt.Texts())
-	}
-	for _, label := range []string{"拼写检查", "专注模式", "打字机模式"} {
-		if tt.HasText(label) {
-			t.Errorf("native-only setting %q shown", label)
-		}
-	}
-}
-
-func TestNativeRichPrintsAndShowsNativeSettings(t *testing.T) {
+// The single document editor exports a PDF on print, and the writing
+// switches are always in settings.
+func TestPrintExportsPDFAndSettingsShowWritingSwitches(t *testing.T) {
 	v, tt := notesFixture(t)
 	e := &fakeRichEditor{}
 	v.AttachRichEditor(e)
@@ -319,12 +287,12 @@ func TestNativeRichPrintsAndShowsNativeSettings(t *testing.T) {
 	v.OnExportPDF = func() { pdf = true }
 	tt.Frame()
 	v.PrintAction()
-	if pdf || e.prints != 1 {
-		t.Fatalf("print: pdf=%v prints=%d", pdf, e.prints)
+	if !pdf {
+		t.Fatal("print did not export a PDF")
 	}
 	v.SettingsOpen = true
 	tt.Frame()
-	for _, label := range []string{"拼写检查", "专注模式", "打字机模式"} {
+	for _, label := range []string{"字数统计", "拼写检查", "专注模式", "打字机模式"} {
 		if !tt.HasText(label) {
 			t.Errorf("setting %q missing", label)
 		}

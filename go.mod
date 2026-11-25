@@ -9,7 +9,7 @@ require (
 	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/bep/goat v0.5.0
 	github.com/dop251/goja v0.0.0-20240927123429-241b342198c2
-	github.com/egoist/mygo v0.7.3
+	github.com/egoist/mygo v0.10.0
 	github.com/gpdf-dev/gpdf v1.0.13
 	github.com/srwiley/oksvg v0.0.0-20221011165216-be6e8873101c
 	github.com/srwiley/rasterx v0.0.0-20220730225603-2ab79fcdd4ef
@@ -24,9 +24,11 @@ require (
 )
 
 require (
+	github.com/ProtonMail/go-crypto v1.4.1 // indirect
 	github.com/PuerkitoBio/goquery v1.10.0 // indirect
 	github.com/andybalholm/brotli v1.2.0 // indirect
 	github.com/andybalholm/cascadia v1.3.2 // indirect
+	github.com/cloudflare/circl v1.6.2 // indirect
 	github.com/dlclark/regexp2 v1.11.4 // indirect
 	github.com/dlclark/regexp2/v2 v2.2.1 // indirect
 	github.com/ebitengine/purego v0.11.1 // indirect
@@ -34,10 +36,14 @@ require (
 	github.com/go-text/typesetting v0.3.5 // indirect
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
 	github.com/google/pprof v0.0.0-20240927180334-d43a67379298 // indirect
+	github.com/klauspost/compress v1.18.6 // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
 	github.com/mazznoer/csscolorparser v0.1.5 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/tetratelabs/wazero v1.12.0 // indirect
+	github.com/ulikunitz/xz v0.5.15 // indirect
+	go.digitalxero.dev/rpm v0.3.4 // indirect
+	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/exp v0.0.0-20240909161429-701f63a606c0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect

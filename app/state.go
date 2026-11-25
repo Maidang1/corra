@@ -61,7 +61,7 @@ type App struct {
 	CodeLineNumbers bool   // line numbers in code fences
 	MathNumbering   string // none (default), ams, or all
 	WordCount       bool   // word-count status bar
-	Spellcheck      bool   // continuous spell checking in the native editor
+	Spellcheck      bool   // continuous spell checking in the editor
 	FocusMode       bool   // dim all but the caret's paragraph
 	Typewriter      bool   // keep the caret line vertically centered
 
