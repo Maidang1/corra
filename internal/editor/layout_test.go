@@ -68,3 +68,40 @@ func BenchmarkTypeInLargeDocument(b *testing.B) {
 		tt.Frame()
 	}
 }
+
+// A node whose view shows its number is laid out again when the number
+// changes, even inside a container nothing else changed in; nodes that
+// show no number keep their boxes.
+func TestRenumberRelaysOutNumberedNodes(t *testing.T) {
+	b := doctest.NewBuilder()
+	d := b.Doc(b.P("a"), b.P("x"), b.Quote(b.P("b")), b.P("c"))
+	shown := map[doc.NodeID]int{}
+	views := DefaultViews()
+	views["paragraph"] = ViewSpec{Text: func(n *doc.Node, env *Env) TextLook {
+		if n.Inline().String() == "b" {
+			shown[n.ID()] = env.Ordinals.Ordinal(n)
+		}
+		return bodyLook(env)
+	}}
+	e := New(Config{Registry: b.Reg, Views: views}, d)
+	env := Env{Font: ui.Font{Size: 16}, Mono: "monospace"}
+	tt := ui.NewTester(func(c *ui.Context) { e.View(c, env) }, 640, 480)
+	tt.Frame()
+	tt.Frame()
+	nested, last := d.Child(2).Child(0), d.Child(3)
+	if shown[nested.ID()] != 3 {
+		t.Fatalf("quoted paragraph shown as %d, want 3", shown[nested.ID()])
+	}
+	kept := e.lay.cache[last]
+	e.Run(func(s doc.State, tx *doc.Tx) bool {
+		tx.ReplaceChildren(s.Doc.ID(), 1, 2)
+		return true
+	}, "test")
+	tt.Frame()
+	if shown[nested.ID()] != 2 {
+		t.Fatalf("quoted paragraph shown as %d after the removal, want 2", shown[nested.ID()])
+	}
+	if e.lay.cache[last] != kept {
+		t.Fatal("a paragraph that shows no number was laid out again")
+	}
+}

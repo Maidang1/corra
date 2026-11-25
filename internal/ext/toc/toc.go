@@ -38,8 +38,10 @@ func Extension() ext.Extension {
 			return editor.AtomLook{
 				Height: func(float32) float32 { return env.Font.Size * 2 },
 				Paint: func(p *ui.Painter, r ui.Rect, env *editor.Env) {
-					p.Fill(r, env.Theme.Surface, 6)
-					p.Text(r.X+10, r.Y+r.H*0.65, "目录 [TOC]", env.Font.Size*0.85, env.Theme.TextMuted)
+					p.Fill(r, env.Tint(), 6)
+					f := env.Font
+					f.Size *= 0.85
+					editor.DrawLabelIn(p, r.X+12, r, "目录 [TOC]", f, env.Theme.TextMuted)
 				},
 			}
 		}}},

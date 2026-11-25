@@ -58,13 +58,18 @@ func Extension() ext.Extension {
 		},
 		Views: map[string]editor.ViewSpec{
 			"table": {Container: func(n *doc.Node, env *editor.Env) editor.ContainerLook {
-				return editor.ContainerLook{After: env.Font.Size * 0.8, Paint: func(p *ui.Painter, r ui.Rect, env *editor.Env) {
-					p.Stroke(r, env.Theme.Border, 1, 4)
+				return editor.ContainerLook{Before: env.Font.Size * 0.4, After: env.Font.Size, Paint: func(p *ui.Painter, r ui.Rect, env *editor.Env) {
+					p.Stroke(r, env.Theme.Border, 6, 1)
 				}}
 			}},
 			"table_row": {Container: func(n *doc.Node, env *editor.Env) editor.ContainerLook {
 				cols := n.NumChildren()
+				header := cols > 0 && n.Child(0).Attrs().Bool("header")
 				return editor.ContainerLook{Horizontal: true, Paint: func(p *ui.Painter, r ui.Rect, env *editor.Env) {
+					if header {
+						// Inside the table's rounded rim.
+						p.FillRadii(ui.Rect{X: r.X + 1, Y: r.Y + 1, W: r.W - 2, H: r.H - 1}, [4]float32{5, 5, 0, 0}, env.Tint())
+					}
 					p.Fill(ui.Rect{X: r.X, Y: r.Y + r.H - 1, W: r.W, H: 1}, env.Theme.Border, 0)
 					for i := 1; i < cols; i++ {
 						x := r.X + r.W*float32(i)/float32(cols)
@@ -74,11 +79,11 @@ func Extension() ext.Extension {
 			}},
 			"table_cell": {Text: func(n *doc.Node, env *editor.Env) editor.TextLook {
 				f := env.Font
-				f.LineHeight = 1.4
+				f.LineHeight = 1.5
 				if n.Attrs().Bool("header") {
-					f.Weight = 650
+					f.Weight = 600
 				}
-				return editor.TextLook{Font: f, Color: env.Theme.Text, PadX: 8, PadY: 6}
+				return editor.TextLook{Font: f, Color: env.Theme.Text, PadX: 10, PadY: 6}
 			}},
 		},
 		Slash: []editor.SlashItem{{Title: "表格", Keywords: "table grid", Command: "table"}},

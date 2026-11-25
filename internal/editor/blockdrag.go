@@ -32,8 +32,9 @@ func (e *Editor) topBlockAt(y float32) int {
 func (e *Editor) handleRect(i int) ui.Rect {
 	k := e.root.kids[i]
 	pad := e.cfg.Padding
-	h := min(firstLineHeight(k), 26)
-	return ui.Rect{X: pad - handleW - 6, Y: pad + k.y, W: handleW, H: h}
+	h := e.env.Font.Size * 1.4
+	_, mid := firstLine(k)
+	return ui.Rect{X: pad - handleW - 6, Y: pad + k.y + mid - h/2, W: handleW, H: h}
 }
 
 // dropIndex returns where a dragged block lands for the pointer at y: the
@@ -98,5 +99,7 @@ func (e *Editor) drawHandles(p *ui.Painter, origin ui.Rect) {
 	r := e.handleRect(i)
 	r.X += origin.X
 	r.Y += origin.Y
-	p.Text(r.X, r.Y+r.H*0.7, "⋮⋮", e.env.Font.Size*0.8, t.TextMuted)
+	f := e.env.Font
+	f.Size *= 0.8
+	DrawLabelIn(p, r.X, r, "⋮⋮", f, t.TextMuted)
 }

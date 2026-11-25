@@ -55,7 +55,7 @@ func Extension() ext.Extension {
 		Views: map[string]editor.ViewSpec{"frontmatter": {Text: func(n *doc.Node, env *editor.Env) editor.TextLook {
 			return editor.TextLook{
 				Font:  ui.Font{Family: env.Mono, Size: env.Font.Size * 0.8, LineHeight: 1.5},
-				Color: env.Theme.TextMuted, Background: env.Theme.Surface, Radius: 6, PadX: 10, PadY: 6,
+				Color: env.Theme.TextMuted, Background: env.Tint(), Radius: 6, PadX: 14, PadY: 10,
 				After: env.Font.Size,
 			}
 		}}},

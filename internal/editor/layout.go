@@ -1,6 +1,8 @@
 package editor
 
 import (
+	"strings"
+
 	"github.com/egoist/mygo/ui"
 
 	"github.com/Maidang1/corra/internal/doc"
@@ -16,6 +18,9 @@ type box struct {
 	before float32
 	after  float32
 	kids   []*box
+	// ink is the text color the containers around passed down, part of
+	// what the box was laid out for, as its width is.
+	ink ui.Color
 
 	// Text blocks.
 	text   *ui.TextLayout
@@ -26,7 +31,7 @@ type box struct {
 
 	// Containers.
 	cont    ContainerLook
-	markers []*ui.TextLayout
+	markers []marker
 
 	// Block atoms.
 	atom AtomLook
@@ -37,12 +42,19 @@ func (b *box) isText() bool { return b.n.Type().IsTextBlock() }
 // textX is where a text block's text starts, from its left edge.
 func (b *box) textX() float32 { return b.look.PadX + b.look.Gutter }
 
+// marker is drawn left of a container's child: a number, or a dot.
+type marker struct {
+	text *ui.TextLayout
+	dot  bool
+}
+
 // layouter lays out nodes, keeping boxes by node pointer.
 type layouter struct {
 	env   *Env
 	views map[string]ViewSpec
 	cache map[*doc.Node]*box
 	next  map[*doc.Node]*box
+	ink   ui.Color // the text color containers pass down
 }
 
 func (l *layouter) view(name string) ViewSpec { return l.views[name] }
@@ -64,11 +76,11 @@ func (l *layouter) keep(b *box) {
 }
 
 func (l *layouter) node(n *doc.Node, width float32) *box {
-	if b, ok := l.cache[n]; ok && b.w == width {
+	if b, ok := l.cache[n]; ok && b.w == width && b.ink == l.ink {
 		l.keep(b)
 		return b
 	}
-	b := &box{n: n, w: width}
+	b := &box{n: n, w: width, ink: l.ink}
 	t := n.Type()
 	switch {
 	case t.IsTextBlock():
@@ -87,9 +99,17 @@ func (l *layouter) text(b *box, width float32) {
 	if v := l.view(b.n.Type().Name()); v.Text != nil {
 		look = v.Text(b.n, l.env)
 	}
+	if l.ink.A > 0 && look.Color == l.env.Theme.Text && b.n.Type().Content() == doc.ContentInline {
+		look.Color = l.ink
+	}
 	b.look = look
 	b.before, b.after = look.Before, look.After
 	spans, objs := l.spans(b.n.Inline(), look)
+	if look.Colorize != nil && len(objs) == 0 {
+		if cs := look.Colorize(b.n.Inline().String()); joined(cs) == b.n.Inline().String() {
+			spans = cs
+		}
+	}
 	b.objs = objs
 	b.text = ui.ShapeRichTextWith(spans, look.Font, ui.TextShape{Width: max(1, width-2*look.PadX-look.Gutter)})
 	_, h := b.text.Size()
@@ -101,6 +121,15 @@ func (l *layouter) text(b *box, width float32) {
 		b.belowH, b.below = look.Below(width)
 		b.h += b.belowH
 	}
+}
+
+// joined returns the spans' texts joined.
+func joined(spans []ui.Span) string {
+	var sb strings.Builder
+	for _, s := range spans {
+		sb.WriteString(s.Text)
+	}
+	return sb.String()
 }
 
 func lineHeight(f ui.Font) float32 {
@@ -158,7 +187,12 @@ func (l *layouter) container(b *box, width float32) {
 	}
 	b.cont = look
 	b.before, b.after = look.Before, look.After
-	inner := max(1, width-look.Indent)
+	if look.Color.A > 0 {
+		ink := l.ink
+		l.ink = look.Color
+		defer func() { l.ink = ink }()
+	}
+	inner := max(1, width-look.Indent-look.IndentRight)
 	if look.Horizontal && b.n.NumChildren() > 0 {
 		cw := inner / float32(b.n.NumChildren())
 		for i := 0; i < b.n.NumChildren(); i++ {
@@ -169,30 +203,41 @@ func (l *layouter) container(b *box, width float32) {
 		}
 		return
 	}
-	y := float32(0)
+	y := look.PadTop
 	var prevAfter float32
 	for i := 0; i < b.n.NumChildren(); i++ {
 		k := l.node(b.n.Child(i), inner)
 		if i > 0 {
-			y += max(prevAfter, k.before)
+			if look.Gap > 0 {
+				y += look.Gap
+			} else {
+				y += max(prevAfter, k.before)
+			}
 		}
 		k.x, k.y = look.Indent, y
 		y += k.h
 		prevAfter = k.after
 		b.kids = append(b.kids, k)
 		if look.Marker != nil {
-			var marker *ui.TextLayout
-			if m := look.Marker(i, b.n.Child(i)); m != "" {
+			var m marker
+			switch s := look.Marker(i, b.n.Child(i)); s {
+			case "":
+			case Bullet:
+				m.dot = true
+			default:
 				f := l.env.Font
-				marker = ui.ShapeText(m, f, 0)
+				f.Features = "tnum"
+				m.text = ui.ShapeText(s, f, 0)
 			}
-			b.markers = append(b.markers, marker)
+			b.markers = append(b.markers, m)
 		}
 	}
-	if len(b.kids) > 0 {
+	// The last child's room below passes out of the container, unless
+	// the container's own padding holds it.
+	if len(b.kids) > 0 && look.PadBottom == 0 {
 		b.after = max(b.after, prevAfter)
 	}
-	b.h = y
+	b.h = y + look.PadBottom
 }
 
 func (l *layouter) blockAtom(b *box, width float32) {

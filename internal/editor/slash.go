@@ -201,17 +201,20 @@ func (e *Editor) drawPopup(p *ui.Painter, origin ui.Rect) {
 	t := e.env.Theme
 	p.Fill(ui.Rect{X: r.X + 2, Y: r.Y + 3, W: r.W, H: r.H}, ui.RGBA(0, 0, 0, 0.12), 8)
 	p.Fill(r, t.Background, 8)
-	p.Stroke(r, t.Border, 1, 8)
-	size := e.env.Font.Size * 0.85
+	p.Stroke(r, t.Border, 8, 1)
+	f := e.env.Font
+	f.Size *= 0.85
+	hint := f
+	hint.Size *= 0.85
 	items := e.popup.items
 	for i := first; i < len(items) && i < first+popupRows; i++ {
 		row := ui.Rect{X: r.X + 4, Y: r.Y + 4 + float32(i-first)*popupRowH, W: r.W - 8, H: popupRowH}
 		if i == e.popup.index {
 			p.Fill(row, t.Accent.Alpha(0.15), 6)
 		}
-		p.Text(row.X+10, row.Y+row.H*0.68, items[i].Title, size, t.Text)
+		DrawLabelIn(p, row.X+10, row, items[i].Title, f, t.Text)
 		if items[i].Hint != "" {
-			p.Text(row.X+row.W-80, row.Y+row.H*0.68, items[i].Hint, size*0.85, t.TextMuted)
+			DrawLabelIn(p, row.X+row.W-80, row, items[i].Hint, hint, t.TextMuted)
 		}
 	}
 }

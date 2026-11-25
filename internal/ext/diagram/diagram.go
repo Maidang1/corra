@@ -52,11 +52,15 @@ func Extension() ext.Extension {
 				case done && err != nil:
 					msg := err.Error()
 					return env.Font.Size * 1.6, func(p *ui.Painter, r ui.Rect, env *editor.Env) {
-						p.Text(r.X+8, r.Y+env.Font.Size*1.1, "预览失败："+msg, env.Font.Size*0.75, env.Theme.Danger)
+						f := env.Font
+						f.Size *= 0.75
+						editor.DrawLabelIn(p, r.X+8, r, "预览失败："+msg, f, env.Theme.Danger)
 					}
 				default:
 					return env.Font.Size * 1.6, func(p *ui.Painter, r ui.Rect, env *editor.Env) {
-						p.Text(r.X+8, r.Y+env.Font.Size*1.1, "正在生成预览…", env.Font.Size*0.75, env.Theme.TextMuted)
+						f := env.Font
+						f.Size *= 0.75
+						editor.DrawLabelIn(p, r.X+8, r, "正在生成预览…", f, env.Theme.TextMuted)
 					}
 				}
 			}

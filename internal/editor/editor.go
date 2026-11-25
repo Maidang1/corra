@@ -41,6 +41,7 @@ type Editor struct {
 	ruleUndo  bool
 	popup     *popupState
 	ordinals  map[doc.NodeID]int
+	numbered  map[doc.NodeID]bool // nodes whose views asked for their ordinal
 	spellOn   bool
 	spelled   map[*doc.Node][]ui.TextInputRange
 	blockDrag *blockDrag
@@ -374,23 +375,37 @@ func (e *Editor) RequestFocus() {
 // Focused reports whether the editor had the keyboard in the last frame.
 func (e *Editor) Focused() bool { return e.focused }
 
-// Ordinal implements OrdinalSource.
-func (e *Editor) Ordinal(n *doc.Node) int { return e.ordinals[n.ID()] }
+// Ordinal implements OrdinalSource. A node whose view asks for its number
+// is laid out again when the number changes.
+func (e *Editor) Ordinal(n *doc.Node) int {
+	if e.numbered == nil {
+		e.numbered = map[doc.NodeID]bool{}
+	}
+	e.numbered[n.ID()] = true
+	return e.ordinals[n.ID()]
+}
 
-// renumber counts the nodes of each type in document order; a node whose
-// number changed is laid out again, though it did not change itself.
+// renumber counts the nodes of each type in document order. A numbered
+// node whose number changed is laid out again, though it did not change
+// itself, and so are its ancestors, whose boxes would hold its old one.
 func (e *Editor) renumber() {
 	counts := map[*doc.NodeType]int{}
 	next := make(map[doc.NodeID]int, len(e.ordinals))
+	var stale []doc.NodeID
 	e.state.Doc.Walk(func(n *doc.Node) bool {
 		counts[n.Type()]++
 		next[n.ID()] = counts[n.Type()]
-		if old, ok := e.ordinals[n.ID()]; ok && old != next[n.ID()] {
-			delete(e.lay.cache, n)
+		if old, ok := e.ordinals[n.ID()]; ok && old != next[n.ID()] && e.numbered[n.ID()] {
+			stale = append(stale, n.ID())
 		}
 		return true
 	})
 	e.ordinals = next
+	for _, id := range stale {
+		for _, a := range e.state.Ancestors(id) {
+			delete(e.lay.cache, a)
+		}
+	}
 }
 
 // SetSpellcheck turns underlining of misspelled words on or off.

@@ -77,15 +77,18 @@ func (e *Editor) drawFormatBar(p *ui.Painter, origin ui.Rect) {
 	t := e.env.Theme
 	p.Fill(ui.Rect{X: r.X + 1, Y: r.Y + 2, W: r.W, H: r.H}, ui.RGBA(0, 0, 0, 0.12), 8)
 	p.Fill(r, t.Background, 8)
-	p.Stroke(r, t.Border, 1, 8)
+	p.Stroke(r, t.Border, 8, 1)
 	sel, _ := e.state.TextSel()
-	size := e.env.Font.Size * 0.8
+	f := e.env.Font
+	f.Size *= 0.8
 	for i, b := range buttons {
 		x := r.X + 4 + float32(i)*formatButtonW
 		if mt := e.cfg.Registry.Mark(b.mark); mt != nil && e.state.RangeHasMark(sel, mt) {
 			p.Fill(ui.Rect{X: x + 2, Y: r.Y + 4, W: formatButtonW - 4, H: r.H - 8}, t.Accent.Alpha(0.18), 5)
 		}
-		p.Text(x+(formatButtonW-float32(len([]rune(b.label)))*size*0.6)/2, r.Y+r.H*0.68, b.label, size, t.Text)
+		l := ui.ShapeText(b.label, f, 0)
+		w, h := l.Size()
+		p.TextLayout(l, x+(formatButtonW-w)/2, r.Y+(r.H-h)/2, t.Text)
 	}
 }
 

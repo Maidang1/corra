@@ -126,32 +126,3 @@ func minZoom(z float32) float32 {
 	}
 	return z
 }
-
-// codeColors maps highlight classes to theme colors.
-func codeColors(t *ui.Theme) map[string]ui.Color {
-	muted := t.TextMuted
-	if t.Dark {
-		return map[string]ui.Color{
-			"text":     t.Text,
-			"keyword":  ui.Hex("#c792ea"),
-			"string":   ui.Hex("#98c379"),
-			"number":   ui.Hex("#d19a66"),
-			"comment":  muted,
-			"operator": ui.Hex("#56b6c2"),
-			"type":     ui.Hex("#e5c07b"),
-			"literal":  ui.Hex("#d19a66"),
-			"name":     ui.Hex("#61afef"),
-		}
-	}
-	return map[string]ui.Color{
-		"text":     t.Text,
-		"keyword":  ui.Hex("#a626a4"),
-		"string":   ui.Hex("#50a14f"),
-		"number":   ui.Hex("#b76b01"),
-		"comment":  muted,
-		"operator": ui.Hex("#0184bc"),
-		"type":     ui.Hex("#c18401"),
-		"literal":  ui.Hex("#b76b01"),
-		"name":     ui.Hex("#4078f2"),
-	}
-}

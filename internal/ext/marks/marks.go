@@ -91,7 +91,7 @@ func Extension() ext.Extension {
 			}},
 			"kbd": {Mark: func(m doc.Mark, env *editor.Env, s *ui.Span) {
 				s.Font, s.Size = env.Mono, env.Font.Size*0.85
-				s.Background, s.Radius, s.PaddingX = env.Theme.Surface, 4, 3
+				s.Background, s.Radius, s.PaddingX = env.Tint(), 4, 4
 			}},
 		},
 		Commands: func(reg *doc.Registry) map[string]doc.Command {

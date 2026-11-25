@@ -44,7 +44,7 @@ func (e *Editor) draw(p *ui.Painter, r ui.Rect) {
 			b.atom.Paint(p, rect, &e.env)
 		}
 		if nodeSel[b.n.ID()] {
-			p.Stroke(ui.Rect{X: ax - 2, Y: ay - 2, W: b.w + 4, H: b.h + 4}, e.env.Theme.Accent, 2, 4)
+			p.Stroke(ui.Rect{X: ax - 2, Y: ay - 2, W: b.w + 4, H: b.h + 4}, e.env.Theme.Accent, 4, 2)
 		}
 	}
 	walk(e.root, e.cfg.Padding, e.cfg.Padding)
@@ -94,7 +94,6 @@ func (e *Editor) drawText(p *ui.Painter, b *box, x, y float32, sel, matches []do
 		look.Decorate(p, ui.Point{X: tx, Y: ty}, b.text.Lines(), b.n.Inline().String(), &e.env)
 	}
 	if b.below != nil {
-		p := p
 		b.below(p, ui.Rect{X: x, Y: y + b.h - b.belowH, W: b.w, H: b.belowH}, &e.env)
 	}
 	if len(b.objs) > 0 {
@@ -117,43 +116,95 @@ func (e *Editor) drawText(p *ui.Painter, b *box, x, y float32, sel, matches []do
 }
 
 // drawMarker draws a list item's bullet, number or checkbox left of its
-// first line.
+// first line, on that line's baseline.
 func (e *Editor) drawMarker(p *ui.Painter, b *box, i int, x, y float32, k *box) {
+	size := e.env.Font.Size
+	base, mid := firstLine(k)
+	base, mid = y+base, y+mid
+	right := x + k.x - size*0.5
+	t := e.env.Theme
 	if b.cont.Check != nil {
 		if task, checked := b.cont.Check(i, k.n); task {
-			size := e.env.Font.Size * 0.9
-			first := firstLineHeight(k)
-			r := ui.Rect{X: x + k.x - size - 8, Y: y + (first-size)/2, W: size, H: size}
+			r := e.checkRect(x+k.x, y, k)
+			d := r.W
 			if checked {
-				p.Fill(r, e.env.Theme.Accent, 3)
-				p.Text(r.X+size*0.15, r.Y+size*0.85, "✓", size*0.9, e.env.Theme.AccentText)
+				p.Fill(r, t.Accent, d*0.25)
+				p.StrokePolyline([][2]float32{
+					{r.X + d*0.26, r.Y + d*0.52},
+					{r.X + d*0.43, r.Y + d*0.69},
+					{r.X + d*0.75, r.Y + d*0.33},
+				}, max(1.5, d*0.12), t.AccentText)
 			} else {
-				p.Stroke(r, e.env.Theme.TextMuted, 1.5, 3)
+				p.Stroke(r, t.TextMuted.Alpha(0.6), d*0.25, 1.5)
 			}
 			return
 		}
 	}
-	if i >= len(b.markers) || b.markers[i] == nil {
+	if i >= len(b.markers) {
 		return
 	}
-	m := b.markers[i]
-	w, h := m.Size()
-	first := firstLineHeight(k)
-	p.TextLayout(m, x+k.x-w-8, y+(first-h)/2, e.env.Theme.TextMuted)
+	switch m := b.markers[i]; {
+	case m.dot:
+		d := size * 0.36
+		p.Fill(ui.Rect{X: right - d - size*0.1, Y: mid - d/2, W: d, H: d}, t.TextMuted, d/2)
+	case m.text != nil:
+		w, _ := m.text.Size()
+		var mb float32
+		if lines := m.text.Lines(); len(lines) > 0 {
+			mb = lines[0].Baseline
+		}
+		p.TextLayout(m.text, right-w, base-mb, t.TextMuted)
+	}
 }
 
-// firstLineHeight returns the height of the first line of text in b.
-func firstLineHeight(b *box) float32 {
+// checkRect returns the checkbox of task item k, whose box is at (x, y).
+func (e *Editor) checkRect(x, y float32, k *box) ui.Rect {
+	d := e.env.Font.Size * 0.95
+	_, mid := firstLine(k)
+	return ui.Rect{X: x - e.env.Font.Size*0.5 - d, Y: y + mid - d/2, W: d, H: d}
+}
+
+// firstLine returns, from b's top, the baseline of the first line of text
+// in b and that line's middle: about where a lowercase letter's center
+// and a Han character's are.
+func firstLine(b *box) (baseline, mid float32) {
+	y := float32(0)
 	for !b.isText() {
 		if len(b.kids) == 0 {
-			return b.h
+			return y + b.h*0.6, y + b.h/2 // an atom, as a picture
 		}
+		y += b.kids[0].y
 		b = b.kids[0]
 	}
+	y += b.look.PadY
+	size := b.look.Font.Size
+	baseline = y + lineHeight(b.look.Font)*0.75
 	if lines := b.text.Lines(); len(lines) > 0 {
-		return lines[0].Rect.H + b.look.PadY
+		baseline = y + lines[0].Baseline
 	}
-	return lineHeight(b.look.Font)
+	return baseline, baseline - size*0.33
+}
+
+// DrawLabel draws one line of s in font f, its left at x and its baseline
+// at baseline, and returns its width.
+func DrawLabel(p *ui.Painter, x, baseline float32, s string, f ui.Font, c ui.Color) float32 {
+	l := ui.ShapeText(s, f, 0)
+	w, _ := l.Size()
+	var b float32
+	if lines := l.Lines(); len(lines) > 0 {
+		b = lines[0].Baseline
+	}
+	p.TextLayout(l, x, baseline-b, c)
+	return w
+}
+
+// DrawLabelIn draws one line of s in font f, its left at x, centered in
+// r from top to bottom, and returns its width.
+func DrawLabelIn(p *ui.Painter, x float32, r ui.Rect, s string, f ui.Font, c ui.Color) float32 {
+	l := ui.ShapeText(s, f, 0)
+	w, h := l.Size()
+	p.TextLayout(l, x, r.Y+(r.H-h)/2, c)
+	return w
 }
 
 func (e *Editor) drawCaret(p *ui.Painter, r ui.Rect) {

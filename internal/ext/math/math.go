@@ -83,7 +83,7 @@ func Extension() ext.Extension {
 			"math_block": {Text: func(n *doc.Node, env *editor.Env) editor.TextLook {
 				l := editor.TextLook{
 					Font: ui.Font{Family: env.Mono, Size: env.Font.Size * 0.85, LineHeight: 1.5}, Color: env.Theme.TextMuted,
-					Background: env.Theme.Surface, Radius: 6, PadX: 12, PadY: 8, After: env.Font.Size * 0.6,
+					Background: env.Tint(), Radius: 6, PadX: 14, PadY: 8, After: env.Font.Size * 0.6,
 				}
 				tex := TeX(n)
 				if env.MathNumbering == "all" && env.Ordinals != nil && strings.TrimSpace(tex) != "" && !strings.Contains(tex, `\tag`) {
@@ -182,7 +182,9 @@ func inlineView(n *doc.Node, env *editor.Env) editor.InlineLook {
 		src := "$" + tex + "$"
 		w := float32(len([]rune(src))) * env.Font.Size * 0.55
 		return editor.InlineLook{Width: w, Height: env.Font.Size, Paint: func(p *ui.Painter, r ui.Rect, env *editor.Env) {
-			p.Text(r.X, r.Y+r.H*0.85, src, env.Font.Size*0.9, env.Theme.Danger)
+			f := env.Font
+			f.Size *= 0.9
+			editor.DrawLabel(p, r.X, r.Y+r.H, src, f, env.Theme.Danger)
 		}}
 	}
 	w, h := img.size()

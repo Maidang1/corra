@@ -56,6 +56,24 @@ type ImageSource interface {
 
 func (e Env) key() Env { return e }
 
+// Tint is the quiet fill behind code, formulas and placeholders: a shade
+// of the page itself, as the light theme's Surface is the page's white.
+func (e Env) Tint() ui.Color {
+	if e.Dark {
+		return ui.RGBA(255, 255, 255, 0.07)
+	}
+	return ui.RGBA(0, 0, 0, 0.045)
+}
+
+// Rule is the color of quote bars and dividers: stronger than a border,
+// quieter than text.
+func (e Env) Rule() ui.Color {
+	if e.Dark {
+		return ui.RGBA(255, 255, 255, 0.22)
+	}
+	return ui.RGBA(0, 0, 0, 0.16)
+}
+
 // TextLook is how a text block looks.
 type TextLook struct {
 	Font  ui.Font
@@ -76,16 +94,29 @@ type TextLook struct {
 	// painted by its paint function: a formula's or a diagram's preview
 	// under its source.
 	Below func(width float32) (height float32, paint func(p *ui.Painter, r ui.Rect, env *Env))
+	// Colorize, when set, splits a block of plain text into colored spans
+	// whose texts join back into it, as code's syntax highlighting.
+	Colorize func(text string) []ui.Span
 }
 
 // ContainerLook is how a container lays out and decorates its children.
 type ContainerLook struct {
-	// Indent moves the children in from the left.
-	Indent float32
+	// Indent moves the children in from the left, IndentRight from the
+	// right.
+	Indent, IndentRight float32
 	// Before and After are the room above and below the container.
 	Before, After float32
+	// PadTop and PadBottom are the room inside the container above its
+	// first child and below its last, as a callout's title.
+	PadTop, PadBottom float32
+	// Gap, when set, is the room between children in place of their own
+	// Before and After, as between a tight list's items.
+	Gap float32
+	// Color, when set, is the text color of the prose inside, as a
+	// quote's quieter ink; code keeps its own.
+	Color ui.Color
 	// Marker returns text drawn left of child i's first line, as a list's
-	// bullet or number, in the indent; "" draws none.
+	// number, in the indent; "" draws none, and Bullet a dot.
 	Marker func(i int, child *doc.Node) string
 	// Check, when set, says child i is a task: a checkbox is drawn in
 	// place of the marker, ticked when checked.
@@ -160,6 +191,10 @@ type Clip struct {
 	// Image is a picture's PNG bytes, as a screenshot pasted.
 	Image []byte
 }
+
+// Bullet is the Marker that draws a dot rather than text: a font's bullet
+// shows tiny beside CJK text.
+const Bullet = "•"
 
 // Config wires an editor.
 type Config struct {

@@ -64,10 +64,12 @@ func Extension() ext.Extension {
 		Views: map[string]editor.ViewSpec{
 			"footnote_ref": {Inline: func(n *doc.Node, env *editor.Env) editor.InlineLook {
 				label := Label(n)
-				size := env.Font.Size * 0.7
-				w := float32(len([]rune(label)))*size*0.62 + 4
-				return editor.InlineLook{Width: w, Height: env.Font.Size, Paint: func(p *ui.Painter, r ui.Rect, env *editor.Env) {
-					p.Text(r.X+2, r.Y+size, label, size, env.Theme.Accent)
+				f := env.Font
+				f.Size *= 0.7
+				w, _ := ui.ShapeText(label, f, 0).Size()
+				// A superscript: its baseline raised off the line's.
+				return editor.InlineLook{Width: w + 4, Height: env.Font.Size, Paint: func(p *ui.Painter, r ui.Rect, env *editor.Env) {
+					editor.DrawLabel(p, r.X+2, r.Y+r.H-env.Font.Size*0.38, label, f, env.Theme.Accent)
 				}}
 			}},
 			"footnote_def": {Container: func(n *doc.Node, env *editor.Env) editor.ContainerLook {
@@ -75,8 +77,13 @@ func Extension() ext.Extension {
 				return editor.ContainerLook{
 					Indent: env.Font.Size * 2.2,
 					After:  env.Font.Size * 0.6,
-					Paint: func(p *ui.Painter, r ui.Rect, env *editor.Env) {
-						p.Text(r.X, r.Y+env.Font.Size*1.05, label+".", env.Font.Size*0.85, env.Theme.Accent)
+					// A note reads as a note, not as body text.
+					Color: env.Theme.TextMuted,
+					Marker: func(i int, _ *doc.Node) string {
+						if i == 0 {
+							return label + "."
+						}
+						return ""
 					},
 				}
 			}},

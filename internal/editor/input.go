@@ -700,9 +700,7 @@ func (e *Editor) toggleTaskAt(x, y float32) bool {
 			kx, ky := bx+k.x, by+k.y
 			if b.cont.Check != nil {
 				if task, _ := b.cont.Check(i, k.n); task {
-					size := e.env.Font.Size * 0.9
-					first := firstLineHeight(k)
-					r := ui.Rect{X: kx - size - 8, Y: ky + (first-size)/2, W: size, H: size}
+					r := e.checkRect(kx, ky, k)
 					if x >= r.X-3 && x <= r.X+r.W+3 && y >= r.Y-3 && y <= r.Y+r.H+3 {
 						found = k.n
 						return

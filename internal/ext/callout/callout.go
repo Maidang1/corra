@@ -14,6 +14,7 @@ import (
 	"github.com/Maidang1/corra/internal/ext"
 	"github.com/Maidang1/corra/internal/mdcodec"
 	"github.com/Maidang1/corra/internal/mdext"
+	"github.com/Maidang1/corra/render"
 )
 
 func validKind(v any) error {
@@ -26,9 +27,38 @@ func validKind(v any) error {
 // Kind returns a callout's kind, upper case, as "NOTE".
 func Kind(n *doc.Node) string { return strings.ToUpper(n.Attrs().String("kind")) }
 
-// colors are the alerts' colors, as GitHub's.
-var colors = map[string]string{
-	"NOTE": "#0969da", "TIP": "#1a7f37", "IMPORTANT": "#8250df", "WARNING": "#9a6700", "CAUTION": "#cf222e",
+// colors are the alerts' colors, as GitHub's, on light and dark pages.
+var colors = map[string][2]string{
+	"NOTE":      {"#0969da", "#4493f8"},
+	"TIP":       {"#1a7f37", "#3fb950"},
+	"IMPORTANT": {"#8250df", "#ab7df8"},
+	"WARNING":   {"#9a6700", "#d29922"},
+	"CAUTION":   {"#cf222e", "#f85149"},
+}
+
+// look is a callout's card: a tinted panel with a bar down its left edge
+// and the kind's title above the content.
+func look(n *doc.Node, env *editor.Env) editor.ContainerLook {
+	kind := Kind(n)
+	shade := 0
+	if env.Dark {
+		shade = 1
+	}
+	c := ui.Hex(colors[kind][shade])
+	size := env.Font.Size
+	pad := size * 0.9
+	title := env.Font
+	title.Weight = 600
+	return editor.ContainerLook{
+		Indent: pad + 3, IndentRight: pad,
+		PadTop: size * 2, PadBottom: size * 0.6,
+		Before: size * 0.4, After: size,
+		Paint: func(p *ui.Painter, r ui.Rect, env *editor.Env) {
+			p.Fill(r, c.Alpha(0.1), 6)
+			p.FillRadii(ui.Rect{X: r.X, Y: r.Y, W: 3, H: r.H}, [4]float32{6, 0, 0, 6}, c)
+			editor.DrawLabel(p, r.X+pad+3, r.Y+size*1.35, render.AlertTitle(kind), title, c)
+		},
+	}
 }
 
 func Extension() ext.Extension {
@@ -44,17 +74,7 @@ func Extension() ext.Extension {
 			Nodes:  map[ast.NodeKind]mdcodec.ParseFunc{ast.KindBlockquote: parse},
 			Writes: map[string]mdcodec.WriteFunc{"callout": write},
 		},
-		Views: map[string]editor.ViewSpec{"callout": {Container: func(n *doc.Node, env *editor.Env) editor.ContainerLook {
-			c := ui.Hex(colors[Kind(n)])
-			return editor.ContainerLook{
-				Indent: env.Font.Size,
-				After:  env.Font.Size * 0.6,
-				Paint: func(p *ui.Painter, r ui.Rect, env *editor.Env) {
-					p.Fill(ui.Rect{X: r.X - 4, Y: r.Y - 4, W: r.W + 8, H: r.H + 8}, c.Alpha(0.08), 6)
-					p.Fill(ui.Rect{X: r.X - 4, Y: r.Y - 4, W: 3, H: r.H + 8}, c, 1.5)
-				},
-			}
-		}}},
+		Views: map[string]editor.ViewSpec{"callout": {Container: look}},
 		Slash: []editor.SlashItem{
 			{Title: "提示块", Keywords: "callout note alert", Command: "callout:NOTE"},
 			{Title: "警告块", Keywords: "callout warning alert", Command: "callout:WARNING"},
